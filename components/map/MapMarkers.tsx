@@ -38,7 +38,7 @@ export const MapMarkers = memo(function MapMarkers({
         return (
           <CircleMarker
             key={item.step.id}
-            position={[item.coordinates.lat, item.coordinates.lng]}
+            center={[item.coordinates.lat, item.coordinates.lng]}
             radius={item.radius}
             pathOptions={{
               color: item.color,

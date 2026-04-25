@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Trip } from "@/lib/types/trip";
 import { coordsForLocation } from "@/lib/locationCoords";
 import { useI18n } from "@/components/providers/I18nProvider";
+import {
+  computeNightsForStep,
+  effectiveStepEnd,
+  effectiveStepStart,
+} from "@/lib/timeline/hotelsAndDates";
 import "leaflet/dist/leaflet.css";
 
 export function TripLeafletMap({ trip }: { trip: Trip }) {
@@ -75,6 +80,12 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
         const ll = coordsForLocation(s.location);
         if (!ll) continue;
         drawPts.push(ll);
+        const markerBadge = formatMarkerBadge(
+          effectiveStepStart(s),
+          effectiveStepEnd(s),
+          computeNightsForStep(s),
+          s.location
+        );
         const markerColor =
           s.status === "active" ? "#2563eb" : s.status === "done" ? "#16a34a" : "#6b7280";
         const markerRadius = s.status === "active" ? 10 : 8;
@@ -84,20 +95,30 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
           weight: 2,
           fillColor: markerColor,
           fillOpacity: 0.9,
-        })
-          .addTo(map)
-          .bindTooltip(formatMarkerBadge(s.startDate, s.endDate, s.nights, idx + 1), {
-            permanent: true,
-            direction: "center",
-            className: "trip-step-order-tooltip",
-            opacity: 1,
-          })
-          .bindPopup(
+        }).addTo(map);
+
+        if (markerBadge) {
+          const badgeMarker = L.marker(ll, {
+            interactive: false,
+            keyboard: false,
+            icon: L.divIcon({
+              className: "trip-step-badge-anchor",
+              html: `<div class="trip-step-badge-bubble">${markerBadge}</div>`,
+              iconSize: [1, 1],
+              iconAnchor: [0, 0],
+            }),
+          }).addTo(map);
+          layers.markers.push(badgeMarker);
+        }
+
+        marker.bindPopup(
             [
               `<div class="trip-step-popup">`,
               `<div><b>${idx + 1}. ${escapeHtml(s.title.trim() || "Untitled step")}</b></div>`,
               `<div>${escapeHtml(s.location.trim() || "—")}</div>`,
-              `<div>${escapeHtml(formatDateRange(s.startDate, s.endDate))}</div>`,
+              `<div>${escapeHtml(
+                formatDateRange(effectiveStepStart(s), effectiveStepEnd(s))
+              )}</div>`,
               `<div>Transport: ${escapeHtml(s.transport.trim() || "—")}</div>`,
               `<div>Hotels: ${s.hotels.length}</div>`,
               `</div>`,
@@ -197,18 +218,35 @@ function formatMarkerBadge(
   startDate: string,
   endDate: string,
   nights: number,
-  fallbackOrder: number
-): string {
+  location: string
+): string | null {
   const start = parseYmdDate(startDate);
   const end = parseYmdDate(endDate) ?? deriveEndDate(start, nights);
-  if (!start || !end) return String(fallbackOrder);
+  if (!start || !end) return null;
+  const locationLabel = compactLocationLabel(location);
 
   const startParts = partsFromDate(start);
   const endParts = partsFromDate(end);
+  let dateLabel = "";
   if (startParts.month === endParts.month) {
-    return `${pad2(startParts.day)}-${pad2(endParts.day)} ${startParts.month}`;
+    dateLabel = `${pad2(startParts.day)}-${pad2(endParts.day)} ${startParts.month}`;
+  } else {
+    dateLabel = `${pad2(startParts.day)} ${startParts.month} - ${pad2(endParts.day)} ${endParts.month}`;
   }
-  return `${pad2(startParts.day)} ${startParts.month}-${pad2(endParts.day)} ${endParts.month}`;
+
+  const safeDate = escapeHtml(dateLabel);
+  const dateStyle = "font-weight:800;color:#0f172a;";
+  const sepStyle = "opacity:.65;";
+  const locationStyle = "font-weight:600;color:#334155;";
+  if (!locationLabel) {
+    return `<span style="${dateStyle}">${safeDate}</span>`;
+  }
+  const safeLocation = escapeHtml(locationLabel);
+  return [
+    `<span style="${dateStyle}">${safeDate}</span>`,
+    `<span style="${sepStyle}"> · </span>`,
+    `<span style="${locationStyle}">${safeLocation}</span>`,
+  ].join("");
 }
 
 function parseYmdDate(value: string): Date | null {
@@ -254,4 +292,12 @@ function deriveEndDate(start: Date | null, nights: number): Date | null {
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
+}
+
+function compactLocationLabel(location: string): string {
+  const trimmed = location.trim();
+  if (!trimmed) return "";
+  const firstSegment = trimmed.split(",")[0].trim();
+  if (firstSegment.length <= 28) return firstSegment;
+  return `${firstSegment.slice(0, 25).trimEnd()}...`;
 }

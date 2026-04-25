@@ -51,6 +51,7 @@ export interface Trip {
   id: string;
   title: string;
   tripStart: string;
+  managePassword: string;
   smartTimeline: boolean;
   autoCurrentByDate: boolean;
   createdAt: string;

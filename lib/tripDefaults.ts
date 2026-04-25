@@ -35,6 +35,7 @@ export function defaultTrip(id: string): Trip {
     id,
     title: "",
     tripStart: "",
+    managePassword: "",
     smartTimeline: true,
     autoCurrentByDate: true,
     createdAt: t,

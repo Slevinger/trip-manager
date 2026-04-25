@@ -70,6 +70,19 @@ export function ManageTab() {
             onChange={(e) => persist({ ...doc, tripStart: e.target.value })}
           />
         </label>
+        <label className="mt-4 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
+          Manage tab password
+          <input
+            type="password"
+            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+            value={doc.managePassword}
+            onChange={(e) => persist({ ...doc, managePassword: e.target.value })}
+            placeholder="Leave empty to keep Manage open"
+          />
+        </label>
+        <p className="mt-1 text-xs text-zinc-500">
+          If set, users must enter this password before opening Manage.
+        </p>
         <label className="mt-4 flex items-center gap-2 text-sm text-zinc-800 dark:text-zinc-100">
           <input
             type="checkbox"

@@ -101,6 +101,7 @@ export function prototypeDraftToTrip(current: Trip, raw: unknown): Trip {
     tripStart: datetimeLocalToYmd(
       String(o.tripStart ?? current.tripStart ?? "")
     ),
+    managePassword: String(o.managePassword ?? current.managePassword ?? ""),
     smartTimeline: o.smartTimeline !== false,
     autoCurrentByDate: o.autoCurrentByDate !== false,
     steps: stepsRaw.map((s, i) => draftStepToTripStep(s, i)),
