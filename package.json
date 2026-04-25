@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "firebase:print-web-env": "node scripts/fetch-firebase-web-env.cjs",
-    "migrate:diagram": "tsx scripts/migrate-diagram-to-firestore.ts"
+    "migrate:diagram": "tsx scripts/migrate-diagram-to-firestore.ts",
+    "deploy:preview": "npx vercel --yes",
+    "deploy:prod": "npx vercel --prod --yes"
   },
   "dependencies": {
     "firebase": "^12.12.1",
