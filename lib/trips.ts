@@ -61,6 +61,7 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     activitiesCost: Number(s.activitiesCost ?? 0),
     otherCost: Number(s.otherCost ?? 0),
     notes: String(s.notes ?? ""),
+    attachments: normalizeAttachments(s.attachments),
     ...(coordinates ? { coordinates } : {}),
     ...(() => {
       const mx = numOrUndef(s.mapX ?? s.x);
@@ -71,6 +72,28 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
       return o;
     })(),
   };
+}
+
+function normalizeAttachments(raw: unknown): Trip["steps"][number]["attachments"] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      const r = (item ?? {}) as Record<string, unknown>;
+      const name = String(r.name ?? "").trim();
+      const url = String(r.url ?? "").trim();
+      const path = String(r.path ?? "").trim();
+      if (!name || !url || !path) return null;
+      return {
+        id: String(r.id ?? ""),
+        name,
+        url,
+        path,
+        size: Number(r.size ?? 0) || 0,
+        contentType: String(r.contentType ?? ""),
+        uploadedAt: String(r.uploadedAt ?? ""),
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => Boolean(v));
 }
 
 function normalizeCoordinates(
@@ -112,6 +135,7 @@ export function normalizeTripFromFirestore(
     title: String(data.title ?? ""),
     tripStart: String(data.tripStart ?? ""),
     managePassword: String(data.managePassword ?? ""),
+    tripAttachments: normalizeAttachments(data.tripAttachments),
     smartTimeline: Boolean(data.smartTimeline ?? true),
     autoCurrentByDate: Boolean(data.autoCurrentByDate ?? true),
     createdAt: tsToIso(data.createdAt),

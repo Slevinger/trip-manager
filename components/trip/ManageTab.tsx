@@ -7,6 +7,7 @@ import { StepList } from "@/components/trip/StepList";
 import { StepDialog } from "@/components/trip/StepDialog";
 import { JsonImportExport } from "@/components/trip/JsonImportExport";
 import { PrototypeDraftImport } from "@/components/trip/PrototypeDraftImport";
+import { AttachmentManager } from "@/components/trip/AttachmentManager";
 import { useTripDocument } from "@/components/providers/TripDocumentProvider";
 import { useI18n } from "@/components/providers/I18nProvider";
 import { createEmptyStep } from "@/lib/tripDefaults";
@@ -127,6 +128,13 @@ export function ManageTab() {
         />
       </section>
 
+      <AttachmentManager
+        title="Trip files (passports, plane tickets, reservations, receipts)"
+        attachments={doc.tripAttachments}
+        uploadPathPrefix={`trips/${doc.id}/trip-attachments`}
+        onChange={(tripAttachments) => persist({ ...doc, tripAttachments })}
+      />
+
       <PrototypeDraftImport
         trip={doc}
         onApply={(next) => persist({ ...next, id: doc.id })}
@@ -140,6 +148,7 @@ export function ManageTab() {
 
       {editing ? (
         <StepDialog
+          tripId={doc.id}
           key={editing.id}
           initial={editing}
           onClose={() => setEditing(null)}

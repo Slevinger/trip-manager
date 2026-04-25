@@ -93,6 +93,7 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
       activitiesCost: Number(o.activitiesCost ?? 0) || 0,
       otherCost: Number(o.otherCost ?? 0) || 0,
       notes: String(o.notes ?? ""),
+      attachments: [],
     };
     const lat = optNum(o.lat);
     const lng = optNum(o.lng);

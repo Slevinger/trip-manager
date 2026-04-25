@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 /** Trim helper — env *names* must be referenced statically so Next.js can inline `NEXT_PUBLIC_*`. */
 function trimEnv(value: string | undefined): string | undefined {
@@ -44,6 +45,7 @@ export function getMissingFirebasePublicEnv(): string[] {
 let app: FirebaseApp | undefined;
 let firestore: Firestore | undefined;
 let auth: Auth | undefined;
+let storage: FirebaseStorage | undefined;
 
 export function getFirebaseApp(): FirebaseApp | undefined {
   if (!hasConfig()) return undefined;
@@ -72,6 +74,16 @@ export function getClientAuth(): Auth | undefined {
     auth = getAuth(a);
   }
   return auth;
+}
+
+export function getClientStorage(): FirebaseStorage | undefined {
+  if (!hasConfig()) return undefined;
+  if (!storage) {
+    const a = getFirebaseApp();
+    if (!a) return undefined;
+    storage = getStorage(a);
+  }
+  return storage;
 }
 
 /** Alias for `getDb()`. */

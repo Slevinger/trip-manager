@@ -54,6 +54,9 @@ function draftStepToTripStep(raw: unknown, order: number): TripStep {
     activitiesCost: Number(r.activitiesCost ?? 0) || 0,
     otherCost: Number(r.otherCost ?? 0) || 0,
     notes: String(r.notes ?? ""),
+    attachments: Array.isArray(r.attachments)
+      ? (r.attachments as TripStep["attachments"])
+      : [],
   };
   const lat = typeof r.lat === "number" ? r.lat : undefined;
   const lng = typeof r.lng === "number" ? r.lng : undefined;
@@ -102,6 +105,9 @@ export function prototypeDraftToTrip(current: Trip, raw: unknown): Trip {
       String(o.tripStart ?? current.tripStart ?? "")
     ),
     managePassword: String(o.managePassword ?? current.managePassword ?? ""),
+    tripAttachments: Array.isArray(o.tripAttachments)
+      ? (o.tripAttachments as Trip["tripAttachments"])
+      : current.tripAttachments ?? [],
     smartTimeline: o.smartTimeline !== false,
     autoCurrentByDate: o.autoCurrentByDate !== false,
     steps: stepsRaw.map((s, i) => draftStepToTripStep(s, i)),

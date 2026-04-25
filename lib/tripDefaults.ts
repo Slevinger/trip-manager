@@ -26,6 +26,7 @@ export function createEmptyStep(order: number): TripStep {
     activitiesCost: 0,
     otherCost: 0,
     notes: "",
+    attachments: [],
   };
 }
 
@@ -36,6 +37,7 @@ export function defaultTrip(id: string): Trip {
     title: "",
     tripStart: "",
     managePassword: "",
+    tripAttachments: [],
     smartTimeline: true,
     autoCurrentByDate: true,
     createdAt: t,

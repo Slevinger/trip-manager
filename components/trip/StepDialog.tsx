@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { ArrivalOption, TripStep } from "@/lib/types/trip";
 import { HotelsEditor } from "@/components/trip/HotelsEditor";
+import { AttachmentManager } from "@/components/trip/AttachmentManager";
 import { useI18n } from "@/components/providers/I18nProvider";
 import {
   applyOpenEndDateFromHotels,
@@ -12,10 +13,12 @@ import {
 } from "@/lib/timeline/hotelsAndDates";
 
 export function StepDialog({
+  tripId,
   initial,
   onClose,
   onSave,
 }: {
+  tripId: string;
   initial: TripStep;
   onClose: () => void;
   onSave: (step: TripStep) => void;
@@ -223,6 +226,12 @@ export function StepDialog({
           </div>
 
           <HotelsEditor hotels={draft.hotels} onChange={setHotels} />
+          <AttachmentManager
+            title="Step files (tickets, reservations, receipts, passports)"
+            attachments={draft.attachments}
+            uploadPathPrefix={`trips/${tripId}/steps/${draft.id}/attachments`}
+            onChange={(attachments) => setDraft({ ...draft, attachments })}
+          />
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {(

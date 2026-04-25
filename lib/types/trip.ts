@@ -1,5 +1,15 @@
 export type StepStatus = "todo" | "active" | "done";
 
+export interface AttachmentFile {
+  id: string;
+  name: string;
+  url: string;
+  path: string;
+  size: number;
+  contentType: string;
+  uploadedAt: string;
+}
+
 export interface ArrivalOption {
   id: string;
   title: string;
@@ -38,6 +48,7 @@ export interface TripStep {
   activitiesCost: number;
   otherCost: number;
   notes: string;
+  attachments: AttachmentFile[];
   coordinates?: {
     lat: number;
     lng: number;
@@ -52,6 +63,7 @@ export interface Trip {
   title: string;
   tripStart: string;
   managePassword: string;
+  tripAttachments: AttachmentFile[];
   smartTimeline: boolean;
   autoCurrentByDate: boolean;
   createdAt: string;
