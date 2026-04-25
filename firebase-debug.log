@@ -1,0 +1,22 @@
+[debug] [2026-04-24T20:03:42.019Z] ----------------------------------------------------------------------
+[debug] [2026-04-24T20:03:42.023Z] Command:       /opt/homebrew/Cellar/node/25.9.0_2/bin/node /opt/homebrew/bin/firebase apps:sdkconfig WEB
+[debug] [2026-04-24T20:03:42.023Z] CLI Version:   15.15.0
+[debug] [2026-04-24T20:03:42.023Z] Platform:      darwin
+[debug] [2026-04-24T20:03:42.024Z] Node Version:  v25.9.0
+[debug] [2026-04-24T20:03:42.024Z] Time:          Fri Apr 24 2026 23:03:42 GMT+0300 (Israel Daylight Time)
+[debug] [2026-04-24T20:03:42.024Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-24T20:03:42.136Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-24T20:03:42.136Z] > authorizing via signed-in user (shir.levinger@gmail.com)
+[debug] [2026-04-24T20:03:42.137Z] Checked if tokens are valid: true, expires at: 1777064216813
+[debug] [2026-04-24T20:03:42.137Z] Checked if tokens are valid: true, expires at: 1777064216813
+[debug] [2026-04-24T20:03:42.138Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/trip-planner-494319/webApps pageSize=100
+[debug] [2026-04-24T20:03:42.612Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/trip-planner-494319/webApps 404
+[debug] [2026-04-24T20:03:42.612Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/trip-planner-494319/webApps {"error":{"code":404,"message":"Firebase project 504455270927 not found.","status":"NOT_FOUND"}}
+[debug] [2026-04-24T20:03:42.613Z] Request to https://firebase.googleapis.com/v1beta1/projects/trip-planner-494319/webApps?pageSize=100 had HTTP Error: 404, Firebase project 504455270927 not found.
+[debug] [2026-04-24T20:03:42.613Z] FirebaseError: Request to https://firebase.googleapis.com/v1beta1/projects/trip-planner-494319/webApps?pageSize=100 had HTTP Error: 404, Firebase project 504455270927 not found.
+    at responseToError (/opt/homebrew/Cellar/firebase-cli/15.15.0/libexec/lib/node_modules/firebase-tools/lib/responseToError.js:53:12)
+    at RetryOperation._fn (/opt/homebrew/Cellar/firebase-cli/15.15.0/libexec/lib/node_modules/firebase-tools/lib/apiv2.js:333:77)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[error] 
+[error] Error: Failed to list Firebase WEB apps. See firebase-debug.log for more info.

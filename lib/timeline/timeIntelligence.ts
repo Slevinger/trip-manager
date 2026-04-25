@@ -1,0 +1,85 @@
+import type { Trip } from "@/lib/types/trip";
+import { effectiveStepEnd, effectiveStepStart, collectHotelDateWarnings } from "@/lib/timeline/hotelsAndDates";
+import { parseYmd } from "@/lib/timeline/dates";
+
+export type TimeIntelCode =
+  | "missing_dates"
+  | "end_before_start"
+  | "step_nights_no_hotels"
+  | "hotels_cover"
+  | "long_transfer"
+  | "short_transition"
+  | "gap_between_steps";
+
+export interface TimeIntelWarning {
+  code: TimeIntelCode;
+  stepId?: string;
+  meta?: Record<string, string | number | boolean | undefined>;
+}
+
+function parseDurationHours(duration: string): number | null {
+  const d = duration.trim().toLowerCase();
+  const hMatch = /(\d+(?:\.\d+)?)\s*h/.exec(d);
+  if (hMatch) return Number(hMatch[1]);
+  const num = Number(d.replace(/[^\d.]/g, ""));
+  return Number.isFinite(num) ? num : null;
+}
+
+export function collectTimeIntelligenceWarnings(trip: Trip): TimeIntelWarning[] {
+  const out: TimeIntelWarning[] = [];
+  const steps = [...trip.steps].sort((a, b) => a.order - b.order);
+
+  for (const s of steps) {
+    const start = effectiveStepStart(s);
+    const end = effectiveStepEnd(s);
+    if (!start.trim() || !end.trim()) {
+      out.push({ code: "missing_dates", stepId: s.id });
+    } else {
+      const ds = parseYmd(start);
+      const de = parseYmd(end);
+      if (ds && de && de < ds) {
+        out.push({ code: "end_before_start", stepId: s.id });
+      }
+    }
+
+    const hotelWs = collectHotelDateWarnings(s);
+    if (hotelWs.some((w) => w.code === "no_hotels_but_nights")) {
+      out.push({ code: "step_nights_no_hotels", stepId: s.id });
+    }
+    if (hotelWs.some((w) => w.code === "hotels_not_covering")) {
+      out.push({ code: "hotels_cover", stepId: s.id });
+    }
+
+    const hours = parseDurationHours(s.transport);
+    if (hours !== null && hours >= 6) {
+      out.push({ code: "long_transfer", stepId: s.id, meta: { hours } });
+    }
+  }
+
+  for (let i = 0; i < steps.length - 1; i++) {
+    const a = steps[i];
+    const b = steps[i + 1];
+    const aEnd = effectiveStepEnd(a);
+    const bStart = effectiveStepStart(b);
+    const da = aEnd ? parseYmd(aEnd) : null;
+    const db = bStart ? parseYmd(bStart) : null;
+    if (da && db) {
+      const gapDays = Math.round((db.getTime() - da.getTime()) / 86400000);
+      if (gapDays < 0) {
+        out.push({
+          code: "short_transition",
+          stepId: b.id,
+          meta: { days: gapDays },
+        });
+      } else if (gapDays > 1) {
+        out.push({
+          code: "gap_between_steps",
+          stepId: b.id,
+          meta: { days: gapDays },
+        });
+      }
+    }
+  }
+
+  return out;
+}
