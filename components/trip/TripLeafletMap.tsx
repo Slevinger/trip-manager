@@ -15,6 +15,7 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
     line: import("leaflet").Polyline | null;
   }>({ markers: [], line: null });
   const [mapWarnings, setMapWarnings] = useState<string[]>([]);
+  const invalidateTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const el = hostRef.current;
@@ -70,21 +71,40 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
       ).addTo(map);
 
       const drawPts: [number, number][] = [];
-      for (const s of ordered) {
+      for (const [idx, s] of ordered.entries()) {
         const ll = coordsForLocation(s.location);
         if (!ll) continue;
         drawPts.push(ll);
+        const markerColor =
+          s.status === "active" ? "#2563eb" : s.status === "done" ? "#16a34a" : "#6b7280";
+        const markerRadius = s.status === "active" ? 10 : 8;
         const marker = L.circleMarker(ll, {
-          radius: 8,
-          color: "#2563eb",
+          radius: markerRadius,
+          color: markerColor,
           weight: 2,
-          fillColor: "#93c5fd",
+          fillColor: markerColor,
           fillOpacity: 0.9,
         })
           .addTo(map)
+          .bindTooltip(formatMarkerBadge(s.startDate, s.endDate, s.nights, idx + 1), {
+            permanent: true,
+            direction: "center",
+            className: "trip-step-order-tooltip",
+            opacity: 1,
+          })
           .bindPopup(
-            `<b>${escapeHtml(s.title)}</b><br>${escapeHtml(s.location)}`
+            [
+              `<div class="trip-step-popup">`,
+              `<div><b>${idx + 1}. ${escapeHtml(s.title.trim() || "Untitled step")}</b></div>`,
+              `<div>${escapeHtml(s.location.trim() || "—")}</div>`,
+              `<div>${escapeHtml(formatDateRange(s.startDate, s.endDate))}</div>`,
+              `<div>Transport: ${escapeHtml(s.transport.trim() || "—")}</div>`,
+              `<div>Hotels: ${s.hotels.length}</div>`,
+              `</div>`,
+            ].join("")
           );
+        marker.on("mouseover", () => marker.openPopup());
+        marker.on("mouseout", () => marker.closePopup());
         layers.markers.push(marker);
       }
 
@@ -98,13 +118,23 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
         map.setView(drawPts[0], 8);
       }
 
-      window.setTimeout(() => {
-        map.invalidateSize();
+      if (invalidateTimerRef.current !== null) {
+        window.clearTimeout(invalidateTimerRef.current);
+        invalidateTimerRef.current = null;
+      }
+      invalidateTimerRef.current = window.setTimeout(() => {
+        if (!cancelled && mapRef.current === map) {
+          map.invalidateSize();
+        }
       }, 120);
     })();
 
     return () => {
       cancelled = true;
+      if (invalidateTimerRef.current !== null) {
+        window.clearTimeout(invalidateTimerRef.current);
+        invalidateTimerRef.current = null;
+      }
       layers.markers.forEach((m) => {
         try {
           m.remove();
@@ -152,4 +182,76 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function formatDateRange(startDate: string, endDate: string): string {
+  const start = startDate.trim();
+  const end = endDate.trim();
+  if (!start && !end) return "—";
+  if (!start) return `— → ${end}`;
+  if (!end) return `${start} → —`;
+  return `${start} → ${end}`;
+}
+
+function formatMarkerBadge(
+  startDate: string,
+  endDate: string,
+  nights: number,
+  fallbackOrder: number
+): string {
+  const start = parseYmdDate(startDate);
+  const end = parseYmdDate(endDate) ?? deriveEndDate(start, nights);
+  if (!start || !end) return String(fallbackOrder);
+
+  const startParts = partsFromDate(start);
+  const endParts = partsFromDate(end);
+  if (startParts.month === endParts.month) {
+    return `${pad2(startParts.day)}-${pad2(endParts.day)} ${startParts.month}`;
+  }
+  return `${pad2(startParts.day)} ${startParts.month}-${pad2(endParts.day)} ${endParts.month}`;
+}
+
+function parseYmdDate(value: string): Date | null {
+  const v = value.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const d = new Date(Date.UTC(year, month, day));
+  if (Number.isNaN(d.getTime())) return null;
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month || d.getUTCDate() !== day) {
+    return null;
+  }
+  return d;
+}
+
+function partsFromDate(d: Date): { day: number; month: string } {
+  const monthNames = [
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+  ];
+  return { day: d.getUTCDate(), month: monthNames[d.getUTCMonth()] };
+}
+
+function deriveEndDate(start: Date | null, nights: number): Date | null {
+  if (!start) return null;
+  const duration = Number.isFinite(nights) && nights > 0 ? Math.floor(nights) : 0;
+  const d = new Date(start.getTime());
+  d.setUTCDate(d.getUTCDate() + duration);
+  return d;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }

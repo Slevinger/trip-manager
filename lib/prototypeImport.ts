@@ -55,6 +55,26 @@ function draftStepToTripStep(raw: unknown, order: number): TripStep {
     otherCost: Number(r.otherCost ?? 0) || 0,
     notes: String(r.notes ?? ""),
   };
+  const lat = typeof r.lat === "number" ? r.lat : undefined;
+  const lng = typeof r.lng === "number" ? r.lng : undefined;
+  const coordObj =
+    r.coordinates && typeof r.coordinates === "object"
+      ? (r.coordinates as { lat?: unknown; lng?: unknown })
+      : null;
+  const coordLat = typeof coordObj?.lat === "number" ? coordObj.lat : lat;
+  const coordLng = typeof coordObj?.lng === "number" ? coordObj.lng : lng;
+  if (
+    typeof coordLat === "number" &&
+    Number.isFinite(coordLat) &&
+    typeof coordLng === "number" &&
+    Number.isFinite(coordLng) &&
+    coordLat >= -90 &&
+    coordLat <= 90 &&
+    coordLng >= -180 &&
+    coordLng <= 180
+  ) {
+    step.coordinates = { lat: coordLat, lng: coordLng };
+  }
   const mx = typeof r.mapX === "number" ? r.mapX : undefined;
   const my = typeof r.mapY === "number" ? r.mapY : undefined;
   if (typeof mx === "number" && Number.isFinite(mx)) step.mapX = mx;

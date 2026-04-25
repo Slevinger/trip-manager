@@ -11,7 +11,13 @@ import { parseYmd } from "@/lib/timeline/dates";
 import { useI18n } from "@/components/providers/I18nProvider";
 import { formatYmdForLocale } from "@/lib/i18n/format";
 
-export function Timeline({ trip }: { trip: Trip }) {
+export function Timeline({
+  trip,
+  onStepClick,
+}: {
+  trip: Trip;
+  onStepClick?: (stepId: string) => void;
+}) {
   const { t, locale } = useI18n();
   const steps = useMemo(() => {
     const list = [...trip.steps];
@@ -39,7 +45,10 @@ export function Timeline({ trip }: { trip: Trip }) {
           return (
             <li
               key={s.id}
-              className="rounded-xl border border-zinc-100 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40"
+              className={`rounded-xl border border-zinc-100 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40 ${
+                onStepClick ? "cursor-pointer transition hover:border-blue-300 dark:hover:border-blue-700" : ""
+              }`}
+              onClick={() => onStepClick?.(s.id)}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">

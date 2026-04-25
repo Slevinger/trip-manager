@@ -94,6 +94,24 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
       otherCost: Number(o.otherCost ?? 0) || 0,
       notes: String(o.notes ?? ""),
     };
+    const lat = optNum(o.lat);
+    const lng = optNum(o.lng);
+    const coordsRaw =
+      o.coordinates && typeof o.coordinates === "object"
+        ? (o.coordinates as { lat?: unknown; lng?: unknown })
+        : null;
+    const coordLat = optNum(coordsRaw?.lat ?? lat);
+    const coordLng = optNum(coordsRaw?.lng ?? lng);
+    if (
+      coordLat !== undefined &&
+      coordLng !== undefined &&
+      coordLat >= -90 &&
+      coordLat <= 90 &&
+      coordLng >= -180 &&
+      coordLng <= 180
+    ) {
+      step.coordinates = { lat: coordLat, lng: coordLng };
+    }
     if (mx !== undefined) step.mapX = mx;
     if (my !== undefined) step.mapY = my;
     return step;

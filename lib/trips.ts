@@ -35,6 +35,7 @@ function tsToIso(v: unknown): string {
 
 function normalizeStep(raw: unknown): Trip["steps"][number] {
   const s = (raw ?? {}) as Record<string, unknown>;
+  const coordinates = normalizeCoordinates(s.coordinates, s.lat, s.lng);
   return {
     id: String(s.id ?? ""),
     order: Number(s.order ?? 0),
@@ -60,6 +61,7 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     activitiesCost: Number(s.activitiesCost ?? 0),
     otherCost: Number(s.otherCost ?? 0),
     notes: String(s.notes ?? ""),
+    ...(coordinates ? { coordinates } : {}),
     ...(() => {
       const mx = numOrUndef(s.mapX ?? s.x);
       const my = numOrUndef(s.mapY ?? s.y);
@@ -69,6 +71,22 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
       return o;
     })(),
   };
+}
+
+function normalizeCoordinates(
+  value: unknown,
+  fallbackLat?: unknown,
+  fallbackLng?: unknown
+): { lat: number; lng: number } | null {
+  const fromObject =
+    value && typeof value === "object"
+      ? (value as { lat?: unknown; lng?: unknown })
+      : null;
+  const lat = numOrUndef(fromObject?.lat ?? fallbackLat);
+  const lng = numOrUndef(fromObject?.lng ?? fallbackLng);
+  if (lat === undefined || lng === undefined) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 function numOrUndef(v: unknown): number | undefined {

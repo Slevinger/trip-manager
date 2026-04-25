@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Noto_Sans, Noto_Sans_Hebrew } from "next/font/google";
 import "./globals.css";
+import "leaflet/dist/leaflet.css";
 import { I18nProvider } from "@/components/providers/I18nProvider";
 
 const noto = Noto_Sans({

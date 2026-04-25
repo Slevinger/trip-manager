@@ -38,6 +38,10 @@ export interface TripStep {
   activitiesCost: number;
   otherCost: number;
   notes: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
   /** Optional map/diagram coordinates (from diagram JSON `x` / `y`). */
   mapX?: number;
   mapY?: number;
