@@ -1,10 +1,88 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // MVP: any signed-in user (custom token from this app) can read/write trips.
-    // Tighten with request.auth.token.tripId or your own checks before production.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentEmailLower() {
+      return signedIn() && request.auth.token.email is string
+        ? request.auth.token.email.lower()
+        : "";
+    }
+
+    function isMember(tripId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid));
+    }
+
+    function inviteExistsForCurrentUser(tripId) {
+      return signedIn() &&
+        currentEmailLower() != "" &&
+        exists(/databases/$(database)/documents/trips/$(tripId)/invites/$(currentEmailLower()));
+    }
+
+    /** Member doc email must match JWT email when present; some clients omit email on the token. */
+    function memberEmailConsistent() {
+      return request.resource.data.emailLower is string &&
+        (
+          (currentEmailLower() != "" &&
+            request.resource.data.emailLower == currentEmailLower()) ||
+          (currentEmailLower() == "" && request.resource.data.emailLower.size() > 0)
+        );
+    }
+
+    /** True when trip has no real owner yet (field missing, null, or empty string). */
+    function tripDataUnclaimed(data) {
+      return !data.keys().hasAny(['ownerUid'])
+        || data.ownerUid == null
+        || data.ownerUid == "";
+    }
+
+    function tripIsUnclaimed(tripId) {
+      let t = get(/databases/$(database)/documents/trips/$(tripId));
+      return t.exists && tripDataUnclaimed(t.data);
+    }
+
+    /** First visit `/trip/{newUuid}` creates trip then `members/{uid}`; after create the trip is claimed so `tripIsUnclaimed` is false — allow owner to add their own member row. */
+    function tripListsRequesterAsOwner(tripId) {
+      let t = get(/databases/$(database)/documents/trips/$(tripId));
+      return t.exists && t.data.ownerUid is string && t.data.ownerUid == request.auth.uid;
+    }
+
     match /trips/{tripId} {
-      allow read, write: if request.auth != null;
+      // Legacy migration: allow reading unclaimed docs (no ownerUid set) so first
+      // Google user can claim owner/member once. Otherwise members only.
+      // Owner may read trip even if `members/{uid}` row is missing (repair after failed bootstrap).
+      // Also allow reading missing trip docs so signed-in users can bootstrap brand-new UUID trips.
+      allow read: if (signedIn() && !exists(/databases/$(database)/documents/trips/$(tripId))) ||
+        isMember(tripId) || tripDataUnclaimed(resource.data) ||
+        (signedIn() && resource.data.ownerUid is string && resource.data.ownerUid == request.auth.uid);
+      allow create: if signedIn() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.ownerEmailLower == currentEmailLower();
+      allow update, delete: if isMember(tripId);
+    }
+
+    match /trips/{tripId}/members/{uid} {
+      allow read: if isMember(tripId) || (signedIn() && request.auth.uid == uid);
+      allow create: if (
+          isMember(tripId) ||
+          (signedIn() && request.auth.uid == uid && inviteExistsForCurrentUser(tripId)) ||
+          (signedIn() && request.auth.uid == uid && tripIsUnclaimed(tripId)) ||
+          (signedIn() && request.auth.uid == uid && tripListsRequesterAsOwner(tripId))
+        ) &&
+        request.resource.data.uid == uid &&
+        memberEmailConsistent();
+      allow update, delete: if isMember(tripId);
+    }
+
+    match /trips/{tripId}/invites/{inviteId} {
+      allow read: if isMember(tripId) || (signedIn() && inviteId == currentEmailLower());
+      allow create: if isMember(tripId) &&
+        request.resource.data.invitedEmailLower == inviteId;
+      allow update: if isMember(tripId) || (signedIn() && inviteId == currentEmailLower());
+      allow delete: if isMember(tripId);
     }
   }
 }

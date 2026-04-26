@@ -65,7 +65,14 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
         layers.line = null;
       }
 
-      const map = L.map(hostRef.current).setView([8.8, 99.3], 7);
+      const map = L.map(hostRef.current, {
+        zoomAnimation: false,
+        markerZoomAnimation: false,
+        fadeAnimation: false,
+        scrollWheelZoom: true,
+        wheelDebounceTime: 120,
+        wheelPxPerZoomLevel: 180,
+      }).setView([8.8, 99.3], 7);
       mapRef.current = map;
 
       L.tileLayer(
@@ -76,15 +83,23 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
       ).addTo(map);
 
       const drawPts: [number, number][] = [];
-      for (const [idx, s] of ordered.entries()) {
+      for (const s of ordered) {
+        const ll = coordsForLocation(s.location);
+        if (ll) drawPts.push(ll);
+      }
+
+      const orderIndexById = new Map(ordered.map((s, idx) => [s.id, idx]));
+      const rotated = rotateByProgress(ordered);
+      for (const s of [...rotated].reverse()) {
+        const idx = orderIndexById.get(s.id) ?? 0;
         const ll = coordsForLocation(s.location);
         if (!ll) continue;
-        drawPts.push(ll);
         const markerBadge = formatMarkerBadge(
           effectiveStepStart(s),
           effectiveStepEnd(s),
           computeNightsForStep(s),
-          s.location
+          s.location,
+          s.status
         );
         const markerColor =
           s.status === "active" ? "#2563eb" : s.status === "done" ? "#16a34a" : "#6b7280";
@@ -98,17 +113,14 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
         }).addTo(map);
 
         if (markerBadge) {
-          const badgeMarker = L.marker(ll, {
+          marker.bindTooltip(`<div class="trip-step-badge-bubble">${markerBadge}</div>`, {
+            permanent: true,
+            direction: "top",
+            offset: [0, -10],
+            className: "trip-step-badge-tooltip",
+            opacity: 1,
             interactive: false,
-            keyboard: false,
-            icon: L.divIcon({
-              className: "trip-step-badge-anchor",
-              html: `<div class="trip-step-badge-bubble">${markerBadge}</div>`,
-              iconSize: [1, 1],
-              iconAnchor: [0, 0],
-            }),
-          }).addTo(map);
-          layers.markers.push(badgeMarker);
+          });
         }
 
         marker.bindPopup(
@@ -186,7 +198,7 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
       </h2>
       <p className="mt-1 text-xs text-zinc-500">{t("view.mapAttribution")}</p>
       <div className="mt-3 h-[min(420px,55vh)] w-full overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
-        <div ref={hostRef} className="h-full w-full" />
+        <div ref={hostRef} dir="ltr" className="h-full w-full" />
       </div>
       {mapWarnings.length > 0 ? (
         <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
@@ -218,7 +230,8 @@ function formatMarkerBadge(
   startDate: string,
   endDate: string,
   nights: number,
-  location: string
+  location: string,
+  status: Trip["steps"][number]["status"]
 ): string | null {
   const start = parseYmdDate(startDate);
   const end = parseYmdDate(endDate) ?? deriveEndDate(start, nights);
@@ -235,17 +248,20 @@ function formatMarkerBadge(
   }
 
   const safeDate = escapeHtml(dateLabel);
-  const dateStyle = "font-weight:800;color:#0f172a;";
-  const sepStyle = "opacity:.65;";
-  const locationStyle = "font-weight:600;color:#334155;";
+  const bubbleClass =
+    status === "active"
+      ? "trip-step-badge-bubble trip-step-badge-bubble-active"
+      : "trip-step-badge-bubble";
   if (!locationLabel) {
-    return `<span style="${dateStyle}">${safeDate}</span>`;
+    return `<span class="${bubbleClass}"><span class="trip-step-badge-date">${safeDate}</span></span>`;
   }
   const safeLocation = escapeHtml(locationLabel);
   return [
-    `<span style="${dateStyle}">${safeDate}</span>`,
-    `<span style="${sepStyle}"> · </span>`,
-    `<span style="${locationStyle}">${safeLocation}</span>`,
+    `<span class="${bubbleClass}">`,
+    `<span class="trip-step-badge-date">${safeDate}</span>`,
+    `<span class="trip-step-badge-sep"> · </span>`,
+    `<span class="trip-step-badge-location">${safeLocation}</span>`,
+    `</span>`,
   ].join("");
 }
 
@@ -300,4 +316,13 @@ function compactLocationLabel(location: string): string {
   const firstSegment = trimmed.split(",")[0].trim();
   if (firstSegment.length <= 28) return firstSegment;
   return `${firstSegment.slice(0, 25).trimEnd()}...`;
+}
+
+function rotateByProgress(steps: Trip["steps"]): Trip["steps"] {
+  if (!steps.length) return steps;
+  const activeIndex = steps.findIndex((s) => s.status === "active");
+  const pivot =
+    activeIndex >= 0 ? activeIndex : steps.findIndex((s) => s.status !== "done");
+  if (pivot <= 0) return steps;
+  return [...steps.slice(pivot), ...steps.slice(0, pivot)];
 }

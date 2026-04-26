@@ -135,6 +135,10 @@ export function normalizeTripFromFirestore(
     title: String(data.title ?? ""),
     tripStart: String(data.tripStart ?? ""),
     managePassword: String(data.managePassword ?? ""),
+    ownerUid: String(data.ownerUid ?? ""),
+    ownerEmail: String(data.ownerEmail ?? ""),
+    ownerEmailLower: String(data.ownerEmailLower ?? ""),
+    accessMode: "invited_only",
     tripAttachments: normalizeAttachments(data.tripAttachments),
     smartTimeline: Boolean(data.smartTimeline ?? true),
     autoCurrentByDate: Boolean(data.autoCurrentByDate ?? true),
@@ -150,6 +154,10 @@ export function tripToFirestorePayload(trip: Trip): Record<string, unknown> {
     title: trip.title,
     tripStart: trip.tripStart,
     managePassword: trip.managePassword,
+    ownerUid: trip.ownerUid,
+    ownerEmail: trip.ownerEmail,
+    ownerEmailLower: trip.ownerEmailLower,
+    accessMode: trip.accessMode,
     smartTimeline: trip.smartTimeline,
     autoCurrentByDate: trip.autoCurrentByDate,
     steps: trip.steps,
@@ -157,13 +165,24 @@ export function tripToFirestorePayload(trip: Trip): Record<string, unknown> {
   };
 }
 
-export async function createTrip(tripId: string): Promise<void> {
+export async function createTrip(
+  tripId: string,
+  owner?: { uid: string; email: string; emailLower: string }
+): Promise<void> {
   const ref = tripDocRef(tripId);
   const snap = await getDoc(ref);
   if (snap.exists()) return;
   const trip = defaultTrip(tripId);
+  const ownerPatch = owner
+    ? {
+        ownerUid: owner.uid,
+        ownerEmail: owner.email,
+        ownerEmailLower: owner.emailLower,
+      }
+    : {};
   await setDoc(ref, {
     ...tripToFirestorePayload(trip),
+    ...ownerPatch,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

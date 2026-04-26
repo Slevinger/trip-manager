@@ -54,7 +54,8 @@ function TripChrome({
   onTab: (next: "view" | "manage") => void;
 }) {
   const { t } = useI18n();
-  const { trip, loading, error } = useTripDocument();
+  const { trip, loading, error, user, authNeedsGoogleClick, signInWithGoogle } =
+    useTripDocument();
   const [isManageUnlocked, setIsManageUnlocked] = useState(false);
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [managePasswordInput, setManagePasswordInput] = useState("");
@@ -70,10 +71,23 @@ function TripChrome({
 
   if (error) {
     const message =
-      error === "ADMIN_NOT_CONFIGURED"
-        ? t("firebase.adminServiceAccount")
-        : error === "firebase"
+      error === "firebase"
           ? t("firebase.missing")
+        : error === "ACCESS_DENIED"
+          ? t("access.denied")
+        : error === "AUTH_REQUIRED"
+          ? t("auth.googleRequired")
+        : error === "AUTH_EMAIL_REQUIRED"
+          ? t("auth.emailRequired")
+        : error === "AUTH_POPUP_BLOCKED"
+          ? t("auth.popupBlocked")
+        : error === "AUTH_REDIRECT_LOOP"
+          ? t("auth.redirectLoop")
+        : error === "FIRESTORE_READ_DENIED"
+          ? t("firebase.permissionDenied")
+          : error.includes("permission-denied") ||
+              error.includes("Missing or insufficient permissions")
+            ? t("firebase.permissionDenied")
           : error.includes("auth/configuration-not-found")
             ? t("firebase.authNotEnabled")
             : `${t("common.error")}: ${error}`;
@@ -82,6 +96,33 @@ function TripChrome({
         <p className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100">
           {message}
         </p>
+        {error === "ACCESS_DENIED" ? (
+          <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+            {t("access.inviteHint")}
+          </p>
+        ) : null}
+      </main>
+    );
+  }
+
+  if (authNeedsGoogleClick) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-16">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            {t("auth.continueTitle")}
+          </h1>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+            {t("auth.continueHint")}
+          </p>
+          <button
+            type="button"
+            onClick={() => void signInWithGoogle()}
+            className="mt-6 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-zinc-900"
+          >
+            {t("auth.continueWithGoogle")}
+          </button>
+        </section>
       </main>
     );
   }
@@ -130,6 +171,11 @@ function TripChrome({
     <>
       <TripHeader title={trip?.title ?? ""} />
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-4">
+        {user?.email ? (
+          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+            {t("auth.signedInAs")}: {user.email}
+          </p>
+        ) : null}
         <Tabs
           active={tab}
           onChange={requestTabChange}

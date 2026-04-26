@@ -1,23 +1,8 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import { TripPage } from "@/components/trip/TripPage";
 
-const TripPageClient = dynamic(
-  () =>
-    import("@/components/trip/TripPage").then((m) => ({ default: m.TripPage })),
-  {
-    ssr: false,
-    loading: () => (
-      <main
-        className="mx-auto max-w-3xl px-4 py-16 text-center text-sm text-zinc-500"
-        aria-busy="true"
-      >
-        …
-      </main>
-    ),
-  }
-);
-
+/** Eager client mount so `getRedirectResult` runs immediately after OAuth (no lazy-chunk delay). */
 export function TripPageGate({ tripId }: { tripId: string }) {
-  return <TripPageClient tripId={tripId} />;
+  return <TripPage tripId={tripId} />;
 }

@@ -29,10 +29,10 @@ type I18nContextValue = {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 function readStoredLocale(): Locale {
-  if (typeof window === "undefined") return "he";
+  if (typeof window === "undefined") return "en";
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (raw === "en" || raw === "ru" || raw === "he") return raw;
-  return "he";
+  return "en";
 }
 
 function readStoredCurrency(): TripCurrency {

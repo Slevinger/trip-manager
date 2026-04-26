@@ -1,5 +1,11 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
-import { getAuth, type Auth } from "firebase/auth";
+import {
+  browserLocalPersistence,
+  GoogleAuthProvider,
+  getAuth,
+  setPersistence,
+  type Auth,
+} from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
@@ -45,7 +51,24 @@ export function getMissingFirebasePublicEnv(): string[] {
 let app: FirebaseApp | undefined;
 let firestore: Firestore | undefined;
 let auth: Auth | undefined;
+let authPersistenceReady: Promise<void> | null = null;
 let storage: FirebaseStorage | undefined;
+let googleProvider: GoogleAuthProvider | undefined;
+
+/** Ensures auth state survives refresh + OAuth redirect return (browser only). */
+export async function ensureAuthPersistence(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const a = getClientAuth();
+  if (!a) return;
+  if (!authPersistenceReady) {
+    authPersistenceReady = setPersistence(a, browserLocalPersistence).catch(
+      () => {
+        /* already configured or unsupported */
+      }
+    );
+  }
+  await authPersistenceReady;
+}
 
 export function getFirebaseApp(): FirebaseApp | undefined {
   if (!hasConfig()) return undefined;
@@ -84,6 +107,16 @@ export function getClientStorage(): FirebaseStorage | undefined {
     storage = getStorage(a);
   }
   return storage;
+}
+
+export function getGoogleAuthProvider(): GoogleAuthProvider {
+  if (!googleProvider) {
+    googleProvider = new GoogleAuthProvider();
+    googleProvider.addScope("email");
+    googleProvider.addScope("profile");
+    googleProvider.setCustomParameters({ prompt: "select_account" });
+  }
+  return googleProvider;
 }
 
 /** Alias for `getDb()`. */

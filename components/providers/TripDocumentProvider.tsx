@@ -8,14 +8,16 @@ import {
   useMemo,
   useState,
 } from "react";
-import { getDoc } from "firebase/firestore";
+import type { User } from "firebase/auth";
 import { getDb } from "@/lib/firebase";
-import { ensureTripFirebaseAuth } from "@/lib/tripAuth";
+import {
+  restoreTripFirebaseSession,
+  startGoogleSignInForTrip,
+} from "@/lib/tripAuth";
+import { ensureTripAccessForUser, type TripMember, normalizeEmail } from "@/lib/tripAccess";
 import type { Trip, TripStep } from "@/lib/types/trip";
 import {
   cancelPendingTripSave,
-  createTrip,
-  getTripRef,
   mergeTrip,
   rememberTripSnapshot,
   saveTrip,
@@ -27,6 +29,11 @@ import { resolveAutoActiveStepId } from "@/lib/timeline/autoCurrentStep";
 type TripDocumentContextValue = {
   tripId: string;
   trip: Trip | null;
+  user: User | null;
+  member: TripMember | null;
+  /** Show “Continue with Google” (OAuth redirect must start from a click, not `useEffect`). */
+  authNeedsGoogleClick: boolean;
+  signInWithGoogle: () => Promise<void>;
   loading: boolean;
   error: string | null;
   /** Replace entire trip (optimistic + debounced save). */
@@ -61,8 +68,26 @@ export function TripDocumentProvider({
   children: React.ReactNode;
 }) {
   const [trip, setTrip] = useState<Trip | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [member, setMember] = useState<TripMember | null>(null);
+  const [authNeedsGoogleClick, setAuthNeedsGoogleClick] = useState(false);
+  const [authSessionNonce, setAuthSessionNonce] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const signInWithGoogle = useCallback(async () => {
+    try {
+      setError(null);
+      const mode = await startGoogleSignInForTrip(tripId);
+      if (mode === "popup") {
+        setAuthNeedsGoogleClick(false);
+        setAuthSessionNonce((n) => n + 1);
+      }
+    } catch (e) {
+      setAuthNeedsGoogleClick(false);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [tripId]);
 
   const persist = useCallback((next: Trip) => {
     const normalized = { ...next, id: tripId };
@@ -102,6 +127,8 @@ export function TripDocumentProvider({
 
     (async () => {
       try {
+        setLoading(true);
+        setAuthNeedsGoogleClick(false);
         if (!getDb()) {
           setTrip(null);
           setError("firebase");
@@ -109,19 +136,36 @@ export function TripDocumentProvider({
           return;
         }
 
-        const authStatus = await ensureTripFirebaseAuth(tripId);
-        if (authStatus === "admin_missing") {
+        const authStatus = await restoreTripFirebaseSession(tripId);
+        if (authStatus.status === "needs_google_sign_in") {
+          setUser(null);
+          setMember(null);
+          setError(null);
+          setAuthNeedsGoogleClick(true);
+          setLoading(false);
+          return;
+        }
+        const currentUser = authStatus.user;
+        setUser(currentUser);
+        const email = currentUser.email?.trim();
+        const emailLower = normalizeEmail(email ?? "");
+        if (!email || !emailLower) {
           setTrip(null);
-          setError("ADMIN_NOT_CONFIGURED");
+          setError("AUTH_EMAIL_REQUIRED");
           setLoading(false);
           return;
         }
 
-        const ref = getTripRef(tripId);
-        const snap = await getDoc(ref);
-        if (!snap.exists()) {
-          await createTrip(tripId);
+        const access = await ensureTripAccessForUser(tripId, currentUser);
+        if (access.accessDenied || !access.member) {
+          setMember(null);
+          setTrip(null);
+          setError("ACCESS_DENIED");
+          setLoading(false);
+          return;
         }
+        setMember(access.member);
+
         unsub = subscribeToTrip(tripId, (remote, err) => {
           if (err) {
             setTrip(null);
@@ -139,6 +183,9 @@ export function TripDocumentProvider({
           setError(null);
         });
       } catch (e) {
+        setAuthNeedsGoogleClick(false);
+        setUser(null);
+        setMember(null);
         setError(e instanceof Error ? e.message : String(e));
         setLoading(false);
       }
@@ -148,7 +195,7 @@ export function TripDocumentProvider({
       if (unsub) unsub();
       cancelPendingTripSave(tripId);
     };
-  }, [tripId]);
+  }, [tripId, authSessionNonce]);
 
   useEffect(() => {
     if (!trip?.autoCurrentByDate) return;
@@ -174,6 +221,10 @@ export function TripDocumentProvider({
     () => ({
       tripId,
       trip,
+      user,
+      member,
+      authNeedsGoogleClick,
+      signInWithGoogle,
       loading,
       error,
       persist,
@@ -181,7 +232,20 @@ export function TripDocumentProvider({
       persistUpdate,
       replaceSteps,
     }),
-    [tripId, trip, loading, error, persist, persistPatch, persistUpdate, replaceSteps]
+    [
+      tripId,
+      trip,
+      user,
+      member,
+      authNeedsGoogleClick,
+      signInWithGoogle,
+      loading,
+      error,
+      persist,
+      persistPatch,
+      persistUpdate,
+      replaceSteps,
+    ]
   );
 
   return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { onSnapshot } from "firebase/firestore";
 import { v4 as uuidv4 } from "uuid";
 import type { Trip, TripStep } from "@/lib/types/trip";
 import { StepList } from "@/components/trip/StepList";
@@ -10,16 +11,70 @@ import { PrototypeDraftImport } from "@/components/trip/PrototypeDraftImport";
 import { AttachmentManager } from "@/components/trip/AttachmentManager";
 import { useTripDocument } from "@/components/providers/TripDocumentProvider";
 import { useI18n } from "@/components/providers/I18nProvider";
+import {
+  createTripInvite,
+  getTripInvitesCollectionRef,
+  getTripMembersCollectionRef,
+  normalizeEmail,
+  type TripInvite,
+  type TripMember,
+} from "@/lib/tripAccess";
 import { createEmptyStep } from "@/lib/tripDefaults";
 
 export function ManageTab() {
-  const { trip, persist } = useTripDocument();
+  const { trip, persist, user } = useTripDocument();
   const { t } = useI18n();
   const [editing, setEditing] = useState<TripStep | null>(null);
+  const [members, setMembers] = useState<TripMember[]>([]);
+  const [invites, setInvites] = useState<TripInvite[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
   const latestTrip = useRef<Trip | null>(null);
 
   useEffect(() => {
     latestTrip.current = trip;
+  }, [trip]);
+
+  useEffect(() => {
+    if (!trip) return;
+    const unsubMembers = onSnapshot(getTripMembersCollectionRef(trip.id), (snap) => {
+      setMembers(
+        snap.docs.map((d) => {
+          const raw = d.data() as Record<string, unknown>;
+          return {
+            uid: d.id,
+            email: String(raw.email ?? ""),
+            emailLower: String(raw.emailLower ?? ""),
+            role: "member",
+            joinedAt: String(raw.joinedAt ?? ""),
+          };
+        })
+      );
+    });
+    const unsubInvites = onSnapshot(getTripInvitesCollectionRef(trip.id), (snap) => {
+      setInvites(
+        snap.docs.map((d) => {
+          const raw = d.data() as Record<string, unknown>;
+          return {
+            id: d.id,
+            invitedEmail: String(raw.invitedEmail ?? ""),
+            invitedEmailLower: String(raw.invitedEmailLower ?? d.id),
+            invitedByUid: String(raw.invitedByUid ?? ""),
+            invitedByEmail: String(raw.invitedByEmail ?? ""),
+            invitedByEmailLower: String(raw.invitedByEmailLower ?? ""),
+            createdAt: String(raw.createdAt ?? ""),
+            acceptedAt:
+              typeof raw.acceptedAt === "string" && raw.acceptedAt.trim()
+                ? raw.acceptedAt
+                : undefined,
+          };
+        })
+      );
+    });
+    return () => {
+      unsubMembers();
+      unsubInvites();
+    };
   }, [trip]);
 
   if (!trip) return null;
@@ -49,6 +104,33 @@ export function ManageTab() {
       return s;
     });
     persist({ ...doc, autoCurrentByDate: false, steps });
+  }
+
+  async function inviteMember() {
+    if (!user?.email) {
+      setInviteFeedback(t("auth.emailRequired"));
+      return;
+    }
+    const normalized = normalizeEmail(inviteEmail);
+    if (!normalized || !normalized.includes("@")) {
+      setInviteFeedback(t("invite.invalidEmail"));
+      return;
+    }
+    const alreadyMember = members.some((m) => m.emailLower === normalized);
+    if (alreadyMember) {
+      setInviteFeedback(t("invite.alreadyMember"));
+      return;
+    }
+    try {
+      await createTripInvite(doc.id, inviteEmail, {
+        uid: user.uid,
+        email: user.email,
+      });
+      setInviteEmail("");
+      setInviteFeedback(t("invite.sent"));
+    } catch {
+      setInviteFeedback(t("invite.failed"));
+    }
   }
 
   return (
@@ -105,6 +187,63 @@ export function ManageTab() {
           />
           <span>{t("manage.autoCurrent")}</span>
         </label>
+      </section>
+
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          {t("invite.title")}
+        </h3>
+        <p className="mt-1 text-xs text-zinc-500">{t("invite.hint")}</p>
+        <div className="mt-3 flex gap-2">
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => {
+              setInviteEmail(e.target.value);
+              if (inviteFeedback) setInviteFeedback(null);
+            }}
+            placeholder={t("invite.emailPlaceholder")}
+            className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+          />
+          <button
+            type="button"
+            onClick={() => void inviteMember()}
+            className="rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white dark:bg-white dark:text-zinc-900"
+          >
+            {t("invite.send")}
+          </button>
+        </div>
+        {inviteFeedback ? (
+          <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">{inviteFeedback}</p>
+        ) : null}
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              {t("invite.members")}
+            </h4>
+            <ul className="mt-2 space-y-1 text-sm text-zinc-700 dark:text-zinc-200">
+              {members.map((m) => (
+                <li key={m.uid}>{m.email}</li>
+              ))}
+              {members.length === 0 ? <li>{t("invite.noneMembers")}</li> : null}
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              {t("invite.pending")}
+            </h4>
+            <ul className="mt-2 space-y-1 text-sm text-zinc-700 dark:text-zinc-200">
+              {invites
+                .filter((inv) => !inv.acceptedAt)
+                .map((inv) => (
+                  <li key={inv.id}>{inv.invitedEmail}</li>
+                ))}
+              {invites.filter((inv) => !inv.acceptedAt).length === 0 ? (
+                <li>{t("invite.nonePending")}</li>
+              ) : null}
+            </ul>
+          </div>
+        </div>
       </section>
 
       <section className="space-y-3">

@@ -29,6 +29,7 @@ body {
   height: 100%;
   min-height: 360px;
   background: #e5e7eb;
+  direction: ltr;
 }
 
 .trip-step-badge-bubble {
@@ -49,31 +50,39 @@ body {
   display: inline-block;
 }
 
-.trip-step-badge-anchor {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  width: 1px !important;
-  height: 1px !important;
-  overflow: visible !important;
+.trip-step-badge-bubble-active {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.35);
 }
 
-.trip-step-badge-anchor .trip-step-badge-bubble {
-  transform: translate(-50%, -215%);
+.trip-step-badge-bubble-active .trip-step-badge-date,
+.trip-step-badge-bubble-active .trip-step-badge-location {
+  color: #ffffff;
 }
 
-.trip-step-badge-anchor {
-  z-index: 650 !important;
+.trip-step-badge-bubble-active .trip-step-badge-sep {
+  color: #ffffff;
+  opacity: 0.85;
 }
 
-.trip-step-badge-anchor,
-.trip-step-badge-anchor.leaflet-div-icon {
+.trip-step-badge-tooltip,
+.trip-step-badge-tooltip.leaflet-tooltip {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
-.trip-step-badge-anchor * {
+.trip-step-badge-tooltip.leaflet-tooltip-top::before,
+.trip-step-badge-tooltip.leaflet-tooltip-bottom::before,
+.trip-step-badge-tooltip.leaflet-tooltip-left::before,
+.trip-step-badge-tooltip.leaflet-tooltip-right::before {
+  display: none !important;
+}
+
+.trip-step-badge-tooltip * {
   pointer-events: none;
 }
 

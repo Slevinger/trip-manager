@@ -63,6 +63,10 @@ export interface Trip {
   title: string;
   tripStart: string;
   managePassword: string;
+  ownerUid: string;
+  ownerEmail: string;
+  ownerEmailLower: string;
+  accessMode: "invited_only";
   tripAttachments: AttachmentFile[];
   smartTimeline: boolean;
   autoCurrentByDate: boolean;

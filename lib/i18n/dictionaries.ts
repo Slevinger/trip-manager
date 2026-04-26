@@ -118,6 +118,38 @@ const he: DictNode = {
   }),
   share: leafMap({
     copyLink: "העתקת קישור",
+    copyLinkInviteOnly: "העתקת קישור (נדרשת הזמנה)",
+  }),
+  auth: leafMap({
+    signedInAs: "מחובר כ",
+    googleRequired: "נדרשת התחברות עם Google כדי לפתוח את הטיול הזה.",
+    emailRequired: "לחשבון Google חייבת להיות כתובת אימייל.",
+    popupBlocked: "חלון ההתחברות נחסם. אפשר חלונות קופצים ונסה שוב.",
+    redirecting: "מפנים להתחברות Google…",
+    continueTitle: "התחברות נדרשת",
+    continueHint:
+      "לחץ על הכפתור כדי להמשיך עם Google. ב-localhost נפתח חלון קופץ; בסביבות אחרות תתבצע הפניה.",
+    continueWithGoogle: "המשך עם Google",
+    redirectLoop:
+      "התחברות Google נכנסה ללולאה. נסה חלון גלישה פרטית, נקה נתוני אתר ל-localhost, או השבת הרחבות שחוסמות אחסון/עוגיות. אחר כך רענן ונסה שוב.",
+  }),
+  access: leafMap({
+    denied: "אין לך גישה לטיול הזה.",
+    inviteHint: "בקשו מחבר טיול להזמין את כתובת האימייל של חשבון Google שלך.",
+  }),
+  invite: leafMap({
+    title: "הזמנות וגישה",
+    hint: "רק משתמשים מוזמנים יכולים לפתוח את הטיול.",
+    emailPlaceholder: "name@example.com",
+    send: "הזמן",
+    members: "חברים",
+    pending: "הזמנות ממתינות",
+    noneMembers: "אין חברים עדיין",
+    nonePending: "אין הזמנות ממתינות",
+    invalidEmail: "הכנס אימייל תקין.",
+    alreadyMember: "האימייל כבר חבר בטיול.",
+    sent: "ההזמנה נשמרה.",
+    failed: "שליחת ההזמנה נכשלה.",
   }),
   json: leafMap({
     title: "ייבוא / ייצוא JSON",
@@ -137,6 +169,8 @@ const he: DictNode = {
       "חסרה הרשאת שרת ל-Firestore. הגדר במחשב השרת (או ב-Vercel) את FIREBASE_SERVICE_ACCOUNT_PATH לנתיב קובץ ה-JSON של חשבון השירות, או את FIREBASE_SERVICE_ACCOUNT_JSON עם תוכן ה-JSON. ודא ש-Firebase Authentication מופעל בפרויקט.",
     authNotEnabled:
       "Firebase Authentication לא הופעל בפרויקט (שגיאת auth/configuration-not-found). ב-Firebase Console → Build → Authentication → לחץ Get started והפעל. אחרי מכן רענן את הדף.",
+    permissionDenied:
+      "Firestore חוסם גישה (כללי אבטחה). פרוס את `firestore.rules` מהפרויקט (Firebase Console → Firestore → Rules → Publish) או ודא שהמשתמש מחובר ומוזמן לטיול.",
   }),
   ai: leafMap({
     intro: "העתק את הפרומפט הבא לכלי בינה מלאכותית כדי לקבל עזרה בתכנון.",
@@ -279,6 +313,38 @@ const en: DictNode = {
   }),
   share: leafMap({
     copyLink: "Copy share link",
+    copyLinkInviteOnly: "Copy share link (invite required)",
+  }),
+  auth: leafMap({
+    signedInAs: "Signed in as",
+    googleRequired: "Google sign-in is required to open this trip.",
+    emailRequired: "Your Google account must include an email address.",
+    popupBlocked: "The sign-in popup was blocked. Allow popups and try again.",
+    redirecting: "Redirecting to Google sign-in…",
+    continueTitle: "Sign in required",
+    continueHint:
+      "Use the button below to continue with Google. On localhost a popup opens; elsewhere the page redirects to Google.",
+    continueWithGoogle: "Continue with Google",
+    redirectLoop:
+      "Google sign-in is looping. Try a private window, clear site data for localhost, or disable extensions that block cookies/storage. Then refresh and try again.",
+  }),
+  access: leafMap({
+    denied: "You do not have access to this trip.",
+    inviteHint: "Ask a trip member to invite your Google account email.",
+  }),
+  invite: leafMap({
+    title: "Invites and access",
+    hint: "Only invited users can open this trip.",
+    emailPlaceholder: "name@example.com",
+    send: "Invite",
+    members: "Members",
+    pending: "Pending invites",
+    noneMembers: "No members yet",
+    nonePending: "No pending invites",
+    invalidEmail: "Enter a valid email address.",
+    alreadyMember: "This email is already a trip member.",
+    sent: "Invite saved.",
+    failed: "Failed to save invite.",
   }),
   json: leafMap({
     title: "Import / export JSON",
@@ -298,6 +364,8 @@ const en: DictNode = {
       "Server credentials are missing for Firestore access. Set FIREBASE_SERVICE_ACCOUNT_PATH to your service account JSON file path, or FIREBASE_SERVICE_ACCOUNT_JSON with the JSON contents (e.g. on Vercel). Enable Firebase Authentication in the project console.",
     authNotEnabled:
       "Firebase Authentication is not enabled for this project (auth/configuration-not-found). In Firebase Console → Build → Authentication → click Get started, then reload this page.",
+    permissionDenied:
+      "Firestore denied access (security rules). Deploy this repo’s `firestore.rules` (Firebase Console → Firestore → Rules → Publish), or confirm you are signed in and invited to the trip.",
   }),
   ai: leafMap({
     intro: "Copy this prompt into an AI assistant for planning help.",
@@ -440,6 +508,38 @@ const ru: DictNode = {
   }),
   share: leafMap({
     copyLink: "Копировать ссылку",
+    copyLinkInviteOnly: "Копировать ссылку (нужно приглашение)",
+  }),
+  auth: leafMap({
+    signedInAs: "Вход выполнен",
+    googleRequired: "Для открытия этой поездки нужен вход через Google.",
+    emailRequired: "У аккаунта Google должен быть email.",
+    popupBlocked: "Окно входа заблокировано. Разрешите всплывающие окна и попробуйте снова.",
+    redirecting: "Переход к входу через Google…",
+    continueTitle: "Нужен вход",
+    continueHint:
+      "Нажмите кнопку ниже, чтобы войти через Google. На localhost откроется всплывающее окно; иначе будет редирект на Google.",
+    continueWithGoogle: "Продолжить с Google",
+    redirectLoop:
+      "Вход Google зацикливается. Попробуйте режим инкогнито, очистите данные сайта для localhost или отключите расширения, блокирующие куки/хранилище. Затем обновите страницу.",
+  }),
+  access: leafMap({
+    denied: "У вас нет доступа к этой поездке.",
+    inviteHint: "Попросите участника поездки пригласить email вашего Google-аккаунта.",
+  }),
+  invite: leafMap({
+    title: "Приглашения и доступ",
+    hint: "Открыть поездку могут только приглашённые пользователи.",
+    emailPlaceholder: "name@example.com",
+    send: "Пригласить",
+    members: "Участники",
+    pending: "Ожидающие приглашения",
+    noneMembers: "Пока нет участников",
+    nonePending: "Нет ожидающих приглашений",
+    invalidEmail: "Введите корректный email.",
+    alreadyMember: "Этот email уже имеет доступ.",
+    sent: "Приглашение сохранено.",
+    failed: "Не удалось сохранить приглашение.",
   }),
   json: leafMap({
     title: "Импорт / экспорт JSON",
@@ -459,6 +559,8 @@ const ru: DictNode = {
       "Нет серверных учётных данных для Firestore. Укажите FIREBASE_SERVICE_ACCOUNT_PATH (путь к JSON сервисного аккаунта) или FIREBASE_SERVICE_ACCOUNT_JSON (содержимое JSON, например в Vercel). Включите Firebase Authentication в консоли проекта.",
     authNotEnabled:
       "В проекте не включён Firebase Authentication (ошибка auth/configuration-not-found). Firebase Console → Build → Authentication → Get started, затем обновите страницу.",
+    permissionDenied:
+      "Firestore отклонил запрос (правила безопасности). Опубликуйте `firestore.rules` из репозитория (Firebase Console → Firestore → Rules → Publish) или проверьте вход и приглашение к поездке.",
   }),
   ai: leafMap({
     intro: "Скопируйте этот промпт в ИИ-помощник для планирования.",

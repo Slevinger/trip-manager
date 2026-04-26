@@ -20,25 +20,12 @@ export async function POST(
   if (!tripId?.trim()) {
     return NextResponse.json({ error: "missing_trip_id" }, { status: 400 });
   }
-
-  const { getAdminAuth, isFirebaseAdminConfigured } = await import(
-    "@/lib/firebase-admin"
+  return NextResponse.json(
+    {
+      error: "deprecated",
+      message: "Custom per-trip tokens are deprecated. Use Google sign-in on client.",
+      legacyUid: uidForTrip(tripId),
+    },
+    { status: 410 }
   );
-
-  if (!isFirebaseAdminConfigured()) {
-    return NextResponse.json(
-      { error: "admin_not_configured" },
-      { status: 501 }
-    );
-  }
-
-  try {
-    const auth = getAdminAuth();
-    const uid = uidForTrip(tripId);
-    const token = await auth.createCustomToken(uid, { tripId });
-    return NextResponse.json({ token });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
 }
