@@ -67,10 +67,6 @@ const he: DictNode = {
     stepsTitle: "שלבים",
     addStep: "שלב חדש",
     endDateOpen: "תאריך סיום פתוח (לפי צ׳ק-אאוט אחרון)",
-    prototypeImportTitle: "ייבוא מטיוטת HTML (Trip Planner Stable)",
-    prototypeImportHint:
-      "הדבק את אובייקט ה־JSON מהשורש (tripTitle, tripStart, smartTimeline, autoCurrentByDate, steps). מזהה המסמך נשמר.",
-    prototypeImportApply: "יישום",
   }),
   step: leafMap({
     title: "כותרת",
@@ -150,16 +146,6 @@ const he: DictNode = {
     alreadyMember: "האימייל כבר חבר בטיול.",
     sent: "ההזמנה נשמרה.",
     failed: "שליחת ההזמנה נכשלה.",
-  }),
-  json: leafMap({
-    title: "ייבוא / ייצוא JSON",
-    export: "ייצוא",
-    import: "ייבוא",
-    backup: "גיבוי",
-    restore: "שחזור",
-    paste: "הדבקת JSON",
-    replace: "החלפת טיול מהלוח",
-    hint: "השתמש בזה לגיבוי או העברה בין סביבות.",
   }),
   firebase: leafMap({
     missing:
@@ -262,10 +248,6 @@ const en: DictNode = {
     stepsTitle: "Steps",
     addStep: "New step",
     endDateOpen: "Open end date (uses latest hotel checkout)",
-    prototypeImportTitle: "Import from HTML prototype (Trip Planner Stable)",
-    prototypeImportHint:
-      "Paste the root JSON object (tripTitle, tripStart, smartTimeline, autoCurrentByDate, steps). Document id is kept.",
-    prototypeImportApply: "Apply",
   }),
   step: leafMap({
     title: "Title",
@@ -345,16 +327,6 @@ const en: DictNode = {
     alreadyMember: "This email is already a trip member.",
     sent: "Invite saved.",
     failed: "Failed to save invite.",
-  }),
-  json: leafMap({
-    title: "Import / export JSON",
-    export: "Export",
-    import: "Import",
-    backup: "Backup",
-    restore: "Restore",
-    paste: "Paste JSON",
-    replace: "Replace trip from clipboard",
-    hint: "Use for backups or moving between environments.",
   }),
   firebase: leafMap({
     missing:
@@ -457,10 +429,6 @@ const ru: DictNode = {
     stepsTitle: "Шаги",
     addStep: "Новый шаг",
     endDateOpen: "Открытая дата окончания (по последнему выезду)",
-    prototypeImportTitle: "Импорт из HTML-черновика (Trip Planner Stable)",
-    prototypeImportHint:
-      "Вставьте корневой JSON (tripTitle, tripStart, smartTimeline, autoCurrentByDate, steps). Id документа сохраняется.",
-    prototypeImportApply: "Применить",
   }),
   step: leafMap({
     title: "Заголовок",
@@ -540,16 +508,6 @@ const ru: DictNode = {
     alreadyMember: "Этот email уже имеет доступ.",
     sent: "Приглашение сохранено.",
     failed: "Не удалось сохранить приглашение.",
-  }),
-  json: leafMap({
-    title: "Импорт / экспорт JSON",
-    export: "Экспорт",
-    import: "Импорт",
-    backup: "Резерв",
-    restore: "Восстановление",
-    paste: "Вставить JSON",
-    replace: "Заменить поездку из буфера",
-    hint: "Для резервных копий или переноса между средами.",
   }),
   firebase: leafMap({
     missing:

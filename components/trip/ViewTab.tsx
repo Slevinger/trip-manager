@@ -61,6 +61,23 @@ export function ViewTab() {
             <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
               {t("step.nights")}: {computeNightsForStep(current)}
             </div>
+            {current.hotels[0]?.name.trim() ? (
+              <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+                {t("hotels.title")}: {current.hotels[0].name.trim()}
+              </div>
+            ) : null}
+            {current.hotels[0]?.bookingUrl.trim() ? (
+              <div className="mt-1 text-xs">
+                <a
+                  href={current.hotels[0].bookingUrl.trim()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {t("hotels.bookingUrl")}
+                </a>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="mt-3 text-sm text-zinc-500">{t("view.none")}</p>

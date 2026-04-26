@@ -6,8 +6,6 @@ import { v4 as uuidv4 } from "uuid";
 import type { Trip, TripStep } from "@/lib/types/trip";
 import { StepList } from "@/components/trip/StepList";
 import { StepDialog } from "@/components/trip/StepDialog";
-import { JsonImportExport } from "@/components/trip/JsonImportExport";
-import { PrototypeDraftImport } from "@/components/trip/PrototypeDraftImport";
 import { AttachmentManager } from "@/components/trip/AttachmentManager";
 import { useTripDocument } from "@/components/providers/TripDocumentProvider";
 import { useI18n } from "@/components/providers/I18nProvider";
@@ -272,17 +270,6 @@ export function ManageTab() {
         attachments={doc.tripAttachments}
         uploadPathPrefix={`trips/${doc.id}/trip-attachments`}
         onChange={(tripAttachments) => persist({ ...doc, tripAttachments })}
-      />
-
-      <PrototypeDraftImport
-        trip={doc}
-        onApply={(next) => persist({ ...next, id: doc.id })}
-      />
-
-      <JsonImportExport
-        tripId={doc.id}
-        trip={doc}
-        onReplace={(next) => persist({ ...next, id: doc.id })}
       />
 
       {editing ? (
