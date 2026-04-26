@@ -19,12 +19,14 @@ import type { Trip, TripStep } from "@/lib/types/trip";
 import {
   cancelPendingTripSave,
   mergeTrip,
+  rememberTripWriter,
   rememberTripSnapshot,
   saveTrip,
   subscribeToTrip,
   updateTrip,
 } from "@/lib/trips";
 import { resolveAutoActiveStepId } from "@/lib/timeline/autoCurrentStep";
+import { defaultTrip } from "@/lib/tripDefaults";
 
 type TripDocumentContextValue = {
   tripId: string;
@@ -147,14 +149,6 @@ export function TripDocumentProvider({
         }
         const currentUser = authStatus.user;
         setUser(currentUser);
-        const email = currentUser.email?.trim();
-        const emailLower = normalizeEmail(email ?? "");
-        if (!email || !emailLower) {
-          setTrip(null);
-          setError("AUTH_EMAIL_REQUIRED");
-          setLoading(false);
-          return;
-        }
 
         const access = await ensureTripAccessForUser(tripId, currentUser);
         if (access.accessDenied || !access.member) {
@@ -164,7 +158,13 @@ export function TripDocumentProvider({
           setLoading(false);
           return;
         }
-        setMember(access.member);
+        const accessMember = access.member;
+        setMember(accessMember);
+        rememberTripWriter(tripId, {
+          uid: accessMember.uid,
+          email: accessMember.email,
+          emailLower: accessMember.emailLower,
+        });
 
         unsub = subscribeToTrip(tripId, (remote, err) => {
           if (err) {
@@ -174,7 +174,19 @@ export function TripDocumentProvider({
             return;
           }
           if (!remote) {
-            setTrip(null);
+            if (access.shouldBootstrapLocalTrip) {
+              const localBootstrap = {
+                ...defaultTrip(tripId),
+                ownerUid: currentUser.uid,
+                ownerEmail: accessMember.email,
+                ownerEmailLower: normalizeEmail(accessMember.email),
+              };
+              setTrip(localBootstrap);
+              rememberTripSnapshot(localBootstrap);
+              setError(null);
+            } else {
+              setTrip(null);
+            }
             setLoading(false);
             return;
           }
@@ -194,6 +206,7 @@ export function TripDocumentProvider({
     return () => {
       if (unsub) unsub();
       cancelPendingTripSave(tripId);
+      rememberTripWriter(tripId, null);
     };
   }, [tripId, authSessionNonce]);
 

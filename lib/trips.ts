@@ -12,9 +12,14 @@ import type { Trip } from "@/lib/types/trip";
 import { defaultTrip } from "@/lib/tripDefaults";
 
 const TRIPS = "trips";
+const MEMBERS = "members";
 
 const lastRemoteTrip = new Map<string, Trip>();
 const latestKnownTrip = new Map<string, Trip>();
+const tripWriters = new Map<
+  string,
+  { uid: string; email: string; emailLower: string } | null
+>();
 
 function tripDocRef(tripId: string) {
   const db = getDb();
@@ -238,7 +243,21 @@ async function flushTripWrite(tripId: string) {
   if (!trip) return;
   pendingTripWrites.delete(tripId);
   const ref = tripDocRef(tripId);
+  const writer = tripWriters.get(tripId);
   await setDoc(ref, tripToFirestorePayload(trip), { merge: true });
+  if (writer) {
+    await setDoc(
+      doc(ref.firestore, TRIPS, tripId, MEMBERS, writer.uid),
+      {
+        uid: writer.uid,
+        email: writer.email,
+        emailLower: writer.emailLower,
+        role: "member",
+        joinedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
 }
 
 /** Debounced full-document persist (optimistic UI should update before this). */
@@ -272,4 +291,11 @@ export function cancelPendingTripSave(tripId: string): void {
   if (t) clearTimeout(t);
   debounceTimers.delete(tripId);
   pendingTripWrites.delete(tripId);
+}
+
+export function rememberTripWriter(
+  tripId: string,
+  writer: { uid: string; email: string; emailLower: string } | null
+): void {
+  tripWriters.set(tripId, writer);
 }

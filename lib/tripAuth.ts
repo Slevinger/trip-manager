@@ -42,6 +42,31 @@ function clearOAuthReturnMarkers(tripId: string): void {
  */
 const restoreInflight = new Map<string, Promise<TripFirebaseAuthResult>>();
 
+function userHasEmail(user: User): boolean {
+  if (typeof user.email === "string" && user.email.trim() !== "") return true;
+  return user.providerData.some(
+    (p) => typeof p.email === "string" && p.email.trim() !== ""
+  );
+}
+
+function userHasGoogleProvider(user: User): boolean {
+  /** Primary federated id; set immediately after Google redirect even when `providerData` is still empty. */
+  if (user.providerId === "google.com") return true;
+  return user.providerData.some((p) => p.providerId === "google.com");
+}
+
+function isUsableTripUser(user: User): boolean {
+  return userHasGoogleProvider(user) && userHasEmail(user);
+}
+
+async function reloadUserOnce(user: User): Promise<void> {
+  try {
+    await user.reload();
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Wait until `onAuthStateChanged` reports a user or timeout (handles post-redirect races). */
 async function waitForUser(auth: Auth, maxMs: number): Promise<User | null> {
   if (auth.currentUser) return auth.currentUser;
@@ -81,9 +106,17 @@ async function runRestoreTripFirebaseSession(
   try {
     const redirect = await getRedirectResult(auth);
     if (redirect?.user) {
+      let u = redirect.user;
+      if (!isUsableTripUser(u)) {
+        await reloadUserOnce(u);
+        u = auth.currentUser ?? u;
+      }
+      if (!isUsableTripUser(u)) {
+        return { status: "needs_google_sign_in" };
+      }
       clearOAuthReturnMarkers(tripId);
       await ensureAuthPersistence();
-      return { status: "signed_in", user: redirect.user };
+      return { status: "signed_in", user: u };
     }
   } catch (error) {
     const code =
@@ -120,25 +153,41 @@ async function runRestoreTripFirebaseSession(
     expectOAuthReturn ? 12_000 : 800
   );
   if (userFromListener) {
+    let u = userFromListener;
+    if (!isUsableTripUser(u) && expectOAuthReturn) {
+      await reloadUserOnce(u);
+      u = auth.currentUser ?? u;
+    }
+    if (!isUsableTripUser(u)) {
+      return { status: "needs_google_sign_in" };
+    }
     clearOAuthReturnMarkers(tripId);
     return {
       status:
         process.env.NEXT_PUBLIC_FIREBASE_AUTH_MODE === "bypass"
           ? "skipped"
           : "signed_in",
-      user: userFromListener,
+      user: u,
     };
   }
 
   const current = auth.currentUser;
   if (current) {
+    let u = current;
+    if (!isUsableTripUser(u) && expectOAuthReturn) {
+      await reloadUserOnce(u);
+      u = auth.currentUser ?? u;
+    }
+    if (!isUsableTripUser(u)) {
+      return { status: "needs_google_sign_in" };
+    }
     clearOAuthReturnMarkers(tripId);
     return {
       status:
         process.env.NEXT_PUBLIC_FIREBASE_AUTH_MODE === "bypass"
           ? "skipped"
           : "signed_in",
-      user: current,
+      user: u,
     };
   }
 
@@ -175,9 +224,9 @@ export async function restoreTripFirebaseSession(
 
 function shouldUseGooglePopup(): boolean {
   if (typeof window === "undefined") return false;
+  if (process.env.NEXT_PUBLIC_FIREBASE_AUTH_USE_POPUP === "false") return false;
   if (process.env.NEXT_PUBLIC_FIREBASE_AUTH_USE_POPUP === "true") return true;
-  const h = window.location.hostname;
-  return h === "localhost" || h === "127.0.0.1";
+  return true;
 }
 
 function isPopupCancelledError(error: unknown): boolean {
@@ -209,14 +258,25 @@ export async function startGoogleSignInForTrip(
   if (shouldUseGooglePopup()) {
     try {
       await signInWithPopup(auth, getGoogleAuthProvider());
+      clearOAuthReturnMarkers(tripId);
+      return "popup";
     } catch (error) {
+      // Popup can fail in some browsers/environments; fall back to redirect.
       if (isPopupCancelledError(error)) {
         throw new Error("AUTH_POPUP_BLOCKED");
       }
-      throw error;
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: string }).code)
+          : "";
+      if (
+        code !== "auth/operation-not-supported-in-this-environment" &&
+        code !== "auth/popup-blocked" &&
+        code !== "auth/internal-error"
+      ) {
+        throw error;
+      }
     }
-    clearOAuthReturnMarkers(tripId);
-    return "popup";
   }
 
   let attempts = 0;

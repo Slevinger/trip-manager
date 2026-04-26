@@ -41,6 +41,41 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+async function resolveUserEmail(user: User): Promise<string | null> {
+  const direct = user.email?.trim();
+  if (direct) return direct;
+
+  const providerEmail = user.providerData
+    .map((p) => p.email?.trim())
+    .find((v): v is string => Boolean(v));
+  if (providerEmail) return providerEmail;
+
+  try {
+    await user.reload();
+  } catch {
+    /* ignore transient reload errors */
+  }
+
+  const afterReload = user.email?.trim();
+  if (afterReload) return afterReload;
+
+  const providerAfterReload = user.providerData
+    .map((p) => p.email?.trim())
+    .find((v): v is string => Boolean(v));
+  if (providerAfterReload) return providerAfterReload;
+
+  try {
+    const token = await user.getIdTokenResult();
+    const claimEmail =
+      typeof token.claims.email === "string" ? token.claims.email.trim() : "";
+    if (claimEmail) return claimEmail;
+  } catch {
+    /* ignore token-read errors */
+  }
+
+  return null;
+}
+
 function isPermissionDenied(error: unknown): boolean {
   const e = error as FirestoreError | undefined;
   return e?.code === "permission-denied";
@@ -157,8 +192,12 @@ export async function createTripInvite(
 export async function ensureTripAccessForUser(
   tripId: string,
   user: User
-): Promise<{ member: TripMember | null; accessDenied: boolean }> {
-  const email = user.email?.trim();
+): Promise<{
+  member: TripMember | null;
+  accessDenied: boolean;
+  shouldBootstrapLocalTrip?: boolean;
+}> {
+  const email = await resolveUserEmail(user);
   const emailLower = normalizeEmail(email ?? "");
   if (!email || !emailLower) {
     throw new Error("AUTH_EMAIL_REQUIRED");
@@ -213,39 +252,6 @@ export async function ensureTripAccessForUser(
   const tripRef = getTripRef(tripId);
   const tripSnap = await withAuthRetry(user, () => getDoc(tripRef));
   if (!tripSnap.exists()) {
-    await withAuthRetry(user, async () => {
-      await setDoc(
-        tripRef,
-        {
-          id: tripId,
-          title: "",
-          tripStart: "",
-          managePassword: "",
-          ownerUid: user.uid,
-          ownerEmail: email,
-          ownerEmailLower: emailLower,
-          accessMode: "invited_only",
-          tripAttachments: [],
-          smartTimeline: true,
-          autoCurrentByDate: true,
-          steps: [],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      await setDoc(
-        memberRef,
-        {
-          uid: user.uid,
-          email,
-          emailLower,
-          role: "member",
-          joinedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
     return {
       member: {
         uid: user.uid,
@@ -255,6 +261,7 @@ export async function ensureTripAccessForUser(
         joinedAt: new Date().toISOString(),
       },
       accessDenied: false,
+      shouldBootstrapLocalTrip: true,
     };
   }
 
