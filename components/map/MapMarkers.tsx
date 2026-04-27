@@ -3,7 +3,7 @@
 import { memo, useMemo } from "react";
 import { CircleMarker, Popup } from "react-leaflet";
 import type { MappedStep } from "@/lib/map/mapUtils";
-import { formatDateRange, statusColor } from "@/lib/map/mapUtils";
+import { formatStepDateRange, statusColor } from "@/lib/map/mapUtils";
 
 export const MapMarkers = memo(function MapMarkers({
   steps,
@@ -56,7 +56,7 @@ export const MapMarkers = memo(function MapMarkers({
                   {item.displayOrder}. {title}
                 </div>
                 <div>{location}</div>
-                <div>{formatDateRange(item.step.startDate, item.step.endDate)}</div>
+                <div>{formatStepDateRange(item.step)}</div>
                 <div>Transport: {item.step.transport.trim() || "\u2014"}</div>
                 <div>Hotels: {hotelsCount}</div>
                 <a

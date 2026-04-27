@@ -1,6 +1,10 @@
 import type { Trip } from "@/lib/types/trip";
-import { effectiveStepEnd, effectiveStepStart, collectHotelDateWarnings } from "@/lib/timeline/hotelsAndDates";
-import { parseYmd } from "@/lib/timeline/dates";
+import {
+  collectHotelDateWarnings,
+  effectiveStepEndParts,
+  effectiveStepStartParts,
+} from "@/lib/timeline/hotelsAndDates";
+import { instantFromParts } from "@/lib/timeline/dates";
 
 export type TimeIntelCode =
   | "missing_dates"
@@ -30,14 +34,14 @@ export function collectTimeIntelligenceWarnings(trip: Trip): TimeIntelWarning[] 
   const steps = [...trip.steps].sort((a, b) => a.order - b.order);
 
   for (const s of steps) {
-    const start = effectiveStepStart(s);
-    const end = effectiveStepEnd(s);
-    if (!start.trim() || !end.trim()) {
+    const start = effectiveStepStartParts(s);
+    const end = effectiveStepEndParts(s);
+    if (!start.date.trim() || !end.date.trim()) {
       out.push({ code: "missing_dates", stepId: s.id });
     } else {
-      const ds = parseYmd(start);
-      const de = parseYmd(end);
-      if (ds && de && de < ds) {
+      const ds = instantFromParts(start);
+      const de = instantFromParts(end);
+      if (ds && de && de.getTime() < ds.getTime()) {
         out.push({ code: "end_before_start", stepId: s.id });
       }
     }
@@ -59,10 +63,10 @@ export function collectTimeIntelligenceWarnings(trip: Trip): TimeIntelWarning[] 
   for (let i = 0; i < steps.length - 1; i++) {
     const a = steps[i];
     const b = steps[i + 1];
-    const aEnd = effectiveStepEnd(a);
-    const bStart = effectiveStepStart(b);
-    const da = aEnd ? parseYmd(aEnd) : null;
-    const db = bStart ? parseYmd(bStart) : null;
+    const aEnd = effectiveStepEndParts(a);
+    const bStart = effectiveStepStartParts(b);
+    const da = aEnd.date ? instantFromParts(aEnd) : null;
+    const db = bStart.date ? instantFromParts(bStart) : null;
     if (da && db) {
       const gapDays = Math.round((db.getTime() - da.getTime()) / 86400000);
       if (gapDays < 0) {

@@ -2,6 +2,8 @@
 
 import { v4 as uuidv4 } from "uuid";
 import type { Hotel } from "@/lib/types/trip";
+import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
+import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
 import { useI18n } from "@/components/providers/I18nProvider";
 
 export function HotelsEditor({
@@ -28,8 +30,10 @@ export function HotelsEditor({
       {
         id: uuidv4(),
         name: "",
-        checkin: "",
-        checkout: "",
+        checkinDate: "",
+        checkinTime: "",
+        checkoutDate: "",
+        checkoutTime: "",
         bookingUrl: "",
         cost: 0,
         notes: "",
@@ -69,33 +73,31 @@ export function HotelsEditor({
                 </label>
                 <label className="block text-xs text-zinc-600 dark:text-zinc-300">
                   <span>{t("hotels.cost")}</span>
-                  <input
-                    type="number"
+                  <GroupedNumberInput
+                    min={0}
                     className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                     value={Number.isFinite(h.cost) ? h.cost : 0}
-                    onChange={(e) =>
-                      updateAt(idx, { cost: Number(e.target.value || 0) })
-                    }
+                    onChange={(n) => updateAt(idx, { cost: n })}
                   />
                 </label>
                 <label className="block text-xs text-zinc-600 dark:text-zinc-300">
                   <span>{t("hotels.checkin")}</span>
-                  <input
-                    type="date"
+                  <TripDateTimeInput
                     className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                    value={h.checkin}
-                    onChange={(e) => updateAt(idx, { checkin: e.target.value })}
+                    date={h.checkinDate}
+                    time={h.checkinTime}
+                    onDateChange={(checkinDate) => updateAt(idx, { checkinDate })}
+                    onTimeChange={(checkinTime) => updateAt(idx, { checkinTime })}
                   />
                 </label>
                 <label className="block text-xs text-zinc-600 dark:text-zinc-300">
                   <span>{t("hotels.checkout")}</span>
-                  <input
-                    type="date"
+                  <TripDateTimeInput
                     className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                    value={h.checkout}
-                    onChange={(e) =>
-                      updateAt(idx, { checkout: e.target.value })
-                    }
+                    date={h.checkoutDate}
+                    time={h.checkoutTime}
+                    onDateChange={(checkoutDate) => updateAt(idx, { checkoutDate })}
+                    onTimeChange={(checkoutTime) => updateAt(idx, { checkoutTime })}
                   />
                 </label>
                 <label className="col-span-1 block text-xs text-zinc-600 dark:text-zinc-300 sm:col-span-2">

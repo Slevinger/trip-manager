@@ -6,9 +6,10 @@ import { coordsForLocation } from "@/lib/locationCoords";
 import { useI18n } from "@/components/providers/I18nProvider";
 import {
   computeNightsForStep,
-  effectiveStepEnd,
-  effectiveStepStart,
+  effectiveStepEndParts,
+  effectiveStepStartParts,
 } from "@/lib/timeline/hotelsAndDates";
+import { formatStepDateRange } from "@/lib/map/mapUtils";
 import "leaflet/dist/leaflet.css";
 
 export function TripLeafletMap({ trip }: { trip: Trip }) {
@@ -95,8 +96,8 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
         const ll = coordsForLocation(s.location);
         if (!ll) continue;
         const markerBadge = formatMarkerBadge(
-          effectiveStepStart(s),
-          effectiveStepEnd(s),
+          effectiveStepStartParts(s),
+          effectiveStepEndParts(s),
           computeNightsForStep(s),
           s.location,
           s.status
@@ -128,9 +129,7 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
               `<div class="trip-step-popup">`,
               `<div><b>${idx + 1}. ${escapeHtml(s.title.trim() || "Untitled step")}</b></div>`,
               `<div>${escapeHtml(s.location.trim() || "—")}</div>`,
-              `<div>${escapeHtml(
-                formatDateRange(effectiveStepStart(s), effectiveStepEnd(s))
-              )}</div>`,
+              `<div>${escapeHtml(formatStepDateRange(s))}</div>`,
               `<div>Transport: ${escapeHtml(s.transport.trim() || "—")}</div>`,
               `<div>Hotels: ${s.hotels.length}</div>`,
               `</div>`,
@@ -217,34 +216,25 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function formatDateRange(startDate: string, endDate: string): string {
-  const start = startDate.trim();
-  const end = endDate.trim();
-  if (!start && !end) return "—";
-  if (!start) return `— → ${end}`;
-  if (!end) return `${start} → —`;
-  return `${start} → ${end}`;
-}
-
 function formatMarkerBadge(
-  startDate: string,
-  endDate: string,
+  stepStart: { date: string; time: string },
+  stepEnd: { date: string; time: string },
   nights: number,
   location: string,
   status: Trip["steps"][number]["status"]
 ): string | null {
-  const start = parseYmdDate(startDate);
-  const end = parseYmdDate(endDate) ?? deriveEndDate(start, nights);
+  const start = parseDdMmYyyyUtc(stepStart.date);
+  const end = parseDdMmYyyyUtc(stepEnd.date) ?? deriveEndDate(start, nights);
   if (!start || !end) return null;
   const locationLabel = compactLocationLabel(location);
 
-  const startParts = partsFromDate(start);
-  const endParts = partsFromDate(end);
+  const startBadge = partsFromDate(start);
+  const endBadge = partsFromDate(end);
   let dateLabel = "";
-  if (startParts.month === endParts.month) {
-    dateLabel = `${pad2(startParts.day)}-${pad2(endParts.day)} ${startParts.month}`;
+  if (startBadge.month === endBadge.month) {
+    dateLabel = `${pad2(startBadge.day)}-${pad2(endBadge.day)} ${startBadge.month}`;
   } else {
-    dateLabel = `${pad2(startParts.day)} ${startParts.month} - ${pad2(endParts.day)} ${endParts.month}`;
+    dateLabel = `${pad2(startBadge.day)} ${startBadge.month} - ${pad2(endBadge.day)} ${endBadge.month}`;
   }
 
   const safeDate = escapeHtml(dateLabel);
@@ -265,13 +255,13 @@ function formatMarkerBadge(
   ].join("");
 }
 
-function parseYmdDate(value: string): Date | null {
+function parseDdMmYyyyUtc(value: string): Date | null {
   const v = value.trim();
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(v);
   if (!m) return null;
-  const year = Number(m[1]);
+  const day = Number(m[1]);
   const month = Number(m[2]) - 1;
-  const day = Number(m[3]);
+  const year = Number(m[3]);
   const d = new Date(Date.UTC(year, month, day));
   if (Number.isNaN(d.getTime())) return null;
   if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month || d.getUTCDate() !== day) {

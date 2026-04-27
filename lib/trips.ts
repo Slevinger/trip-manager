@@ -10,6 +10,10 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Trip } from "@/lib/types/trip";
 import { defaultTrip } from "@/lib/tripDefaults";
+import {
+  migrateLegacyCombined,
+  splitStoredDateAndTime,
+} from "@/lib/timeline/dates";
 
 const TRIPS = "trips";
 const MEMBERS = "members";
@@ -38,9 +42,36 @@ function tsToIso(v: unknown): string {
   return new Date().toISOString();
 }
 
+function normalizeHotel(raw: unknown): Trip["steps"][number]["hotels"][number] {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const ciD = String(r.checkinDate ?? "").trim();
+  const ciT = String(r.checkinTime ?? "").trim();
+  const coD = String(r.checkoutDate ?? "").trim();
+  const coT = String(r.checkoutTime ?? "").trim();
+  const ciL = String(r.checkin ?? "").trim();
+  const coL = String(r.checkout ?? "").trim();
+  const checkin =
+    ciD || ciT ? splitStoredDateAndTime(ciD || ciL, ciT) : migrateLegacyCombined(ciL);
+  const checkout =
+    coD || coT ? splitStoredDateAndTime(coD || coL, coT) : migrateLegacyCombined(coL);
+  return {
+    id: String(r.id ?? ""),
+    name: String(r.name ?? ""),
+    checkinDate: checkin.date,
+    checkinTime: checkin.time,
+    checkoutDate: checkout.date,
+    checkoutTime: checkout.time,
+    bookingUrl: String(r.bookingUrl ?? ""),
+    cost: Number(r.cost ?? 0) || 0,
+    notes: String(r.notes ?? ""),
+  };
+}
+
 function normalizeStep(raw: unknown): Trip["steps"][number] {
   const s = (raw ?? {}) as Record<string, unknown>;
   const coordinates = normalizeCoordinates(s.coordinates, s.lat, s.lng);
+  const start = splitStoredDateAndTime(s.startDate, s.startTime);
+  const end = splitStoredDateAndTime(s.endDate, s.endTime);
   return {
     id: String(s.id ?? ""),
     order: Number(s.order ?? 0),
@@ -50,8 +81,10 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
       s.status === "todo" || s.status === "active" || s.status === "done"
         ? s.status
         : "todo",
-    startDate: String(s.startDate ?? ""),
-    endDate: String(s.endDate ?? ""),
+    startDate: start.date,
+    startTime: start.time,
+    endDate: end.date,
+    endTime: end.time,
     endDateOpen: Boolean(s.endDateOpen ?? true),
     nights: Number(s.nights ?? 0),
     duration: String(s.duration ?? ""),
@@ -60,7 +93,7 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     arrivalOptions: Array.isArray(s.arrivalOptions)
       ? (s.arrivalOptions as Trip["steps"][number]["arrivalOptions"])
       : [],
-    hotels: Array.isArray(s.hotels) ? (s.hotels as Trip["steps"][number]["hotels"]) : [],
+    hotels: Array.isArray(s.hotels) ? s.hotels.map((h) => normalizeHotel(h)) : [],
     transportCost: Number(s.transportCost ?? 0),
     foodCost: Number(s.foodCost ?? 0),
     activitiesCost: Number(s.activitiesCost ?? 0),
@@ -133,12 +166,18 @@ export function normalizeTripFromFirestore(
   const base = defaultTrip(tripId);
   if (!data) return base;
   const stepsRaw = Array.isArray(data.steps) ? data.steps : [];
+  const tsd = String(data.tripStartDate ?? "").trim();
+  const tst = String(data.tripStartTime ?? "").trim();
+  const leg = String(data.tripStart ?? "").trim();
+  const tripTimes =
+    tsd || tst ? splitStoredDateAndTime(tsd || leg, tst) : migrateLegacyCombined(leg);
   return {
     ...base,
-    ...data,
     id: (data.id as string) || tripId,
     title: String(data.title ?? ""),
-    tripStart: String(data.tripStart ?? ""),
+    tripStartDate: tripTimes.date,
+    tripStartTime: tripTimes.time,
+    budget: Number(data.budget ?? 0) || 0,
     managePassword: String(data.managePassword ?? ""),
     ownerUid: String(data.ownerUid ?? ""),
     ownerEmail: String(data.ownerEmail ?? ""),
@@ -157,7 +196,9 @@ export function tripToFirestorePayload(trip: Trip): Record<string, unknown> {
   return {
     id: trip.id,
     title: trip.title,
-    tripStart: trip.tripStart,
+    tripStartDate: trip.tripStartDate,
+    tripStartTime: trip.tripStartTime,
+    budget: trip.budget,
     managePassword: trip.managePassword,
     ownerUid: trip.ownerUid,
     ownerEmail: trip.ownerEmail,

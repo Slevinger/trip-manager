@@ -4,12 +4,12 @@ import { useMemo } from "react";
 import type { Trip } from "@/lib/types/trip";
 import {
   computeNightsForStep,
-  effectiveStepEnd,
-  effectiveStepStart,
+  effectiveStepEndParts,
+  effectiveStepStartParts,
 } from "@/lib/timeline/hotelsAndDates";
-import { parseYmd } from "@/lib/timeline/dates";
+import { instantFromParts } from "@/lib/timeline/dates";
 import { useI18n } from "@/components/providers/I18nProvider";
-import { formatYmdForLocale } from "@/lib/i18n/format";
+import { formatTripDateTimeForLocale } from "@/lib/i18n/format";
 
 export function Timeline({
   trip,
@@ -23,8 +23,12 @@ export function Timeline({
     const list = [...trip.steps];
     if (trip.smartTimeline) {
       return list.sort((a, b) => {
-        const as = parseYmd(effectiveStepStart(a))?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        const bs = parseYmd(effectiveStepStart(b))?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const as =
+          instantFromParts(effectiveStepStartParts(a))?.getTime() ??
+          Number.MAX_SAFE_INTEGER;
+        const bs =
+          instantFromParts(effectiveStepStartParts(b))?.getTime() ??
+          Number.MAX_SAFE_INTEGER;
         if (as !== bs) return as - bs;
         return a.order - b.order;
       });
@@ -39,8 +43,8 @@ export function Timeline({
       </h2>
       <ol className="mt-4 space-y-3">
         {steps.map((s, idx) => {
-          const start = effectiveStepStart(s);
-          const end = effectiveStepEnd(s);
+          const start = effectiveStepStartParts(s);
+          const end = effectiveStepEndParts(s);
           const nights = computeNightsForStep(s);
           return (
             <li
@@ -82,11 +86,11 @@ export function Timeline({
               </div>
               <div className="mt-2 grid gap-1 text-xs text-zinc-600 dark:text-zinc-300">
                 <div>
-                  {start
-                    ? formatYmdForLocale(locale, start)
+                  {start.date
+                    ? formatTripDateTimeForLocale(locale, start.date, start.time)
                     : "—"}{" "}
                   →{" "}
-                  {end ? formatYmdForLocale(locale, end) : "—"}
+                  {end.date ? formatTripDateTimeForLocale(locale, end.date, end.time) : "—"}
                 </div>
                 <div>
                   {t("step.nights")}: {nights}

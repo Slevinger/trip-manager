@@ -21,8 +21,12 @@ export interface ArrivalOption {
 export interface Hotel {
   id: string;
   name: string;
-  checkin: string;
-  checkout: string;
+  /** Calendar day `dd-mm-yyyy`. */
+  checkinDate: string;
+  /** Clock time `HH:mm` (empty = no time). */
+  checkinTime: string;
+  checkoutDate: string;
+  checkoutTime: string;
   bookingUrl: string;
   cost: number;
   notes: string;
@@ -34,8 +38,12 @@ export interface TripStep {
   title: string;
   location: string;
   status: StepStatus;
+  /** `dd-mm-yyyy` */
   startDate: string;
+  /** `HH:mm` or empty */
+  startTime: string;
   endDate: string;
+  endTime: string;
   endDateOpen: boolean;
   nights: number;
   duration: string;
@@ -61,7 +69,12 @@ export interface TripStep {
 export interface Trip {
   id: string;
   title: string;
-  tripStart: string;
+  /** Trip first day `dd-mm-yyyy`. */
+  tripStartDate: string;
+  /** `HH:mm` or empty */
+  tripStartTime: string;
+  /** Planned budget in the app display currency. 0 means unset. */
+  budget: number;
   managePassword: string;
   ownerUid: string;
   ownerEmail: string;

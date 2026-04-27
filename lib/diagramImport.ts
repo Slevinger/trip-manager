@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Hotel, StepStatus, TripStep } from "@/lib/types/trip";
+import { migrateLegacyCombined } from "@/lib/timeline/dates";
 
 function optNum(v: unknown): number | undefined {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -15,21 +16,31 @@ function normStatus(v: unknown): StepStatus {
   return "todo";
 }
 
+function hotelFromLegacyCheckinCheckout(checkinRaw: string, checkoutRaw: string): Hotel {
+  const ci = migrateLegacyCombined(checkinRaw);
+  const co = migrateLegacyCombined(checkoutRaw);
+  return {
+    id: uuidv4(),
+    name: "",
+    checkinDate: ci.date,
+    checkinTime: ci.time,
+    checkoutDate: co.date,
+    checkoutTime: co.time,
+    bookingUrl: "",
+    cost: 0,
+    notes: "",
+  };
+}
+
 function hotelsFromDiagram(o: Record<string, unknown>): Hotel[] {
   if (o.hasHotel !== true && o.hasHotel !== "true") return [];
   const name = String(o.hotelName ?? "").trim();
   if (!name) return [];
-  return [
-    {
-      id: uuidv4(),
-      name,
-      checkin: String(o.checkin ?? ""),
-      checkout: String(o.checkout ?? ""),
-      bookingUrl: String(o.bookingUrl ?? ""),
-      cost: 0,
-      notes: "",
-    },
-  ];
+  const h = hotelFromLegacyCheckinCheckout(
+    String(o.checkin ?? ""),
+    String(o.checkout ?? "")
+  );
+  return [{ ...h, name }];
 }
 
 /**
@@ -51,14 +62,18 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
         : uuidv4();
     const mx = optNum(o.mapX ?? o.x);
     const my = optNum(o.mapY ?? o.y);
+    const start = migrateLegacyCombined(String(o.startDate ?? o.checkin ?? ""));
+    const end = migrateLegacyCombined(String(o.endDate ?? o.checkout ?? ""));
     const step: TripStep = {
       id,
       order: index,
       title: String(o.title ?? ""),
       location: String(o.location ?? ""),
       status: normStatus(o.status),
-      startDate: String(o.startDate ?? o.checkin ?? ""),
-      endDate: String(o.endDate ?? o.checkout ?? ""),
+      startDate: start.date,
+      startTime: start.time,
+      endDate: end.date,
+      endTime: end.time,
       endDateOpen: true,
       nights: Number(o.nights ?? 0) || 0,
       duration: String(o.duration ?? ""),
@@ -72,14 +87,18 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
               string,
               unknown
             >;
+            const ci = migrateLegacyCombined(String(r.checkin ?? ""));
+            const co = migrateLegacyCombined(String(r.checkout ?? ""));
             return {
               id:
                 typeof r.id === "string" && r.id
                   ? String(r.id)
                   : uuidv4(),
               name: String(r.name ?? ""),
-              checkin: String(r.checkin ?? ""),
-              checkout: String(r.checkout ?? ""),
+              checkinDate: ci.date,
+              checkinTime: ci.time,
+              checkoutDate: co.date,
+              checkoutTime: co.time,
               bookingUrl: String(r.bookingUrl ?? ""),
               cost: Number(r.cost ?? 0) || 0,
               notes: String(r.notes ?? ""),

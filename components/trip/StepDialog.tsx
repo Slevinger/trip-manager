@@ -3,9 +3,11 @@
 import { useMemo, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { ArrivalOption, TripStep } from "@/lib/types/trip";
+import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
 import { HotelsEditor } from "@/components/trip/HotelsEditor";
 import { AttachmentManager } from "@/components/trip/AttachmentManager";
 import { useI18n } from "@/components/providers/I18nProvider";
+import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
 import {
   applyOpenEndDateFromHotels,
   computeNightsForStep,
@@ -91,23 +93,23 @@ export function StepDialog({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block text-xs text-zinc-600 dark:text-zinc-300">
               <span>{t("step.startDate")}</span>
-              <input
-                type="date"
+              <TripDateTimeInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                value={draft.startDate}
-                onChange={(e) =>
-                  setDraft({ ...draft, startDate: e.target.value })
-                }
+                date={draft.startDate}
+                time={draft.startTime}
+                onDateChange={(startDate) => setDraft({ ...draft, startDate })}
+                onTimeChange={(startTime) => setDraft({ ...draft, startTime })}
               />
             </label>
             <label className="block text-xs text-zinc-600 dark:text-zinc-300">
               <span>{t("step.endDate")}</span>
-              <input
-                type="date"
+              <TripDateTimeInput
                 disabled={draft.endDateOpen}
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900"
-                value={draft.endDate}
-                onChange={(e) => setDraft({ ...draft, endDate: e.target.value })}
+                date={draft.endDate}
+                time={draft.endTime}
+                onDateChange={(endDate) => setDraft({ ...draft, endDate })}
+                onTimeChange={(endTime) => setDraft({ ...draft, endTime })}
               />
             </label>
           </div>
@@ -244,14 +246,14 @@ export function StepDialog({
             ).map(([field, val]) => (
               <label key={field} className="block text-xs text-zinc-600 dark:text-zinc-300">
                 <span>{t(`step.${field}`)}</span>
-                <input
-                  type="number"
+                <GroupedNumberInput
+                  min={0}
                   className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-2 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                   value={val}
-                  onChange={(e) =>
+                  onChange={(n) =>
                     setDraft({
                       ...draft,
-                      [field]: Number(e.target.value || 0),
+                      [field]: n,
                     })
                   }
                 />

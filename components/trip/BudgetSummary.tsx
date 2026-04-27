@@ -8,6 +8,8 @@ import { useI18n } from "@/components/providers/I18nProvider";
 export function BudgetSummary({ trip }: { trip: Trip }) {
   const { t, formatMoney } = useI18n();
   const totals = useMemo(() => computeBudgetTotals(trip), [trip]);
+  const planned = trip.budget > 0 ? trip.budget : 0;
+  const difference = planned > 0 ? planned - totals.total : 0;
 
   const fmt = (n: number) => formatMoney(n);
 
@@ -39,6 +41,28 @@ export function BudgetSummary({ trip }: { trip: Trip }) {
           <span>{t("budget.total")}</span>
           <span className="tabular-nums">{fmt(totals.total)}</span>
         </div>
+        {planned > 0 ? (
+          <>
+            <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+              <dt className="text-zinc-600 dark:text-zinc-300">
+                {t("budget.planned")}
+              </dt>
+              <dd className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+                {fmt(planned)}
+              </dd>
+            </div>
+            <div
+              className={`mt-2 flex items-center justify-between gap-3 text-sm font-medium ${
+                difference >= 0
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : "text-rose-700 dark:text-rose-400"
+              }`}
+            >
+              <span>{t("budget.difference")}</span>
+              <span className="tabular-nums">{fmt(difference)}</span>
+            </div>
+          </>
+        ) : null}
       </dl>
     </section>
   );

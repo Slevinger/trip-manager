@@ -18,6 +18,8 @@ import {
   type TripMember,
 } from "@/lib/tripAccess";
 import { createEmptyStep } from "@/lib/tripDefaults";
+import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
+import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
 
 export function ManageTab() {
   const { trip, persist, user } = useTripDocument();
@@ -144,13 +146,26 @@ export function ManageTab() {
         </label>
         <label className="mt-4 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
           {t("manage.tripStart")}
-          <input
-            type="date"
+          <TripDateTimeInput
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-            value={doc.tripStart}
-            onChange={(e) => persist({ ...doc, tripStart: e.target.value })}
+            date={doc.tripStartDate}
+            time={doc.tripStartTime}
+            onDateChange={(tripStartDate) => persist({ ...doc, tripStartDate })}
+            onTimeChange={(tripStartTime) => persist({ ...doc, tripStartTime })}
           />
         </label>
+        <label className="mt-4 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
+          {t("manage.tripBudget")}
+          <GroupedNumberInput
+            allowEmptyZero
+            min={0}
+            placeholder={t("common.optional")}
+            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+            value={doc.budget}
+            onChange={(n) => persist({ ...doc, budget: n })}
+          />
+        </label>
+        <p className="mt-1 text-xs text-zinc-500">{t("manage.tripBudgetHint")}</p>
         <label className="mt-4 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
           Manage tab password
           <input

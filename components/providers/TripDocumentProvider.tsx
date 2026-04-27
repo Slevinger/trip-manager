@@ -228,7 +228,7 @@ export function TripDocumentProvider({
     const id = window.setInterval(tick, 60_000);
     tick();
     return () => window.clearInterval(id);
-  }, [trip?.autoCurrentByDate, trip?.steps, trip?.tripStart]);
+  }, [trip?.autoCurrentByDate, trip?.steps, trip?.tripStartDate, trip?.tripStartTime]);
 
   const value = useMemo(
     () => ({

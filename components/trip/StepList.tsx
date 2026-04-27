@@ -4,11 +4,11 @@ import { useMemo } from "react";
 import type { Trip, TripStep } from "@/lib/types/trip";
 import {
   computeNightsForStep,
-  effectiveStepEnd,
-  effectiveStepStart,
+  effectiveStepEndParts,
+  effectiveStepStartParts,
 } from "@/lib/timeline/hotelsAndDates";
 import { useI18n } from "@/components/providers/I18nProvider";
-import { formatYmdForLocale } from "@/lib/i18n/format";
+import { formatTripDateTimeForLocale } from "@/lib/i18n/format";
 
 export function StepList({
   trip,
@@ -30,8 +30,8 @@ export function StepList({
   return (
     <div className="space-y-3">
       {steps.map((s, idx) => {
-        const start = effectiveStepStart(s);
-        const end = effectiveStepEnd(s);
+        const start = effectiveStepStartParts(s);
+        const end = effectiveStepEndParts(s);
         const nights = computeNightsForStep(s);
         return (
           <div
@@ -44,11 +44,11 @@ export function StepList({
                   {idx + 1}. {s.title.trim() || t("step.title")}
                 </div>
                 <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                  {start
-                    ? formatYmdForLocale(locale, start)
+                  {start.date
+                    ? formatTripDateTimeForLocale(locale, start.date, start.time)
                     : "—"}{" "}
                   →{" "}
-                  {end ? formatYmdForLocale(locale, end) : "—"} ·{" "}
+                  {end.date ? formatTripDateTimeForLocale(locale, end.date, end.time) : "—"} ·{" "}
                   {t("step.nights")}: {nights}
                 </div>
                 {s.location.trim() ? (

@@ -10,10 +10,10 @@ import { useTripDocument } from "@/components/providers/TripDocumentProvider";
 import { useI18n } from "@/components/providers/I18nProvider";
 import {
   computeNightsForStep,
-  effectiveStepEnd,
-  effectiveStepStart,
+  effectiveStepEndParts,
+  effectiveStepStartParts,
 } from "@/lib/timeline/hotelsAndDates";
-import { formatYmdForLocale } from "@/lib/i18n/format";
+import { formatTripDateTimeForLocale } from "@/lib/i18n/format";
 import type { Trip } from "@/lib/types/trip";
 
 function pickCurrentStep(trip: Trip) {
@@ -28,6 +28,9 @@ export function ViewTab() {
   const current = useMemo(() => (trip ? pickCurrentStep(trip) : null), [trip]);
 
   if (!trip) return null;
+
+  const startParts = current ? effectiveStepStartParts(current) : null;
+  const endParts = current ? effectiveStepEndParts(current) : null;
 
   return (
     <div className="space-y-6">
@@ -50,12 +53,12 @@ export function ViewTab() {
               </div>
             ) : null}
             <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-              {effectiveStepStart(current)
-                ? formatYmdForLocale(locale, effectiveStepStart(current))
+              {startParts?.date
+                ? formatTripDateTimeForLocale(locale, startParts.date, startParts.time)
                 : "—"}{" "}
               →{" "}
-              {effectiveStepEnd(current)
-                ? formatYmdForLocale(locale, effectiveStepEnd(current))
+              {endParts?.date
+                ? formatTripDateTimeForLocale(locale, endParts.date, endParts.time)
                 : "—"}
             </div>
             <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">

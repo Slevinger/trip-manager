@@ -1,5 +1,12 @@
 import type { Hotel, TripStep } from "@/lib/types/trip";
-import { diffNightsInclusive, maxYmd, minYmd, parseYmd } from "@/lib/timeline/dates";
+import {
+  diffNightsInclusive,
+  instantFromParts,
+  maxTripDateTime,
+  minTripDateTime,
+  parseDdMmYyyyCalendarDate,
+  type TripDateTimeParts,
+} from "@/lib/timeline/dates";
 
 export type HotelDateWarningCode =
   | "no_hotels_but_nights"
@@ -15,47 +22,61 @@ export interface HotelDateWarning {
   hotelId?: string;
 }
 
-function earliestHotelCheckin(hotels: Hotel[]): string {
-  const dates = hotels.map((h) => h.checkin).filter(Boolean);
-  if (!dates.length) return "";
-  return dates.reduce((acc, cur) => (acc ? minYmd(acc, cur) : cur));
+function hotelCheckinParts(h: Hotel): TripDateTimeParts {
+  return { date: h.checkinDate.trim(), time: h.checkinTime.trim() };
 }
 
-function latestHotelCheckout(hotels: Hotel[]): string {
-  const dates = hotels.map((h) => h.checkout).filter(Boolean);
-  if (!dates.length) return "";
-  return dates.reduce((acc, cur) => (acc ? maxYmd(acc, cur) : cur));
+function hotelCheckoutParts(h: Hotel): TripDateTimeParts {
+  return { date: h.checkoutDate.trim(), time: h.checkoutTime.trim() };
 }
 
-export function effectiveStepStart(step: TripStep): string {
-  if (step.startDate.trim()) return step.startDate.trim();
-  return earliestHotelCheckin(step.hotels);
+function earliestHotelCheckin(hotels: Hotel[]): TripDateTimeParts | null {
+  const parts = hotels
+    .map((h) => hotelCheckinParts(h))
+    .filter((p) => p.date);
+  if (!parts.length) return null;
+  return parts.reduce((acc, cur) => minTripDateTime(acc, cur));
 }
 
-export function effectiveStepEnd(step: TripStep): string {
+function latestHotelCheckout(hotels: Hotel[]): TripDateTimeParts | null {
+  const parts = hotels
+    .map((h) => hotelCheckoutParts(h))
+    .filter((p) => p.date);
+  if (!parts.length) return null;
+  return parts.reduce((acc, cur) => maxTripDateTime(acc, cur));
+}
+
+export function effectiveStepStartParts(step: TripStep): TripDateTimeParts {
+  if (step.startDate.trim()) {
+    return { date: step.startDate.trim(), time: step.startTime.trim() };
+  }
+  return earliestHotelCheckin(step.hotels) ?? { date: "", time: "" };
+}
+
+export function effectiveStepEndParts(step: TripStep): TripDateTimeParts {
   if (step.endDateOpen) {
     const fromHotels = latestHotelCheckout(step.hotels);
-    if (fromHotels) return fromHotels;
+    if (fromHotels?.date) return fromHotels;
   }
-  return step.endDate.trim();
+  return { date: step.endDate.trim(), time: step.endTime.trim() };
 }
 
-/** Recompute nights from effective start/end (inclusive nights between dates). */
+/** Recompute nights from effective start/end (inclusive nights between calendar days). */
 export function computeNightsForStep(step: TripStep): number {
-  const start = effectiveStepStart(step);
-  const end = effectiveStepEnd(step);
-  const ds = parseYmd(start);
-  const de = parseYmd(end);
+  const start = effectiveStepStartParts(step);
+  const end = effectiveStepEndParts(step);
+  const ds = parseDdMmYyyyCalendarDate(start.date);
+  const de = parseDdMmYyyyCalendarDate(end.date);
   if (!ds || !de) return 0;
   return diffNightsInclusive(ds, de);
 }
 
-/** When endDateOpen and hotel checkout changes, endDate should follow latest checkout. */
+/** When endDateOpen and hotel checkout changes, end should follow latest checkout. */
 export function applyOpenEndDateFromHotels(step: TripStep): TripStep {
   if (!step.endDateOpen) return step;
   const latest = latestHotelCheckout(step.hotels);
-  if (!latest) return { ...step, endDate: "" };
-  return { ...step, endDate: latest };
+  if (!latest?.date) return { ...step, endDate: "", endTime: "" };
+  return { ...step, endDate: latest.date, endTime: latest.time };
 }
 
 /** Persisted step fields aligned with hotel timeline rules. */
@@ -69,8 +90,8 @@ export function syncStepWithHotels(step: TripStep): TripStep {
 
 export function collectHotelDateWarnings(step: TripStep): HotelDateWarning[] {
   const warnings: HotelDateWarning[] = [];
-  const effStart = effectiveStepStart(step);
-  const effEnd = effectiveStepEnd(step);
+  const effStart = effectiveStepStartParts(step);
+  const effEnd = effectiveStepEndParts(step);
   const nights = computeNightsForStep(step);
 
   if (step.hotels.length === 0 && nights > 0) {
@@ -78,15 +99,15 @@ export function collectHotelDateWarnings(step: TripStep): HotelDateWarning[] {
   }
 
   for (const h of step.hotels) {
-    if (!h.checkin.trim()) {
+    if (!h.checkinDate.trim()) {
       warnings.push({ code: "missing_checkin", stepId: step.id, hotelId: h.id });
     }
-    if (!h.checkout.trim()) {
+    if (!h.checkoutDate.trim()) {
       warnings.push({ code: "missing_checkout", stepId: step.id, hotelId: h.id });
     }
-    const ci = parseYmd(h.checkin);
-    const co = parseYmd(h.checkout);
-    if (ci && co && co <= ci) {
+    const ci = instantFromParts(hotelCheckinParts(h));
+    const co = instantFromParts(hotelCheckoutParts(h));
+    if (ci && co && co.getTime() <= ci.getTime()) {
       warnings.push({ code: "checkout_before_checkin", stepId: step.id, hotelId: h.id });
     }
   }
@@ -95,18 +116,19 @@ export function collectHotelDateWarnings(step: TripStep): HotelDateWarning[] {
 
   const firstCi = earliestHotelCheckin(step.hotels);
   const lastCo = latestHotelCheckout(step.hotels);
-  if (effStart && firstCi && parseYmd(firstCi)! < parseYmd(effStart)!) {
+  const effStartD = parseDdMmYyyyCalendarDate(effStart.date);
+  const effEndD = parseDdMmYyyyCalendarDate(effEnd.date);
+  const firstCiD = firstCi ? parseDdMmYyyyCalendarDate(firstCi.date) : null;
+  const lastCoD = lastCo ? parseDdMmYyyyCalendarDate(lastCo.date) : null;
+
+  if (effStartD && firstCiD && firstCiD < effStartD) {
     warnings.push({ code: "hotels_exceed_range", stepId: step.id });
   }
-  if (effEnd && lastCo && parseYmd(lastCo)! > parseYmd(effEnd)!) {
+  if (effEndD && lastCoD && lastCoD > effEndD) {
     warnings.push({ code: "hotels_exceed_range", stepId: step.id });
   }
-  if (effStart && effEnd && firstCi && lastCo) {
-    const ps = parseYmd(effStart)!;
-    const pe = parseYmd(effEnd)!;
-    const hs = parseYmd(firstCi)!;
-    const he = parseYmd(lastCo)!;
-    if (hs > ps || he < pe) {
+  if (effStartD && effEndD && firstCiD && lastCoD) {
+    if (firstCiD > effStartD || lastCoD < effEndD) {
       warnings.push({ code: "hotels_not_covering", stepId: step.id });
     }
   }

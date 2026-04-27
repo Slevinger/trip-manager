@@ -1,4 +1,8 @@
 import type { StepStatus, TripStep } from "@/lib/types/trip";
+import {
+  effectiveStepEndParts,
+  effectiveStepStartParts,
+} from "@/lib/timeline/hotelsAndDates";
 import { resolveLocationCoordinates } from "@/lib/map/locationResolver";
 
 export interface MappedStep {
@@ -70,11 +74,17 @@ export function statusColor(status: StepStatus): string {
   return "#6b7280";
 }
 
-export function formatDateRange(startDate: string, endDate: string): string {
-  const start = startDate?.trim() ?? "";
-  const end = endDate?.trim() ?? "";
-  if (!start && !end) return "\u2014";
-  if (!start) return `\u2014 \u2192 ${end}`;
-  if (!end) return `${start} \u2192 \u2014`;
-  return `${start} \u2192 ${end}`;
+function joinDateTime(date: string, time: string): string {
+  const d = date.trim();
+  const t = time.trim();
+  if (!d) return "";
+  return t ? `${d} ${t}` : d;
+}
+
+export function formatStepDateRange(step: TripStep): string {
+  const a = effectiveStepStartParts(step);
+  const b = effectiveStepEndParts(step);
+  const left = joinDateTime(a.date, a.time) || "\u2014";
+  const right = joinDateTime(b.date, b.time) || "\u2014";
+  return `${left} \u2192 ${right}`;
 }
