@@ -9,23 +9,28 @@
     "lint": "eslint",
     "firebase:print-web-env": "node scripts/fetch-firebase-web-env.cjs",
     "migrate:diagram": "tsx scripts/migrate-diagram-to-firestore.ts",
+    "migrate:step-types": "tsx scripts/migrate-step-types-firestore.ts",
     "deploy:preview": "npx vercel --yes",
     "deploy:prod": "npx vercel --prod --yes"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.11.2",
     "firebase": "^12.12.1",
     "firebase-admin": "^13.8.0",
     "leaflet": "^1.9.4",
     "next": "16.2.4",
+    "nodemailer": "^6.9.16",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-leaflet": "^5.0.0",
+    "react-redux": "^9.2.0",
     "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
+    "@types/nodemailer": "^6.4.17",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",

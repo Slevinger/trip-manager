@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Trip, TripStep } from "@/lib/types/trip";
+import { applyTransitEndFromArrivals } from "@/lib/timeline/hotelsAndDates";
+import type { StayStep, TransitStep, Trip, TripStep } from "@/lib/types/trip";
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -9,6 +10,7 @@ export function createEmptyStep(order: number): TripStep {
   return {
     id: uuidv4(),
     order,
+    type: "stay",
     title: "",
     location: "",
     status: "todo",
@@ -19,7 +21,6 @@ export function createEmptyStep(order: number): TripStep {
     endDateOpen: true,
     nights: 0,
     duration: "",
-    transport: "",
     arrivalSummary: "",
     arrivalOptions: [],
     hotels: [],
@@ -30,6 +31,53 @@ export function createEmptyStep(order: number): TripStep {
     notes: "",
     attachments: [],
   };
+}
+
+/**
+ * New step placed after `afterStep`. After a transit leg, default to stay (next place).
+ */
+export function createEmptyStepInsertedAfter(afterStep: TripStep, order: number): TripStep {
+  if (afterStep.type === "transit") {
+    return { ...createEmptyStep(order), type: "stay", hotels: [] };
+  }
+  return createEmptyStep(order);
+}
+
+/** Convert any step shape to a stay (wizard / type switch). */
+export function morphStepToStay(step: TripStep): StayStep {
+  if (step.type === "stay") return step;
+  const {
+    transports: _tr,
+    transitEndManual: _tm,
+    fromStayStepId: _f,
+    toStayStepId: _to,
+    ...base
+  } = step;
+  return {
+    ...base,
+    type: "stay",
+    hotels: [],
+    endDateOpen: true,
+  };
+}
+
+/** Convert any step shape to a transit (wizard / type switch). */
+export function morphStepToTransit(step: TripStep): TransitStep {
+  if (step.type === "transit") {
+    return applyTransitEndFromArrivals({ ...step, endDateOpen: false });
+  }
+  const { hotels: _h, ...rest } = step;
+  return applyTransitEndFromArrivals({
+    ...rest,
+    type: "transit",
+    transports: [],
+    endDateOpen: false,
+    transitEndManual: false,
+    arrivalSummary: step.arrivalSummary ?? "",
+    arrivalOptions: [],
+    fromStayStepId: undefined,
+    toStayStepId: undefined,
+  });
 }
 
 export function defaultTrip(id: string): Trip {

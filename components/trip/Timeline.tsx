@@ -45,7 +45,6 @@ export function Timeline({
         {steps.map((s, idx) => {
           const start = effectiveStepStartParts(s);
           const end = effectiveStepEndParts(s);
-          const nights = computeNightsForStep(s);
           return (
             <li
               key={s.id}
@@ -64,7 +63,7 @@ export function Timeline({
                       {s.location}
                     </div>
                   ) : null}
-                  {s.hotels.length > 0 ? (
+                  {s.type === "stay" && s.hotels.length > 0 ? (
                     <div className="mt-1">
                       <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-900 dark:bg-sky-900/40 dark:text-sky-100">
                         🏨 {s.hotels.length}
@@ -92,9 +91,11 @@ export function Timeline({
                   →{" "}
                   {end.date ? formatTripDateTimeForLocale(locale, end.date, end.time) : "—"}
                 </div>
-                <div>
-                  {t("step.nights")}: {nights}
-                </div>
+                {s.type !== "transit" ? (
+                  <div>
+                    {t("step.nights")}: {computeNightsForStep(s)}
+                  </div>
+                ) : null}
               </div>
             </li>
           );

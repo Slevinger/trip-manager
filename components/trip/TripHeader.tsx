@@ -1,6 +1,7 @@
 "use client";
 
 import { ShareLinkButton } from "@/components/trip/ShareLinkButton";
+import { CloneTripButton } from "@/components/trip/CloneTripButton";
 import { useI18n } from "@/components/providers/I18nProvider";
 import type { Locale } from "@/lib/i18n/dictionaries";
 import type { TripCurrency } from "@/lib/i18n/currency";
@@ -44,6 +45,7 @@ export function TripHeader({ title }: { title: string }) {
               <option value="EUR">{t("header.currencyEUR")}</option>
             </select>
           </label>
+          <CloneTripButton />
           <ShareLinkButton />
         </div>
       </div>

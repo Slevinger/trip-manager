@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { Provider } from "react-redux";
 import type { User } from "firebase/auth";
 import { getDb } from "@/lib/firebase";
 import {
@@ -17,13 +18,28 @@ import {
 import { ensureTripAccessForUser, type TripMember, normalizeEmail } from "@/lib/tripAccess";
 import type { Trip, TripStep } from "@/lib/types/trip";
 import {
+  autoStatusApplied,
+  markTripSynced,
+  remoteSnapshotApplied,
+  resetTripDocument,
+  undoLastUserChange,
+  userPersisted,
+} from "@/lib/store/tripDocumentSlice";
+import {
+  makeTripDocumentStore,
+  useTripDocumentDispatch,
+  useTripDocumentSelector,
+  useTripDocumentStore,
+} from "@/lib/store/tripDocumentStore";
+import type { TripChangeLogEntry } from "@/lib/store/tripChangeLog";
+import {
   cancelPendingTripSave,
+  flushTripSaveNow,
+  mergeLatestTrip,
   mergeTrip,
   rememberTripWriter,
   rememberTripSnapshot,
-  saveTrip,
   subscribeToTrip,
-  updateTrip,
 } from "@/lib/trips";
 import { resolveAutoActiveStepId } from "@/lib/timeline/autoCurrentStep";
 import { defaultTrip } from "@/lib/tripDefaults";
@@ -31,6 +47,16 @@ import { defaultTrip } from "@/lib/tripDefaults";
 type TripDocumentContextValue = {
   tripId: string;
   trip: Trip | null;
+  /** Append-only list of trip mutations (local + remote sync + auto status). */
+  changeLog: TripChangeLogEntry[];
+  /** Whether there is a local edit to undo (cleared after remote sync). */
+  canUndo: boolean;
+  /** Reverts the last local edit (Redux only). Use Save to persist. */
+  undo: () => boolean;
+  /** True when local edits are not yet written to Firestore. */
+  hasUnsavedChanges: boolean;
+  /** Write the current trip from the store to Firestore. */
+  saveNow: () => Promise<void>;
   user: User | null;
   member: TripMember | null;
   /** Show “Continue with Google” (OAuth redirect must start from a click, not `useEffect`). */
@@ -38,11 +64,11 @@ type TripDocumentContextValue = {
   signInWithGoogle: () => Promise<void>;
   loading: boolean;
   error: string | null;
-  /** Replace entire trip (optimistic + debounced save). */
+  /** Replace entire trip in Redux only; use Save to persist to Firestore. */
   persist: (next: Trip) => void;
-  /** Merge partial trip fields (optimistic + debounced save). */
+  /** Merge partial trip fields in Redux only. */
   persistPatch: (patch: Partial<Trip>) => void;
-  /** Shallow merge using lib helper against latest known snapshot. */
+  /** Merge against latest remembered trip in Redux only. */
   persistUpdate: (patch: Partial<Trip>) => Trip | null;
   replaceSteps: (steps: TripStep[]) => void;
 };
@@ -69,7 +95,30 @@ export function TripDocumentProvider({
   tripId: string;
   children: React.ReactNode;
 }) {
-  const [trip, setTrip] = useState<Trip | null>(null);
+  const store = useMemo(() => makeTripDocumentStore(), [tripId]);
+  return (
+    <Provider store={store}>
+      <TripDocumentInner tripId={tripId}>{children}</TripDocumentInner>
+    </Provider>
+  );
+}
+
+function TripDocumentInner({
+  tripId,
+  children,
+}: {
+  tripId: string;
+  children: React.ReactNode;
+}) {
+  const dispatch = useTripDocumentDispatch();
+  const store = useTripDocumentStore();
+  const trip = useTripDocumentSelector((s) => s.tripDocument.trip);
+  const changeLog = useTripDocumentSelector((s) => s.tripDocument.changeLog);
+  const canUndo = useTripDocumentSelector((s) => s.tripDocument.userUndoStack.length > 0);
+  const hasUnsavedChanges = useTripDocumentSelector(
+    (s) => s.tripDocument.hasUnsavedChanges
+  );
+
   const [user, setUser] = useState<User | null>(null);
   const [member, setMember] = useState<TripMember | null>(null);
   const [authNeedsGoogleClick, setAuthNeedsGoogleClick] = useState(false);
@@ -91,38 +140,63 @@ export function TripDocumentProvider({
     }
   }, [tripId]);
 
-  const persist = useCallback((next: Trip) => {
-    const normalized = { ...next, id: tripId };
-    setTrip(normalized);
-    rememberTripSnapshot(normalized);
-    saveTrip(normalized);
-  }, [tripId]);
+  const persist = useCallback(
+    (next: Trip) => {
+      const normalized = { ...next, id: tripId };
+      dispatch(userPersisted(normalized));
+      rememberTripSnapshot(normalized);
+    },
+    [dispatch, tripId]
+  );
 
   const persistPatch = useCallback(
     (patch: Partial<Trip>) => {
-      setTrip((prev) => {
-        if (!prev) return prev;
-        const next = mergeTrip(prev, patch);
-        rememberTripSnapshot(next);
-        saveTrip(next);
-        return next;
-      });
+      const prev = store.getState().tripDocument.trip;
+      if (!prev) return;
+      const next = mergeTrip(prev, patch);
+      dispatch(userPersisted(next));
+      rememberTripSnapshot(next);
     },
-    []
+    [dispatch, store]
   );
 
   const persistUpdate = useCallback(
     (patch: Partial<Trip>) => {
-      const next = updateTrip(tripId, patch);
-      setTrip(next);
+      const next = mergeLatestTrip(tripId, patch);
+      dispatch(userPersisted(next));
+      rememberTripSnapshot(next);
       return next;
     },
-    [tripId]
+    [dispatch, tripId]
   );
 
-  const replaceSteps = useCallback((steps: TripStep[]) => {
-    persistPatch({ steps });
-  }, [persistPatch]);
+  const replaceSteps = useCallback(
+    (steps: TripStep[]) => {
+      persistPatch({ steps });
+    },
+    [persistPatch]
+  );
+
+  const undo = useCallback(() => {
+    const stackLen = store.getState().tripDocument.userUndoStack.length;
+    if (stackLen === 0) return false;
+    dispatch(undoLastUserChange());
+    const restored = store.getState().tripDocument.trip;
+    if (restored) rememberTripSnapshot(restored);
+    return true;
+  }, [dispatch, store]);
+
+  const saveNow = useCallback(async () => {
+    const t = store.getState().tripDocument.trip;
+    if (!t) return;
+    const normalized = { ...t, id: tripId };
+    try {
+      await flushTripSaveNow(normalized);
+      dispatch(markTripSynced());
+    } catch {
+      /* keep hasUnsavedChanges true */
+    }
+  }, [dispatch, store, tripId]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -131,8 +205,9 @@ export function TripDocumentProvider({
       try {
         setLoading(true);
         setAuthNeedsGoogleClick(false);
+        dispatch(resetTripDocument());
         if (!getDb()) {
-          setTrip(null);
+          dispatch(resetTripDocument());
           setError("firebase");
           setLoading(false);
           return;
@@ -143,6 +218,7 @@ export function TripDocumentProvider({
           setUser(null);
           setMember(null);
           setError(null);
+          dispatch(resetTripDocument());
           setAuthNeedsGoogleClick(true);
           setLoading(false);
           return;
@@ -153,7 +229,7 @@ export function TripDocumentProvider({
         const access = await ensureTripAccessForUser(tripId, currentUser);
         if (access.accessDenied || !access.member) {
           setMember(null);
-          setTrip(null);
+          dispatch(resetTripDocument());
           setError("ACCESS_DENIED");
           setLoading(false);
           return;
@@ -168,7 +244,7 @@ export function TripDocumentProvider({
 
         unsub = subscribeToTrip(tripId, (remote, err) => {
           if (err) {
-            setTrip(null);
+            dispatch(resetTripDocument());
             setError(err.message);
             setLoading(false);
             return;
@@ -181,16 +257,16 @@ export function TripDocumentProvider({
                 ownerEmail: accessMember.email,
                 ownerEmailLower: normalizeEmail(accessMember.email),
               };
-              setTrip(localBootstrap);
+              dispatch(userPersisted(localBootstrap));
               rememberTripSnapshot(localBootstrap);
               setError(null);
             } else {
-              setTrip(null);
+              dispatch(resetTripDocument());
             }
             setLoading(false);
             return;
           }
-          setTrip(remote);
+          dispatch(remoteSnapshotApplied(remote));
           setLoading(false);
           setError(null);
         });
@@ -198,6 +274,7 @@ export function TripDocumentProvider({
         setAuthNeedsGoogleClick(false);
         setUser(null);
         setMember(null);
+        dispatch(resetTripDocument());
         setError(e instanceof Error ? e.message : String(e));
         setLoading(false);
       }
@@ -208,32 +285,42 @@ export function TripDocumentProvider({
       cancelPendingTripSave(tripId);
       rememberTripWriter(tripId, null);
     };
-  }, [tripId, authSessionNonce]);
+  }, [tripId, authSessionNonce, dispatch]);
 
   useEffect(() => {
     if (!trip?.autoCurrentByDate) return;
     const tick = () => {
-      setTrip((prev) => {
-        if (!prev?.autoCurrentByDate) return prev;
-        const candidate = applyAutoStatuses(prev, new Date());
-        const same =
-          JSON.stringify(candidate.steps.map((s) => [s.id, s.status])) ===
-          JSON.stringify(prev.steps.map((s) => [s.id, s.status]));
-        if (same) return prev;
-        rememberTripSnapshot(candidate);
-        saveTrip(candidate);
-        return candidate;
-      });
+      const prev = store.getState().tripDocument.trip;
+      if (!prev?.autoCurrentByDate) return;
+      const candidate = applyAutoStatuses(prev, new Date());
+      const same =
+        JSON.stringify(candidate.steps.map((s: TripStep) => [s.id, s.status])) ===
+        JSON.stringify(prev.steps.map((s: TripStep) => [s.id, s.status]));
+      if (same) return;
+      dispatch(autoStatusApplied(candidate));
+      rememberTripSnapshot(candidate);
     };
     const id = window.setInterval(tick, 60_000);
     tick();
     return () => window.clearInterval(id);
-  }, [trip?.autoCurrentByDate, trip?.steps, trip?.tripStartDate, trip?.tripStartTime]);
+  }, [
+    dispatch,
+    store,
+    trip?.autoCurrentByDate,
+    trip?.steps,
+    trip?.tripStartDate,
+    trip?.tripStartTime,
+  ]);
 
   const value = useMemo(
     () => ({
       tripId,
       trip,
+      changeLog,
+      canUndo,
+      undo,
+      hasUnsavedChanges,
+      saveNow,
       user,
       member,
       authNeedsGoogleClick,
@@ -248,6 +335,11 @@ export function TripDocumentProvider({
     [
       tripId,
       trip,
+      changeLog,
+      canUndo,
+      undo,
+      hasUnsavedChanges,
+      saveNow,
       user,
       member,
       authNeedsGoogleClick,

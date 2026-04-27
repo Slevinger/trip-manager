@@ -8,9 +8,11 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
-import type { Trip } from "@/lib/types/trip";
+import type { StayStep, StepStatus, TransitStep, Trip } from "@/lib/types/trip";
 import { defaultTrip } from "@/lib/tripDefaults";
+import { applyTransitEndFromArrivals } from "@/lib/timeline/hotelsAndDates";
 import {
+  formatSpanBetweenStoredParts,
   migrateLegacyCombined,
   splitStoredDateAndTime,
 } from "@/lib/timeline/dates";
@@ -42,7 +44,7 @@ function tsToIso(v: unknown): string {
   return new Date().toISOString();
 }
 
-function normalizeHotel(raw: unknown): Trip["steps"][number]["hotels"][number] {
+function normalizeHotel(raw: unknown): StayStep["hotels"][number] {
   const r = (raw ?? {}) as Record<string, unknown>;
   const ciD = String(r.checkinDate ?? "").trim();
   const ciT = String(r.checkinTime ?? "").trim();
@@ -67,20 +69,59 @@ function normalizeHotel(raw: unknown): Trip["steps"][number]["hotels"][number] {
   };
 }
 
+function normalizeArrivalOptions(raw: unknown): Trip["steps"][number]["arrivalOptions"] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const r = (item ?? {}) as Record<string, unknown>;
+    const st = splitStoredDateAndTime(r.startDate, r.startTime);
+    const en = splitStoredDateAndTime(r.endDate, r.endTime);
+    const computed = formatSpanBetweenStoredParts(st.date, st.time, en.date, en.time);
+    const legacy = String(r.duration ?? "").trim();
+    return {
+      id: String(r.id ?? ""),
+      title: String(r.title ?? ""),
+      details: String(r.details ?? ""),
+      duration: computed || legacy,
+      cost: String(r.cost ?? ""),
+      startDate: st.date,
+      startTime: st.time,
+      endDate: en.date,
+      endTime: en.time,
+    };
+  });
+}
+
+function normalizeTransports(raw: unknown): TransitStep["transports"] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const r = (item ?? {}) as Record<string, unknown>;
+    return {
+      id: String(r.id ?? ""),
+      title: String(r.title ?? ""),
+      from: String(r.from ?? ""),
+      to: String(r.to ?? ""),
+      details: String(r.details ?? ""),
+      duration: String(r.duration ?? ""),
+      cost: String(r.cost ?? ""),
+    };
+  });
+}
+
 function normalizeStep(raw: unknown): Trip["steps"][number] {
   const s = (raw ?? {}) as Record<string, unknown>;
   const coordinates = normalizeCoordinates(s.coordinates, s.lat, s.lng);
   const start = splitStoredDateAndTime(s.startDate, s.startTime);
   const end = splitStoredDateAndTime(s.endDate, s.endTime);
-  return {
+  const status: StepStatus =
+    s.status === "todo" || s.status === "active" || s.status === "done"
+      ? s.status
+      : "todo";
+  const shared = {
     id: String(s.id ?? ""),
     order: Number(s.order ?? 0),
     title: String(s.title ?? ""),
     location: String(s.location ?? ""),
-    status:
-      s.status === "todo" || s.status === "active" || s.status === "done"
-        ? s.status
-        : "todo",
+    status,
     startDate: start.date,
     startTime: start.time,
     endDate: end.date,
@@ -88,12 +129,8 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     endDateOpen: Boolean(s.endDateOpen ?? true),
     nights: Number(s.nights ?? 0),
     duration: String(s.duration ?? ""),
-    transport: String(s.transport ?? ""),
     arrivalSummary: String(s.arrivalSummary ?? ""),
-    arrivalOptions: Array.isArray(s.arrivalOptions)
-      ? (s.arrivalOptions as Trip["steps"][number]["arrivalOptions"])
-      : [],
-    hotels: Array.isArray(s.hotels) ? s.hotels.map((h) => normalizeHotel(h)) : [],
+    arrivalOptions: normalizeArrivalOptions(s.arrivalOptions),
     transportCost: Number(s.transportCost ?? 0),
     foodCost: Number(s.foodCost ?? 0),
     activitiesCost: Number(s.activitiesCost ?? 0),
@@ -110,6 +147,25 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
       return o;
     })(),
   };
+
+  const hotels = Array.isArray(s.hotels) ? s.hotels.map((h) => normalizeHotel(h)) : [];
+  const transports = normalizeTransports(s.transports);
+  const type = s.type === "stay" ? "stay" : "transit";
+
+  if (type === "stay") return { ...shared, type, hotels };
+  const fromStayStepId = String(s.fromStayStepId ?? "").trim();
+  const toStayStepId = String(s.toStayStepId ?? "").trim();
+  const transit: TransitStep = {
+    ...shared,
+    type,
+    transports,
+    endDateOpen: false,
+    nights: 0,
+    transitEndManual: Boolean(s.transitEndManual),
+    ...(fromStayStepId ? { fromStayStepId } : {}),
+    ...(toStayStepId ? { toStayStepId } : {}),
+  };
+  return applyTransitEndFromArrivals(transit);
 }
 
 function normalizeAttachments(raw: unknown): Trip["steps"][number]["attachments"] {
@@ -301,6 +357,19 @@ async function flushTripWrite(tripId: string) {
   }
 }
 
+/** Skip debounce and write this trip to Firestore now (explicit Save). */
+export async function flushTripSaveNow(trip: Trip): Promise<void> {
+  const tripId = trip.id;
+  const existing = debounceTimers.get(tripId);
+  if (existing) {
+    clearTimeout(existing);
+    debounceTimers.delete(tripId);
+  }
+  rememberTripSnapshot(trip);
+  pendingTripWrites.set(tripId, trip);
+  await flushTripWrite(tripId);
+}
+
 /** Debounced full-document persist (optimistic UI should update before this). */
 export function saveTrip(trip: Trip): void {
   rememberTripSnapshot(trip);
@@ -316,13 +385,18 @@ export function mergeTrip(current: Trip, patch: Partial<Trip>): Trip {
   };
 }
 
-/** Merge patch into the latest remembered trip, then debounced save. */
-export function updateTrip(tripId: string, patch: Partial<Trip>): Trip {
+/** Merge patch into the latest remembered trip without scheduling a save. */
+export function mergeLatestTrip(tripId: string, patch: Partial<Trip>): Trip {
   const base =
     latestKnownTrip.get(tripId) ??
     lastRemoteTrip.get(tripId) ??
     defaultTrip(tripId);
-  const next = mergeTrip({ ...base, id: tripId }, patch);
+  return mergeTrip({ ...base, id: tripId }, patch);
+}
+
+/** Merge patch into the latest remembered trip, then debounced save. */
+export function updateTrip(tripId: string, patch: Partial<Trip>): Trip {
+  const next = mergeLatestTrip(tripId, patch);
   saveTrip(next);
   return next;
 }

@@ -10,6 +10,7 @@ export interface TripBudgetTotals {
 }
 
 export function sumHotelCosts(step: TripStep): number {
+  if (step.type !== "stay") return 0;
   return step.hotels.reduce((acc, h) => acc + (Number.isFinite(h.cost) ? h.cost : 0), 0);
 }
 

@@ -130,8 +130,12 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
               `<div><b>${idx + 1}. ${escapeHtml(s.title.trim() || "Untitled step")}</b></div>`,
               `<div>${escapeHtml(s.location.trim() || "—")}</div>`,
               `<div>${escapeHtml(formatStepDateRange(s))}</div>`,
-              `<div>Transport: ${escapeHtml(s.transport.trim() || "—")}</div>`,
-              `<div>Hotels: ${s.hotels.length}</div>`,
+              `<div>Transport: ${escapeHtml(
+                s.type === "transit"
+                  ? s.transports.map((x) => x.title.trim()).filter(Boolean).join(", ") || "—"
+                  : "—"
+              )}</div>`,
+              `<div>Hotels: ${s.type === "stay" ? s.hotels.length : 0}</div>`,
               `</div>`,
             ].join("")
           );

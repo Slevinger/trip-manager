@@ -14,6 +14,25 @@ export interface ArrivalOption {
   id: string;
   title: string;
   details: string;
+  /** Computed from start/end (stored for prompts / export). */
+  duration: string;
+  cost: string;
+  /** Option window start `dd-mm-yyyy`. */
+  startDate: string;
+  /** `HH:mm` or empty. */
+  startTime: string;
+  /** Option window end `dd-mm-yyyy`. */
+  endDate: string;
+  /** `HH:mm` or empty. */
+  endTime: string;
+}
+
+export interface TransportOption {
+  id: string;
+  title: string;
+  from: string;
+  to: string;
+  details: string;
   duration: string;
   cost: string;
 }
@@ -32,9 +51,10 @@ export interface Hotel {
   notes: string;
 }
 
-export interface TripStep {
+export interface TripStepBase {
   id: string;
   order: number;
+  type: "stay" | "transit";
   title: string;
   location: string;
   status: StepStatus;
@@ -47,10 +67,8 @@ export interface TripStep {
   endDateOpen: boolean;
   nights: number;
   duration: string;
-  transport: string;
   arrivalSummary: string;
   arrivalOptions: ArrivalOption[];
-  hotels: Hotel[];
   transportCost: number;
   foodCost: number;
   activitiesCost: number;
@@ -65,6 +83,27 @@ export interface TripStep {
   mapX?: number;
   mapY?: number;
 }
+
+export interface StayStep extends TripStepBase {
+  type: "stay";
+  hotels: Hotel[];
+}
+
+export interface TransitStep extends TripStepBase {
+  type: "transit";
+  transports: TransportOption[];
+  /** Stay step id this transit leaves from (same trip). */
+  fromStayStepId?: string;
+  /** Stay step id this transit arrives at (same trip). */
+  toStayStepId?: string;
+  /**
+   * When false/undefined, `endDate`/`endTime` follow the last arrival option’s end
+   * (when there is at least one arrival with a valid end date). Set true when the user edits step end manually.
+   */
+  transitEndManual?: boolean;
+}
+
+export type TripStep = StayStep | TransitStep;
 
 export interface Trip {
   id: string;

@@ -45,7 +45,7 @@ function hotelsFromDiagram(o: Record<string, unknown>): Hotel[] {
 
 /**
  * Maps an array of diagram-export objects into {@link TripStep} rows
- * (title, location, nights, transport, notes, optional x/y → mapX/mapY, optional hotel).
+ * (title, location, nights, notes, optional x/y -> mapX/mapY, optional hotel/transports).
  */
 export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
   if (!Array.isArray(raw)) {
@@ -64,7 +64,29 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
     const my = optNum(o.mapY ?? o.y);
     const start = migrateLegacyCombined(String(o.startDate ?? o.checkin ?? ""));
     const end = migrateLegacyCombined(String(o.endDate ?? o.checkout ?? ""));
-    const step: TripStep = {
+    const hotels = (() => {
+      if (Array.isArray(o.hotels) && o.hotels.length > 0) {
+        return (o.hotels as unknown[]).map((h) => {
+          const r = (h && typeof h === "object" ? h : {}) as Record<string, unknown>;
+          const ci = migrateLegacyCombined(String(r.checkin ?? ""));
+          const co = migrateLegacyCombined(String(r.checkout ?? ""));
+          return {
+            id: typeof r.id === "string" && r.id ? String(r.id) : uuidv4(),
+            name: String(r.name ?? ""),
+            checkinDate: ci.date,
+            checkinTime: ci.time,
+            checkoutDate: co.date,
+            checkoutTime: co.time,
+            bookingUrl: String(r.bookingUrl ?? ""),
+            cost: Number(r.cost ?? 0) || 0,
+            notes: String(r.notes ?? ""),
+          } satisfies Hotel;
+        });
+      }
+      return hotelsFromDiagram(o);
+    })();
+    const legacyTransport = String(o.transport ?? "").trim();
+    const base = {
       id,
       order: index,
       title: String(o.title ?? ""),
@@ -77,36 +99,8 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
       endDateOpen: true,
       nights: Number(o.nights ?? 0) || 0,
       duration: String(o.duration ?? ""),
-      transport: String(o.transport ?? ""),
       arrivalSummary: String(o.arrivalSummary ?? ""),
       arrivalOptions: [],
-      hotels: (() => {
-        if (Array.isArray(o.hotels) && o.hotels.length > 0) {
-          return (o.hotels as unknown[]).map((h) => {
-            const r = (h && typeof h === "object" ? h : {}) as Record<
-              string,
-              unknown
-            >;
-            const ci = migrateLegacyCombined(String(r.checkin ?? ""));
-            const co = migrateLegacyCombined(String(r.checkout ?? ""));
-            return {
-              id:
-                typeof r.id === "string" && r.id
-                  ? String(r.id)
-                  : uuidv4(),
-              name: String(r.name ?? ""),
-              checkinDate: ci.date,
-              checkinTime: ci.time,
-              checkoutDate: co.date,
-              checkoutTime: co.time,
-              bookingUrl: String(r.bookingUrl ?? ""),
-              cost: Number(r.cost ?? 0) || 0,
-              notes: String(r.notes ?? ""),
-            } satisfies Hotel;
-          });
-        }
-        return hotelsFromDiagram(o);
-      })(),
       transportCost: Number(o.transportCost ?? 0) || 0,
       foodCost: Number(o.foodCost ?? 0) || 0,
       activitiesCost: Number(o.activitiesCost ?? 0) || 0,
@@ -114,6 +108,30 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
       notes: String(o.notes ?? ""),
       attachments: [],
     };
+    const step: TripStep =
+      hotels.length > 0
+        ? {
+            ...base,
+            type: "stay",
+            hotels,
+          }
+        : {
+            ...base,
+            type: "transit",
+            transports: legacyTransport
+              ? [
+                  {
+                    id: uuidv4(),
+                    title: legacyTransport,
+                    from: "",
+                    to: "",
+                    details: "",
+                    duration: String(o.duration ?? ""),
+                    cost: "",
+                  },
+                ]
+              : [],
+          };
     const lat = optNum(o.lat);
     const lng = optNum(o.lng);
     const coordsRaw =

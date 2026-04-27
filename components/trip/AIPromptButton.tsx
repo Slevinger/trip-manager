@@ -136,7 +136,11 @@ function buildPrompt(
     }
     lines.push(`${t("step.startDate")}: ${startDisp}`);
     lines.push(`${t("step.endDate")}: ${endDisp}`);
-    lines.push(`${t("step.nights")}: ${Number.isFinite(current.nights) ? String(current.nights) : "—"}`);
+    if (current.type !== "transit") {
+      lines.push(
+        `${t("step.nights")}: ${Number.isFinite(current.nights) ? String(current.nights) : "—"}`
+      );
+    }
   }
   lines.push("");
 

@@ -61,15 +61,17 @@ export function ViewTab() {
                 ? formatTripDateTimeForLocale(locale, endParts.date, endParts.time)
                 : "—"}
             </div>
-            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-              {t("step.nights")}: {computeNightsForStep(current)}
-            </div>
-            {current.hotels[0]?.name.trim() ? (
+            {current.type !== "transit" ? (
+              <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                {t("step.nights")}: {computeNightsForStep(current)}
+              </div>
+            ) : null}
+            {current.type === "stay" && current.hotels[0]?.name.trim() ? (
               <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
                 {t("hotels.title")}: {current.hotels[0].name.trim()}
               </div>
             ) : null}
-            {current.hotels[0]?.bookingUrl.trim() ? (
+            {current.type === "stay" && current.hotels[0]?.bookingUrl.trim() ? (
               <div className="mt-1 text-xs">
                 <a
                   href={current.hotels[0].bookingUrl.trim()}

@@ -108,6 +108,43 @@ export function instantFromParts(parts: TripDateTimeParts): Date | null {
   );
 }
 
+/** Human span from start to end (e.g. `2d 5h`, `45m`). Empty if parts invalid or end ≤ start. */
+export function formatTripDateTimeSpan(
+  start: TripDateTimeParts,
+  end: TripDateTimeParts
+): string {
+  const a = instantFromParts(start);
+  const b = instantFromParts(end);
+  if (!a || !b) return "";
+  const ms = b.getTime() - a.getTime();
+  if (ms <= 0) return "";
+  const totalMinutes = Math.floor(ms / 60000);
+  if (totalMinutes <= 0) return "";
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const mins = totalMinutes % 60;
+  if (days > 0) {
+    const hPart = hours > 0 ? ` ${hours}h` : "";
+    const mPart = mins > 0 ? ` ${mins}m` : "";
+    return `${days}d${hPart}${mPart}`.trim();
+  }
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `${mins}m`;
+}
+
+/** Span between two stored date+time rows (e.g. arrival option window). */
+export function formatSpanBetweenStoredParts(
+  startDate: string,
+  startTime: string,
+  endDate: string,
+  endTime: string
+): string {
+  return formatTripDateTimeSpan(
+    { date: startDate.trim(), time: startTime.trim() },
+    { date: endDate.trim(), time: endTime.trim() }
+  );
+}
+
 export function diffNightsInclusive(start: Date, end: Date): number {
   const msPerDay = 86400000;
   const a = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
@@ -126,6 +163,20 @@ export function parseTripDdMmParts(
   const m = DD_MM_YYYY.exec(dateStr.trim());
   if (!m) return null;
   return { d: m[1], m: m[2], y: m[3] };
+}
+
+/** `yyyy-mm-dd` for `<input type="date">`; empty if not canonical `dd-mm-yyyy`. */
+export function tripDdMmYyyyToHtmlDate(ddMmYyyy: string): string {
+  const p = parseTripDdMmParts(ddMmYyyy);
+  if (!p) return "";
+  return `${p.y}-${p.m}-${p.d}`;
+}
+
+/** Parse `yyyy-mm-dd` from a date input into stored `dd-mm-yyyy`. */
+export function htmlDateToTripDdMmYyyy(html: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(html.trim());
+  if (!m) return "";
+  return `${m[3]}-${m[2]}-${m[1]}`;
 }
 
 /** Build `dd-mm-yyyy` from numeric select strings; clamps day to month length. */
