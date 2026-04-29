@@ -96,6 +96,16 @@ function writeTripLocalSnapshot(tripId: string, trip: Trip, hasUnsavedChanges: b
   }
 }
 
+function clearTripLocalSnapshot(tripId: string): void {
+  if (DISABLE_TRIP_LOCAL_SNAPSHOT) return;
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(tripSnapshotKey(tripId));
+  } catch {
+    /* ignore localStorage quota / privacy mode errors */
+  }
+}
+
 function toMs(value: string | undefined): number {
   if (!value) return 0;
   const parsed = Date.parse(value);
@@ -261,7 +271,7 @@ function TripDocumentInner({
     const normalized = { ...t, id: tripId };
     await flushTripSaveNow(normalized);
     dispatch(markTripSynced());
-    writeTripLocalSnapshot(tripId, normalized, false);
+    clearTripLocalSnapshot(tripId);
   }, [dispatch, store, tripId]);
 
   useEffect(() => {
@@ -358,7 +368,7 @@ function TripDocumentInner({
             return;
           }
           dispatch(remoteSnapshotApplied(remote));
-          writeTripLocalSnapshot(tripId, remote, false);
+          clearTripLocalSnapshot(tripId);
           setLoading(false);
           setError(null);
         });

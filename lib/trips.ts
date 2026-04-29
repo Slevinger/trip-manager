@@ -1,5 +1,6 @@
 import {
   doc,
+  type FirestoreError,
   getDoc,
   onSnapshot,
   serverTimestamp,
@@ -33,25 +34,61 @@ function tripDocRef(tripId: string) {
   return doc(db, TRIPS, tripId);
 }
 
-/** Firestore create rules require owner fields; bootstrap trips start empty until first save. */
-function withTripOwnerFromAuthIfMissing(trip: Trip): Trip {
+function isPermissionDenied(error: unknown): boolean {
+  const e = error as FirestoreError | undefined;
+  return e?.code === "permission-denied";
+}
+
+async function resolveCurrentUserIdentity(): Promise<
+  { uid: string; email: string; emailLower: string } | null
+> {
   const auth = getClientAuth();
   const u = auth?.currentUser;
-  if (!u?.uid) return trip;
-  if (trip.ownerUid.trim() && trip.ownerEmailLower.trim()) return trip;
-  const email =
-    (typeof u.email === "string" && u.email.trim()) ||
+  if (!u?.uid) return null;
+  const direct = typeof u.email === "string" ? u.email.trim() : "";
+  const provider =
     u.providerData
       .map((p) => (typeof p.email === "string" ? p.email.trim() : ""))
-      .find((e) => e.length > 0) ||
-    "";
+      .find((e) => e.length > 0) || "";
+  let tokenEmail = "";
+  try {
+    const token = await u.getIdTokenResult();
+    tokenEmail =
+      typeof token.claims.email === "string" ? token.claims.email.trim() : "";
+  } catch {
+    /* ignore transient token-read errors */
+  }
+  // Firestore rules validate against ID token email; prefer that when present.
+  const email = tokenEmail || direct || provider;
   const emailLower = email.toLowerCase();
-  if (!emailLower) return trip;
+  if (!emailLower) return null;
+  return { uid: u.uid, email, emailLower };
+}
+
+/** Firestore create rules require owner fields; bootstrap trips start empty until first save. */
+async function withTripOwnerFromAuthIfMissing(trip: Trip): Promise<Trip> {
+  const identity = await resolveCurrentUserIdentity();
+  if (!identity) {
+    throw new Error("AUTH_EMAIL_REQUIRED");
+  }
+  if (trip.ownerUid.trim() && trip.ownerEmailLower.trim()) {
+    if (
+      trip.ownerUid === identity.uid &&
+      trip.ownerEmailLower.trim() !== identity.emailLower
+    ) {
+      return {
+        ...trip,
+        ownerEmail: identity.email,
+        ownerEmailLower: identity.emailLower,
+      };
+    }
+    return trip;
+  }
   return {
     ...trip,
-    ownerUid: u.uid,
-    ownerEmail: email || emailLower,
-    ownerEmailLower: emailLower,
+    ownerUid: identity.uid,
+    ownerEmail: identity.email,
+    ownerEmailLower: identity.emailLower,
   };
 }
 
@@ -361,19 +398,18 @@ async function flushTripWrite(tripId: string) {
   const raw = pendingTripWrites.get(tripId);
   if (!raw) return;
   pendingTripWrites.delete(tripId);
-  const trip = withTripOwnerFromAuthIfMissing(raw);
+  const trip = await withTripOwnerFromAuthIfMissing(raw);
   rememberTripSnapshot(trip);
   const ref = tripDocRef(tripId);
   const writer = tripWriters.get(tripId);
-  await setDoc(ref, tripToFirestorePayload(trip), { merge: true });
-
-  const auth = getClientAuth();
-  const u = auth?.currentUser;
-  if (
+  const identity = await resolveCurrentUserIdentity();
+  const u = identity ? { uid: identity.uid, email: identity.email } : null;
+  const canWriteOwnerMember =
     u?.uid &&
     trip.ownerUid === u.uid &&
-    trip.ownerEmailLower.trim()
-  ) {
+    trip.ownerEmailLower.trim();
+  const writeOwnerMember = async () => {
+    if (!canWriteOwnerMember) return;
     const memberEmail =
       trip.ownerEmail.trim() || u.email?.trim() || trip.ownerEmailLower;
     await setDoc(
@@ -387,7 +423,18 @@ async function flushTripWrite(tripId: string) {
       },
       { merge: true }
     );
+  };
+
+  try {
+    await setDoc(ref, tripToFirestorePayload(trip), { merge: true });
+  } catch (error) {
+    // Existing unclaimed docs can reject trip update until owner membership exists.
+    if (!isPermissionDenied(error)) throw error;
+    await writeOwnerMember();
+    await setDoc(ref, tripToFirestorePayload(trip), { merge: true });
   }
+
+  await writeOwnerMember();
 
   if (writer) {
     await setDoc(
@@ -404,6 +451,33 @@ async function flushTripWrite(tripId: string) {
   }
 }
 
+async function saveTripViaApi(trip: Trip): Promise<void> {
+  const auth = getClientAuth();
+  const u = auth?.currentUser;
+  if (!u) {
+    throw new Error("AUTH_REQUIRED");
+  }
+  const token = await u.getIdToken();
+  const res = await fetch(`/api/trips/${encodeURIComponent(trip.id)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ trip }),
+  });
+  if (!res.ok) {
+    let details = "";
+    try {
+      const json = (await res.json()) as { error?: string };
+      details = json?.error ? ` (${json.error})` : "";
+    } catch {
+      /* ignore parse errors */
+    }
+    throw new Error(`save_failed${details}`);
+  }
+}
+
 /** Skip debounce and write this trip to Firestore now (explicit Save). */
 export async function flushTripSaveNow(trip: Trip): Promise<void> {
   const tripId = trip.id;
@@ -412,10 +486,15 @@ export async function flushTripSaveNow(trip: Trip): Promise<void> {
     clearTimeout(existing);
     debounceTimers.delete(tripId);
   }
-  const ready = withTripOwnerFromAuthIfMissing({ ...trip, id: tripId });
+  const ready = await withTripOwnerFromAuthIfMissing({ ...trip, id: tripId });
   rememberTripSnapshot(ready);
   pendingTripWrites.set(tripId, ready);
-  await flushTripWrite(tripId);
+  try {
+    await flushTripWrite(tripId);
+  } catch (error) {
+    if (!isPermissionDenied(error)) throw error;
+    await saveTripViaApi(ready);
+  }
 }
 
 /** Debounced full-document persist (optimistic UI should update before this). */
