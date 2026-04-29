@@ -146,19 +146,8 @@ export function StepDialog({
   }
 
   function addTransport() {
-    setDraft((d) => {
-      if (d.type !== "transit") return d;
-      const next: TransportOption = {
-        id: uuidv4(),
-        title: "",
-        from: "",
-        to: "",
-        details: "",
-        duration: "",
-        cost: "",
-      };
-      return { ...d, transports: [...d.transports, next] };
-    });
+    setSaveError(null);
+    setSurface("wizard");
   }
 
   return (
@@ -599,7 +588,14 @@ export function StepDialog({
           ) : null}
 
           {draft.type === "stay" ? (
-            <HotelsEditor hotels={draft.hotels} onChange={setHotels} />
+            <HotelsEditor
+              hotels={draft.hotels}
+              onChange={setHotels}
+              onAddRequested={() => {
+                setSaveError(null);
+                setSurface("wizard");
+              }}
+            />
           ) : (
             <div className="space-y-2">
               <div className="flex items-center justify-between">

@@ -9,9 +9,11 @@ import { useI18n } from "@/components/providers/I18nProvider";
 export function HotelsEditor({
   hotels,
   onChange,
+  onAddRequested,
 }: {
   hotels: Hotel[];
   onChange: (next: Hotel[]) => void;
+  onAddRequested?: () => void;
 }) {
   const { t } = useI18n();
 
@@ -25,6 +27,10 @@ export function HotelsEditor({
   }
 
   function addHotel() {
+    if (onAddRequested) {
+      onAddRequested();
+      return;
+    }
     onChange([
       ...hotels,
       {
