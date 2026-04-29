@@ -6,7 +6,7 @@ import { useI18n } from "@/components/providers/I18nProvider";
 import { ensureAuthPersistence, getClientAuth } from "@/lib/firebase";
 import { restoreTripFirebaseSession, startGoogleSignInForTrip } from "@/lib/tripAuth";
 
-const INDEX_AUTH_ID = "__trips_index__";
+const INDEX_AUTH_ID = "__trip_list__";
 
 type TripRow = {
   id: string;
@@ -75,7 +75,7 @@ function removeLocalTripSnapshot(tripId: string): void {
   }
 }
 
-export default function TripsPage() {
+export default function TripListPage() {
   const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [needsSignIn, setNeedsSignIn] = useState(false);
@@ -211,7 +211,7 @@ export default function TripsPage() {
           {t("trips.title")}
         </h1>
         <Link
-          href="/new"
+          href="/trip/new"
           className="rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white dark:bg-white dark:text-zinc-900"
         >
           {t("trips.newTrip")}
