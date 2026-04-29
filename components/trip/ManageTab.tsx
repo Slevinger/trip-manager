@@ -15,6 +15,7 @@ import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
 export function ManageTab() {
   const { trip, persist, canUndo, undo, hasUnsavedChanges, saveNow } = useTripDocument();
   const { t } = useI18n();
+  const [tripSaveError, setTripSaveError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{
     step: TripStep;
     isNew?: boolean;
@@ -206,9 +207,17 @@ export function ManageTab() {
           onSave={(saved) => {
             const base = latestTrip.current;
             if (!base) return;
-            const steps = base.steps.map((s) =>
-              s.id === saved.id ? saved : s
-            );
+            const idx = base.steps.findIndex((s) => s.id === saved.id);
+            const steps =
+              idx === -1
+                ? (() => {
+                    const nextOrder = base.steps.length
+                      ? Math.max(...base.steps.map((s) => s.order)) + 1
+                      : 0;
+                    return [...base.steps, { ...saved, order: nextOrder }];
+                  })()
+                : base.steps.map((s) => (s.id === saved.id ? saved : s));
+            setTripSaveError(null);
             persist({ ...base, steps });
           }}
         />
@@ -216,9 +225,15 @@ export function ManageTab() {
       </div>
 
       <div
-        className="sticky bottom-0 z-30 -mx-4 mt-2 flex flex-wrap items-center justify-end gap-2 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.08)] backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.35)]"
+        className="sticky bottom-0 z-30 -mx-4 mt-2 flex flex-col gap-2 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.08)] backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.35)]"
         style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
+        {tripSaveError ? (
+          <p className="text-xs font-medium text-red-600 dark:text-red-400">
+            {tripSaveError}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
           disabled={!canUndo}
@@ -234,11 +249,19 @@ export function ManageTab() {
           title={
             hasUnsavedChanges ? t("manage.saveHint") : t("manage.saveNothing")
           }
-          onClick={() => void saveNow()}
+          onClick={() => {
+            setTripSaveError(null);
+            void saveNow().catch((err: unknown) => {
+              setTripSaveError(
+                err instanceof Error ? err.message : String(err)
+              );
+            });
+          }}
           className="rounded-xl bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-zinc-900"
         >
           {t("manage.save")}
         </button>
+        </div>
       </div>
     </div>
   );

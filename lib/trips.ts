@@ -7,7 +7,7 @@ import {
   type Unsubscribe,
   Timestamp,
 } from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { getClientAuth, getDb } from "@/lib/firebase";
 import type { StayStep, StepStatus, TransitStep, Trip } from "@/lib/types/trip";
 import { defaultTrip } from "@/lib/tripDefaults";
 import { applyTransitEndFromArrivals } from "@/lib/timeline/hotelsAndDates";
@@ -31,6 +31,28 @@ function tripDocRef(tripId: string) {
   const db = getDb();
   if (!db) throw new Error("Firestore is not configured");
   return doc(db, TRIPS, tripId);
+}
+
+/** Firestore create rules require owner fields; bootstrap trips start empty until first save. */
+function withTripOwnerFromAuthIfMissing(trip: Trip): Trip {
+  const auth = getClientAuth();
+  const u = auth?.currentUser;
+  if (!u?.uid) return trip;
+  if (trip.ownerUid.trim() && trip.ownerEmailLower.trim()) return trip;
+  const email =
+    (typeof u.email === "string" && u.email.trim()) ||
+    u.providerData
+      .map((p) => (typeof p.email === "string" ? p.email.trim() : ""))
+      .find((e) => e.length > 0) ||
+    "";
+  const emailLower = email.toLowerCase();
+  if (!emailLower) return trip;
+  return {
+    ...trip,
+    ownerUid: u.uid,
+    ownerEmail: email || emailLower,
+    ownerEmailLower: emailLower,
+  };
 }
 
 export function getTripRef(tripId: string) {
@@ -336,12 +358,37 @@ function scheduleFlush(tripId: string) {
 }
 
 async function flushTripWrite(tripId: string) {
-  const trip = pendingTripWrites.get(tripId);
-  if (!trip) return;
+  const raw = pendingTripWrites.get(tripId);
+  if (!raw) return;
   pendingTripWrites.delete(tripId);
+  const trip = withTripOwnerFromAuthIfMissing(raw);
+  rememberTripSnapshot(trip);
   const ref = tripDocRef(tripId);
   const writer = tripWriters.get(tripId);
   await setDoc(ref, tripToFirestorePayload(trip), { merge: true });
+
+  const auth = getClientAuth();
+  const u = auth?.currentUser;
+  if (
+    u?.uid &&
+    trip.ownerUid === u.uid &&
+    trip.ownerEmailLower.trim()
+  ) {
+    const memberEmail =
+      trip.ownerEmail.trim() || u.email?.trim() || trip.ownerEmailLower;
+    await setDoc(
+      doc(ref.firestore, TRIPS, tripId, MEMBERS, u.uid),
+      {
+        uid: u.uid,
+        email: memberEmail,
+        emailLower: trip.ownerEmailLower.trim(),
+        role: "member",
+        joinedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
   if (writer) {
     await setDoc(
       doc(ref.firestore, TRIPS, tripId, MEMBERS, writer.uid),
@@ -365,8 +412,9 @@ export async function flushTripSaveNow(trip: Trip): Promise<void> {
     clearTimeout(existing);
     debounceTimers.delete(tripId);
   }
-  rememberTripSnapshot(trip);
-  pendingTripWrites.set(tripId, trip);
+  const ready = withTripOwnerFromAuthIfMissing({ ...trip, id: tripId });
+  rememberTripSnapshot(ready);
+  pendingTripWrites.set(tripId, ready);
   await flushTripWrite(tripId);
 }
 

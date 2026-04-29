@@ -259,13 +259,9 @@ function TripDocumentInner({
     const t = store.getState().tripDocument.trip;
     if (!t) return;
     const normalized = { ...t, id: tripId };
-    try {
-      await flushTripSaveNow(normalized);
-      dispatch(markTripSynced());
-      writeTripLocalSnapshot(tripId, normalized, false);
-    } catch {
-      /* keep hasUnsavedChanges true */
-    }
+    await flushTripSaveNow(normalized);
+    dispatch(markTripSynced());
+    writeTripLocalSnapshot(tripId, normalized, false);
   }, [dispatch, store, tripId]);
 
   useEffect(() => {
