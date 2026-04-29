@@ -281,7 +281,7 @@ const he: DictNode = {
     authNotEnabled:
       "Firebase Authentication לא הופעל בפרויקט (שגיאת auth/configuration-not-found). ב-Firebase Console → Build → Authentication → לחץ Get started והפעל. אחרי מכן רענן את הדף.",
     permissionDenied:
-      "Firestore חוסם גישה (כללי אבטחה). פרוס את `firestore.rules` מהפרויקט (Firebase Console → Firestore → Rules → Publish) או ודא שהמשתמש מחובר ומוזמן לטיול.",
+      "Firestore חוסם גישה (כללי אבטחה). פרוס את `firestore.rules` מהפרויקט (Firebase Console → Firestore → Rules → Publish) או ודא שהמשתמש מחובר.",
   }),
   ai: leafMap({
     intro: "העתק את הפרומפט הבא לכלי בינה מלאכותית כדי לקבל עזרה בתכנון.",
@@ -617,7 +617,7 @@ const en: DictNode = {
     authNotEnabled:
       "Firebase Authentication is not enabled for this project (auth/configuration-not-found). In Firebase Console → Build → Authentication → click Get started, then reload this page.",
     permissionDenied:
-      "Firestore denied access (security rules). Deploy this repo’s `firestore.rules` (Firebase Console → Firestore → Rules → Publish), or confirm you are signed in and invited to the trip.",
+      "Firestore denied access (security rules). Deploy this repo’s `firestore.rules` (Firebase Console → Firestore → Rules → Publish), or confirm you are signed in.",
   }),
   ai: leafMap({
     intro: "Copy this prompt into an AI assistant for planning help.",
@@ -953,7 +953,7 @@ const ru: DictNode = {
     authNotEnabled:
       "В проекте не включён Firebase Authentication (ошибка auth/configuration-not-found). Firebase Console → Build → Authentication → Get started, затем обновите страницу.",
     permissionDenied:
-      "Firestore отклонил запрос (правила безопасности). Опубликуйте `firestore.rules` из репозитория (Firebase Console → Firestore → Rules → Publish) или проверьте вход и приглашение к поездке.",
+      "Firestore отклонил запрос (правила безопасности). Опубликуйте `firestore.rules` из репозитория (Firebase Console → Firestore → Rules → Publish) или проверьте, что вы вошли в систему.",
   }),
   ai: leafMap({
     intro: "Скопируйте этот промпт в ИИ-помощник для планирования.",

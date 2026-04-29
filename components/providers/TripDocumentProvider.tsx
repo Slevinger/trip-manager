@@ -15,7 +15,6 @@ import {
   restoreTripFirebaseSession,
   startGoogleSignInForTrip,
 } from "@/lib/tripAuth";
-import { ensureTripAccessForUser, type TripMember, normalizeEmail } from "@/lib/tripAccess";
 import type { Trip, TripStep } from "@/lib/types/trip";
 import {
   autoStatusApplied,
@@ -37,12 +36,76 @@ import {
   flushTripSaveNow,
   mergeLatestTrip,
   mergeTrip,
-  rememberTripWriter,
   rememberTripSnapshot,
   subscribeToTrip,
 } from "@/lib/trips";
 import { resolveAutoActiveStepId } from "@/lib/timeline/autoCurrentStep";
 import { defaultTrip } from "@/lib/tripDefaults";
+
+const TRIP_LOCAL_SNAPSHOT_PREFIX = "trip-doc-snapshot:";
+const TRIP_LOCAL_SNAPSHOT_VERSION = 1;
+const UNSAVED_EXIT_WARNING = "You have unsaved trip changes. Leave without saving?";
+const DISABLE_TRIP_LOCAL_SNAPSHOT =
+  process.env.NEXT_PUBLIC_DISABLE_TRIP_LOCAL_SNAPSHOT === "true";
+
+type TripLocalSnapshot = {
+  v: number;
+  savedAt: string;
+  hasUnsavedChanges: boolean;
+  trip: Trip;
+};
+
+function tripSnapshotKey(tripId: string): string {
+  return `${TRIP_LOCAL_SNAPSHOT_PREFIX}${tripId}`;
+}
+
+function readTripLocalSnapshot(tripId: string): TripLocalSnapshot | null {
+  if (DISABLE_TRIP_LOCAL_SNAPSHOT) return null;
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(tripSnapshotKey(tripId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as TripLocalSnapshot;
+    if (
+      !parsed ||
+      parsed.v !== TRIP_LOCAL_SNAPSHOT_VERSION ||
+      !parsed.trip ||
+      typeof parsed.trip !== "object"
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeTripLocalSnapshot(tripId: string, trip: Trip, hasUnsavedChanges: boolean): void {
+  if (DISABLE_TRIP_LOCAL_SNAPSHOT) return;
+  if (typeof window === "undefined") return;
+  try {
+    const payload: TripLocalSnapshot = {
+      v: TRIP_LOCAL_SNAPSHOT_VERSION,
+      savedAt: new Date().toISOString(),
+      hasUnsavedChanges,
+      trip,
+    };
+    window.localStorage.setItem(tripSnapshotKey(tripId), JSON.stringify(payload));
+  } catch {
+    /* ignore localStorage quota / privacy mode errors */
+  }
+}
+
+function toMs(value: string | undefined): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function shouldPreferLocalSnapshot(local: TripLocalSnapshot, remote: Trip): boolean {
+  if (!local.hasUnsavedChanges) return false;
+  return toMs(local.savedAt) >= toMs(remote.updatedAt);
+}
 
 type TripDocumentContextValue = {
   tripId: string;
@@ -58,7 +121,7 @@ type TripDocumentContextValue = {
   /** Write the current trip from the store to Firestore. */
   saveNow: () => Promise<void>;
   user: User | null;
-  member: TripMember | null;
+  member: null;
   /** Show “Continue with Google” (OAuth redirect must start from a click, not `useEffect`). */
   authNeedsGoogleClick: boolean;
   signInWithGoogle: () => Promise<void>;
@@ -120,7 +183,7 @@ function TripDocumentInner({
   );
 
   const [user, setUser] = useState<User | null>(null);
-  const [member, setMember] = useState<TripMember | null>(null);
+  const [member, setMember] = useState<null>(null);
   const [authNeedsGoogleClick, setAuthNeedsGoogleClick] = useState(false);
   const [authSessionNonce, setAuthSessionNonce] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -145,6 +208,7 @@ function TripDocumentInner({
       const normalized = { ...next, id: tripId };
       dispatch(userPersisted(normalized));
       rememberTripSnapshot(normalized);
+      writeTripLocalSnapshot(tripId, normalized, true);
     },
     [dispatch, tripId]
   );
@@ -156,8 +220,9 @@ function TripDocumentInner({
       const next = mergeTrip(prev, patch);
       dispatch(userPersisted(next));
       rememberTripSnapshot(next);
+      writeTripLocalSnapshot(tripId, next, true);
     },
-    [dispatch, store]
+    [dispatch, store, tripId]
   );
 
   const persistUpdate = useCallback(
@@ -165,6 +230,7 @@ function TripDocumentInner({
       const next = mergeLatestTrip(tripId, patch);
       dispatch(userPersisted(next));
       rememberTripSnapshot(next);
+      writeTripLocalSnapshot(tripId, next, true);
       return next;
     },
     [dispatch, tripId]
@@ -182,9 +248,12 @@ function TripDocumentInner({
     if (stackLen === 0) return false;
     dispatch(undoLastUserChange());
     const restored = store.getState().tripDocument.trip;
-    if (restored) rememberTripSnapshot(restored);
+    if (restored) {
+      rememberTripSnapshot(restored);
+      writeTripLocalSnapshot(tripId, restored, true);
+    }
     return true;
-  }, [dispatch, store]);
+  }, [dispatch, store, tripId]);
 
   const saveNow = useCallback(async () => {
     const t = store.getState().tripDocument.trip;
@@ -193,56 +262,81 @@ function TripDocumentInner({
     try {
       await flushTripSaveNow(normalized);
       dispatch(markTripSynced());
+      writeTripLocalSnapshot(tripId, normalized, false);
     } catch {
       /* keep hasUnsavedChanges true */
     }
   }, [dispatch, store, tripId]);
 
   useEffect(() => {
+    const writeSnapshot = () => {
+      try {
+        const state = store.getState().tripDocument;
+        if (!state.trip) {
+          return;
+        }
+        writeTripLocalSnapshot(tripId, state.trip, state.hasUnsavedChanges);
+      } catch {
+        /* ignore localStorage quota / privacy mode errors */
+      }
+    };
+    writeSnapshot();
+    const unsubscribe = store.subscribe(writeSnapshot);
+    return () => unsubscribe();
+  }, [store, tripId]);
+
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!store.getState().tripDocument.hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = UNSAVED_EXIT_WARNING;
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [store]);
+
+  useEffect(() => {
     let unsub: (() => void) | undefined;
+    let cancelled = false;
 
     (async () => {
       try {
+        if (cancelled) return;
         setLoading(true);
-        setAuthNeedsGoogleClick(false);
         dispatch(resetTripDocument());
         if (!getDb()) {
+          if (cancelled) return;
           dispatch(resetTripDocument());
           setError("firebase");
           setLoading(false);
           return;
         }
-
         const authStatus = await restoreTripFirebaseSession(tripId);
+        if (cancelled) return;
         if (authStatus.status === "needs_google_sign_in") {
           setUser(null);
-          setMember(null);
-          setError(null);
-          dispatch(resetTripDocument());
           setAuthNeedsGoogleClick(true);
-          setLoading(false);
-          return;
-        }
-        const currentUser = authStatus.user;
-        setUser(currentUser);
-
-        const access = await ensureTripAccessForUser(tripId, currentUser);
-        if (access.accessDenied || !access.member) {
-          setMember(null);
           dispatch(resetTripDocument());
-          setError("ACCESS_DENIED");
+          setError("AUTH_REQUIRED");
           setLoading(false);
           return;
         }
-        const accessMember = access.member;
-        setMember(accessMember);
-        rememberTripWriter(tripId, {
-          uid: accessMember.uid,
-          email: accessMember.email,
-          emailLower: accessMember.emailLower,
-        });
+        setUser(authStatus.user);
+        setMember(null);
 
-        unsub = subscribeToTrip(tripId, (remote, err) => {
+        let local = readTripLocalSnapshot(tripId);
+        if (local?.trip) {
+          if (local.hasUnsavedChanges) {
+            dispatch(userPersisted(local.trip));
+          } else {
+            dispatch(remoteSnapshotApplied(local.trip));
+          }
+          rememberTripSnapshot(local.trip);
+          writeTripLocalSnapshot(tripId, local.trip, local.hasUnsavedChanges);
+        }
+
+        const localUnsub = subscribeToTrip(tripId, (remote, err) => {
+          if (cancelled) return;
           if (err) {
             dispatch(resetTripDocument());
             setError(err.message);
@@ -250,26 +344,33 @@ function TripDocumentInner({
             return;
           }
           if (!remote) {
-            if (access.shouldBootstrapLocalTrip) {
-              const localBootstrap = {
-                ...defaultTrip(tripId),
-                ownerUid: currentUser.uid,
-                ownerEmail: accessMember.email,
-                ownerEmailLower: normalizeEmail(accessMember.email),
-              };
-              dispatch(userPersisted(localBootstrap));
-              rememberTripSnapshot(localBootstrap);
-              setError(null);
-            } else {
-              dispatch(resetTripDocument());
-            }
+            const localBootstrap = defaultTrip(tripId);
+            dispatch(userPersisted(localBootstrap));
+            rememberTripSnapshot(localBootstrap);
+            writeTripLocalSnapshot(tripId, localBootstrap, true);
+            setError(null);
             setLoading(false);
             return;
           }
+          local = readTripLocalSnapshot(tripId);
+          if (local?.trip && shouldPreferLocalSnapshot(local, remote)) {
+            dispatch(userPersisted(local.trip));
+            rememberTripSnapshot(local.trip);
+            writeTripLocalSnapshot(tripId, local.trip, true);
+            setLoading(false);
+            setError(null);
+            return;
+          }
           dispatch(remoteSnapshotApplied(remote));
+          writeTripLocalSnapshot(tripId, remote, false);
           setLoading(false);
           setError(null);
         });
+        if (cancelled) {
+          localUnsub();
+          return;
+        }
+        unsub = localUnsub;
       } catch (e) {
         setAuthNeedsGoogleClick(false);
         setUser(null);
@@ -281,11 +382,11 @@ function TripDocumentInner({
     })();
 
     return () => {
+      cancelled = true;
       if (unsub) unsub();
       cancelPendingTripSave(tripId);
-      rememberTripWriter(tripId, null);
     };
-  }, [tripId, authSessionNonce, dispatch]);
+  }, [tripId, dispatch, authSessionNonce]);
 
   useEffect(() => {
     if (!trip?.autoCurrentByDate) return;

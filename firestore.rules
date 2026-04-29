@@ -84,5 +84,10 @@ service cloud.firestore {
       allow update: if isMember(tripId) || (signedIn() && inviteId == currentEmailLower());
       allow delete: if isMember(tripId);
     }
+
+    // Single-editor manage lock (cross-browser tab coordination).
+    match /trips/{tripId}/locks/{lockId} {
+      allow read, create, update, delete: if signedIn();
+    }
   }
 }

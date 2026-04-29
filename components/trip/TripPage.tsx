@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  doc,
+  onSnapshot,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { TripHeader } from "@/components/trip/TripHeader";
 import { Tabs } from "@/components/trip/Tabs";
 import { ViewTab } from "@/components/trip/ViewTab";
@@ -10,7 +17,10 @@ import {
   useTripDocument,
 } from "@/components/providers/TripDocumentProvider";
 import { useI18n } from "@/components/providers/I18nProvider";
-import { getDb, getMissingFirebasePublicEnv } from "@/lib/firebase";
+import { getClientAuth, getDb, getMissingFirebasePublicEnv } from "@/lib/firebase";
+
+const MANAGE_LOCK_TTL_MS = 45_000;
+const MANAGE_LOCK_HEARTBEAT_MS = 15_000;
 
 export function TripPage({ tripId }: { tripId: string }) {
   const { t } = useI18n();
@@ -41,15 +51,17 @@ export function TripPage({ tripId }: { tripId: string }) {
 
   return (
     <TripDocumentProvider tripId={tripId}>
-      <TripChrome tab={tab} onTab={setTab} />
+      <TripChrome tripId={tripId} tab={tab} onTab={setTab} />
     </TripDocumentProvider>
   );
 }
 
 function TripChrome({
+  tripId,
   tab,
   onTab,
 }: {
+  tripId: string;
   tab: "view" | "manage";
   onTab: (next: "view" | "manage") => void;
 }) {
@@ -60,6 +72,132 @@ function TripChrome({
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [managePasswordInput, setManagePasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [manageLockError, setManageLockError] = useState("");
+  const [hasManageLock, setHasManageLock] = useState(false);
+  const db = getDb();
+  const lockRef = useMemo(
+    () => (db ? doc(db, "trips", tripId, "locks", "manage") : null),
+    [db, tripId]
+  );
+  const lockSessionId = useMemo(() => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `manage-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }, []);
+
+  const writeLock = useCallback(async () => {
+    if (!lockRef) return;
+    const auth = getClientAuth();
+    const currentUser = auth?.currentUser;
+    await setDoc(
+      lockRef,
+      {
+        holderSessionId: lockSessionId,
+        holderUid: currentUser?.uid ?? "",
+        holderEmail: currentUser?.email ?? "",
+        expiresAtMs: Date.now() + MANAGE_LOCK_TTL_MS,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }, [lockRef, lockSessionId]);
+
+  const acquireManageLock = useCallback(async (): Promise<boolean> => {
+    if (!lockRef) return false;
+    try {
+      await runTransaction(lockRef.firestore, async (tx) => {
+        const snap = await tx.get(lockRef);
+        const now = Date.now();
+        const data = (snap.data() ?? {}) as Record<string, unknown>;
+        const holderSessionId = String(data.holderSessionId ?? "");
+        const expiresAtMs = Number(data.expiresAtMs ?? 0);
+        const available =
+          !snap.exists() || holderSessionId === lockSessionId || expiresAtMs <= now;
+        if (!available) throw new Error("MANAGE_LOCK_HELD");
+        const auth = getClientAuth();
+        const currentUser = auth?.currentUser;
+        tx.set(
+          lockRef,
+          {
+            holderSessionId: lockSessionId,
+            holderUid: currentUser?.uid ?? "",
+            holderEmail: currentUser?.email ?? "",
+            expiresAtMs: now + MANAGE_LOCK_TTL_MS,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [lockRef, lockSessionId]);
+
+  const releaseManageLock = useCallback(async () => {
+    if (!lockRef) return;
+    try {
+      await runTransaction(lockRef.firestore, async (tx) => {
+        const snap = await tx.get(lockRef);
+        if (!snap.exists()) return;
+        const data = (snap.data() ?? {}) as Record<string, unknown>;
+        const holderSessionId = String(data.holderSessionId ?? "");
+        if (holderSessionId !== lockSessionId) return;
+        tx.delete(lockRef);
+      });
+    } catch {
+      /* ignore */
+    }
+  }, [lockRef, lockSessionId]);
+
+  useEffect(() => {
+    if (!lockRef) return;
+    return onSnapshot(
+      lockRef,
+      (snap) => {
+        if (!snap.exists() || tab !== "manage") return;
+        const data = (snap.data() ?? {}) as Record<string, unknown>;
+        const holderSessionId = String(data.holderSessionId ?? "");
+        const expiresAtMs = Number(data.expiresAtMs ?? 0);
+        if (holderSessionId !== lockSessionId && expiresAtMs > Date.now()) {
+          setHasManageLock(false);
+          setManageLockError("Manage tab is currently open in another browser.");
+          onTab("view");
+        }
+      },
+      () => {
+        // Firestore rules may deny lock doc reads for some users; avoid uncaught listener crashes.
+        setManageLockError("Unable to observe manage lock.");
+      }
+    );
+  }, [lockRef, lockSessionId, onTab, tab]);
+
+  useEffect(() => {
+    if (tab !== "manage" || !hasManageLock) return;
+    const id = window.setInterval(() => {
+      void writeLock();
+    }, MANAGE_LOCK_HEARTBEAT_MS);
+    return () => window.clearInterval(id);
+  }, [hasManageLock, tab, writeLock]);
+
+  useEffect(() => {
+    return () => {
+      if (hasManageLock) void releaseManageLock();
+    };
+  }, [hasManageLock, releaseManageLock]);
+
+  const openManageWithLock = useCallback(async () => {
+    setManageLockError("");
+    const ok = await acquireManageLock();
+    if (!ok) {
+      setManageLockError("Manage tab is currently open in another browser.");
+      return;
+    }
+    setHasManageLock(true);
+    setIsManageUnlocked(true);
+    onTab("manage");
+  }, [acquireManageLock, onTab]);
 
   if (loading) {
     return (
@@ -129,17 +267,20 @@ function TripChrome({
 
   function requestTabChange(next: "view" | "manage") {
     if (next === "view") {
+      if (hasManageLock) {
+        setHasManageLock(false);
+        void releaseManageLock();
+      }
       onTab("view");
       return;
     }
     const requiredPassword = trip?.managePassword ?? "";
     if (!requiredPassword) {
-      setIsManageUnlocked(true);
-      onTab("manage");
+      void openManageWithLock();
       return;
     }
     if (isManageUnlocked) {
-      onTab("manage");
+      void openManageWithLock();
       return;
     }
     setShowPasswordPrompt(true);
@@ -152,16 +293,14 @@ function TripChrome({
     const requiredPassword = trip?.managePassword ?? "";
     if (!requiredPassword) {
       setShowPasswordPrompt(false);
-      setIsManageUnlocked(true);
-      onTab("manage");
+      void openManageWithLock();
       return;
     }
     if (managePasswordInput === requiredPassword) {
       setShowPasswordPrompt(false);
-      setIsManageUnlocked(true);
       setManagePasswordInput("");
       setPasswordError("");
-      onTab("manage");
+      void openManageWithLock();
       return;
     }
     setPasswordError("Wrong password. Try again.");
@@ -181,6 +320,11 @@ function TripChrome({
           onChange={requestTabChange}
           labels={{ view: t("tabs.view"), manage: t("tabs.manage") }}
         />
+        {manageLockError ? (
+          <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+            {manageLockError}
+          </p>
+        ) : null}
         {showPasswordPrompt ? (
           <section className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">

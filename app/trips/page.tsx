@@ -13,7 +13,67 @@ type TripRow = {
   title: string;
   joinedAt?: string;
   canDeleteSole?: boolean;
+  hasLocalSnapshot?: boolean;
 };
+
+const TRIP_LOCAL_SNAPSHOT_PREFIX = "trip-doc-snapshot:";
+
+function readLocalTripRows(): TripRow[] {
+  if (typeof window === "undefined") return [];
+  const rows: TripRow[] = [];
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || !key.startsWith(TRIP_LOCAL_SNAPSHOT_PREFIX)) continue;
+      const tripId = key.slice(TRIP_LOCAL_SNAPSHOT_PREFIX.length).trim();
+      if (!tripId) continue;
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as {
+        savedAt?: string;
+        trip?: { title?: string };
+      };
+      rows.push({
+        id: tripId,
+        title: typeof parsed.trip?.title === "string" ? parsed.trip.title : "",
+        joinedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : undefined,
+        canDeleteSole: false,
+        hasLocalSnapshot: true,
+      });
+    }
+  } catch {
+    return rows;
+  }
+  return rows;
+}
+
+function mergeTripRows(remoteRows: TripRow[], localRows: TripRow[]): TripRow[] {
+  const byId = new Map<string, TripRow>();
+  for (const row of remoteRows) byId.set(row.id, row);
+  for (const local of localRows) {
+    const existing = byId.get(local.id);
+    if (!existing) {
+      byId.set(local.id, local);
+      continue;
+    }
+    byId.set(local.id, {
+      ...existing,
+      title: existing.title || local.title,
+      joinedAt: existing.joinedAt || local.joinedAt,
+      hasLocalSnapshot: true,
+    });
+  }
+  return [...byId.values()];
+}
+
+function removeLocalTripSnapshot(tripId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(`${TRIP_LOCAL_SNAPSHOT_PREFIX}${tripId}`);
+  } catch {
+    /* ignore localStorage errors */
+  }
+}
 
 export default function TripsPage() {
   const { t } = useI18n();
@@ -25,11 +85,12 @@ export default function TripsPage() {
 
   const loadTrips = useCallback(async () => {
     setError(null);
+    const localRows = readLocalTripRows();
     await ensureAuthPersistence();
     const auth = await restoreTripFirebaseSession(INDEX_AUTH_ID);
     if (auth.status === "needs_google_sign_in") {
       setNeedsSignIn(true);
-      setRows([]);
+      setRows(localRows);
       return;
     }
     if (!auth.user) throw new Error("firebase");
@@ -40,7 +101,8 @@ export default function TripsPage() {
     if (!res.ok) throw new Error(`list_trips_failed_${res.status}`);
     const payload = (await res.json()) as { trips?: TripRow[] };
     setNeedsSignIn(false);
-    setRows(Array.isArray(payload.trips) ? payload.trips : []);
+    const remoteRows = Array.isArray(payload.trips) ? payload.trips : [];
+    setRows(mergeTripRows(remoteRows, localRows));
   }, []);
 
   useEffect(() => {
@@ -96,6 +158,22 @@ export default function TripsPage() {
     [t]
   );
 
+  const deleteLocalTrip = useCallback((tripId: string) => {
+    removeLocalTripSnapshot(tripId);
+    setRows((prev) =>
+      prev
+        .map((row) =>
+          row.id === tripId
+            ? {
+                ...row,
+                hasLocalSnapshot: false,
+              }
+            : row
+        )
+        .filter((row) => row.id !== tripId || row.canDeleteSole)
+    );
+  }, []);
+
   if (loading) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 text-center text-sm text-zinc-500">
@@ -104,7 +182,7 @@ export default function TripsPage() {
     );
   }
 
-  if (needsSignIn) {
+  if (needsSignIn && rows.length === 0) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16">
         <section className="rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -163,6 +241,15 @@ export default function TripsPage() {
                   <div className="mt-1 text-xs text-zinc-500">{row.id}</div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {row.hasLocalSnapshot ? (
+                    <button
+                      type="button"
+                      onClick={() => deleteLocalTrip(row.id)}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-900"
+                    >
+                      Delete local
+                    </button>
+                  ) : null}
                   {row.canDeleteSole ? (
                     <button
                       type="button"
