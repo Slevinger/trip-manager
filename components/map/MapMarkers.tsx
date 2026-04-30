@@ -32,10 +32,6 @@ export const MapMarkers = memo(function MapMarkers({
     <>
       {markerData.map((item) => {
         const hotelsCount = item.step.type === "stay" ? item.step.hotels.length : 0;
-        const transportLabel =
-          item.step.type === "transit"
-            ? item.step.transports.map((x) => x.title.trim()).filter(Boolean).join(", ")
-            : "";
         const location = item.step.location.trim() || "\u2014";
         const title = item.step.title.trim() || "Untitled step";
         const googleMapsHref = `https://www.google.com/maps?q=${item.coordinates.lat},${item.coordinates.lng}`;
@@ -61,7 +57,7 @@ export const MapMarkers = memo(function MapMarkers({
                 </div>
                 <div>{location}</div>
                 <div>{formatStepDateRange(item.step)}</div>
-                <div>Transport: {transportLabel || "\u2014"}</div>
+                <div>Transport: {item.step.type === "transit" ? "Transit step" : "\u2014"}</div>
                 <div>Hotels: {hotelsCount}</div>
                 <a
                   href={googleMapsHref}

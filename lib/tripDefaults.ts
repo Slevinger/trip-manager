@@ -1,5 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
-import { applyTransitEndFromArrivals } from "@/lib/timeline/hotelsAndDates";
+import {
+  applyTransitEndFromArrivals,
+  effectiveStepEndParts,
+} from "@/lib/timeline/hotelsAndDates";
 import type { StayStep, TransitStep, Trip, TripStep } from "@/lib/types/trip";
 
 export function nowIso(): string {
@@ -37,10 +40,49 @@ export function createEmptyStep(order: number): TripStep {
  * New step placed after `afterStep`. After a transit leg, default to stay (next place).
  */
 export function createEmptyStepInsertedAfter(afterStep: TripStep, order: number): TripStep {
+  const prevEnd = effectiveStepEndParts(afterStep);
+  const startDate = prevEnd.date;
+  const startTime = prevEnd.time;
+  const base = {
+    ...createEmptyStep(order),
+    startDate,
+    startTime,
+  };
   if (afterStep.type === "transit") {
-    return { ...createEmptyStep(order), type: "stay", hotels: [] };
+    return {
+      ...base,
+      type: "stay",
+      hotels: [
+        {
+          id: uuidv4(),
+          name: "",
+          checkinDate: startDate,
+          checkinTime: startTime,
+          checkoutDate: startDate,
+          checkoutTime: startTime,
+          bookingUrl: "",
+          cost: 0,
+          notes: "",
+        },
+      ],
+    };
   }
-  return createEmptyStep(order);
+  return {
+    ...base,
+    hotels: [
+      {
+        id: uuidv4(),
+        name: "",
+        checkinDate: startDate,
+        checkinTime: startTime,
+        checkoutDate: startDate,
+        checkoutTime: startTime,
+        bookingUrl: "",
+        cost: 0,
+        notes: "",
+      },
+    ],
+  };
 }
 
 /** Convert any step shape to a stay (wizard / type switch). */
@@ -70,6 +112,7 @@ export function morphStepToTransit(step: TripStep): TransitStep {
   return applyTransitEndFromArrivals({
     ...rest,
     type: "transit",
+    transitType: "airplane",
     transports: [],
     endDateOpen: false,
     transitEndManual: false,

@@ -132,7 +132,7 @@ export function TripLeafletMap({ trip }: { trip: Trip }) {
               `<div>${escapeHtml(formatStepDateRange(s))}</div>`,
               `<div>Transport: ${escapeHtml(
                 s.type === "transit"
-                  ? s.transports.map((x) => x.title.trim()).filter(Boolean).join(", ") || "—"
+                  ? "Transit step"
                   : "—"
               )}</div>`,
               `<div>Hotels: ${s.type === "stay" ? s.hotels.length : 0}</div>`,

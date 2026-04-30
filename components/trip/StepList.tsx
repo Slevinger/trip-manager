@@ -10,6 +10,15 @@ import {
 import { useI18n } from "@/components/providers/I18nProvider";
 import { formatTripDateTimeForLocale } from "@/lib/i18n/format";
 
+function stepEmoji(step: TripStep): string {
+  if (step.type === "stay") return "🏨";
+  if (step.transitType === "minivan") return "🚐";
+  if (step.transitType === "taxi") return "🚕";
+  if (step.transitType === "ferry") return "⛴️";
+  if (step.transitType === "speedboat") return "🚤";
+  return "✈️";
+}
+
 export function StepList({
   trip,
   onEdit,
@@ -116,7 +125,7 @@ export function StepList({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-              {draggingStep.title.trim() || t("step.title")}
+              {stepEmoji(draggingStep)} {draggingStep.title.trim() || t("step.title")}
             </div>
             <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
               {start.date
@@ -154,7 +163,7 @@ export function StepList({
           style={{ left: dragPos.x, top: dragPos.y }}
         >
           <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            {draggingStep.title.trim() || t("step.title")}
+            {stepEmoji(draggingStep)} {draggingStep.title.trim() || t("step.title")}
           </div>
           <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
             {draggingStep.location.trim() || "—"}
@@ -198,7 +207,7 @@ export function StepList({
                     >
                       ⋮⋮
                     </button>
-                    {idx + 1}. {s.title.trim() || t("step.title")}
+                    {idx + 1}. {stepEmoji(s)} {s.title.trim() || t("step.title")}
                   </div>
                   <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
                     {start.date

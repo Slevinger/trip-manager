@@ -113,7 +113,7 @@ export function MainStepWizard({
       kind="transit"
       tripSteps={tripSteps}
       initial={phase.step}
-      entry={startMode === "transit_item" ? "transports_only" : "full"}
+        entry="full"
       onBackToTypePick={() => setPhase({ kind: "pick" })}
       onComplete={onComplete}
     />

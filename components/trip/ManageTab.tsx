@@ -11,6 +11,7 @@ import { useI18n } from "@/components/providers/I18nProvider";
 import { createEmptyStep, createEmptyStepInsertedAfter } from "@/lib/tripDefaults";
 import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
 import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
+import { instantFromParts } from "@/lib/timeline/dates";
 
 export function ManageTab() {
   const { trip, persist, canUndo, undo, hasUnsavedChanges, saveNow } = useTripDocument();
@@ -43,6 +44,41 @@ export function ManageTab() {
 
   const doc = trip;
 
+  function normalizeStepOrder(steps: TripStep[]): TripStep[] {
+    const enriched = steps.map((step, idx) => {
+      const instant = instantFromParts({
+        date: step.startDate.trim(),
+        time: step.startTime.trim(),
+      });
+      return {
+        step,
+        originalOrder: step.order,
+        originalIndex: idx,
+        hasDate: Boolean(instant),
+        dateMs: instant?.getTime() ?? 0,
+      };
+    });
+    enriched.sort((a, b) => {
+      if (a.hasDate && b.hasDate) {
+        if (a.dateMs !== b.dateMs) return a.dateMs - b.dateMs;
+        if (a.originalOrder !== b.originalOrder) return a.originalOrder - b.originalOrder;
+        return a.originalIndex - b.originalIndex;
+      }
+      if (a.hasDate !== b.hasDate) return a.hasDate ? -1 : 1;
+      if (a.originalOrder !== b.originalOrder) return a.originalOrder - b.originalOrder;
+      return a.originalIndex - b.originalIndex;
+    });
+    return enriched.map((item, idx) => ({ ...item.step, order: idx }));
+  }
+
+  function persistNonInputChange(next: Trip) {
+    setTripSaveError(null);
+    persist(next);
+    void saveNow().catch((err: unknown) => {
+      setTripSaveError(err instanceof Error ? err.message : String(err));
+    });
+  }
+
   function addStep() {
     const sorted = [...doc.steps].sort((a, b) => a.order - b.order);
     const last = sorted.length ? sorted[sorted.length - 1] : null;
@@ -51,7 +87,7 @@ export function ManageTab() {
       : 0;
     const base = last ? createEmptyStepInsertedAfter(last, order) : createEmptyStep(order);
     const step = { ...base, id: uuidv4() };
-    persist({ ...doc, steps: [...doc.steps, step] });
+    persistNonInputChange({ ...doc, steps: normalizeStepOrder([...doc.steps, step]) });
     setEditing({ step, isNew: true });
   }
 
@@ -65,7 +101,7 @@ export function ManageTab() {
     };
     const withNew = [...sorted.slice(0, idx + 1), newStep, ...sorted.slice(idx + 1)];
     const renumbered = withNew.map((s, i) => ({ ...s, order: i }));
-    persist({ ...doc, steps: renumbered });
+    persistNonInputChange({ ...doc, steps: normalizeStepOrder(renumbered) });
     setEditing({ step: newStep, isNew: true });
   }
 
@@ -73,7 +109,7 @@ export function ManageTab() {
     const steps = doc.steps
       .filter((s) => s.id !== stepId)
       .map((s, idx) => ({ ...s, order: idx }));
-    persist({ ...doc, steps });
+    persistNonInputChange({ ...doc, steps: normalizeStepOrder(steps) });
   }
 
   function setActive(stepId: string) {
@@ -82,7 +118,11 @@ export function ManageTab() {
       if (s.status === "active") return { ...s, status: "todo" as const };
       return s;
     });
-    persist({ ...doc, autoCurrentByDate: false, steps });
+    persistNonInputChange({
+      ...doc,
+      autoCurrentByDate: false,
+      steps: normalizeStepOrder(steps),
+    });
   }
 
   function reorderSteps(orderedStepIds: string[]) {
@@ -93,7 +133,7 @@ export function ManageTab() {
       .filter((s): s is TripStep => Boolean(s))
       .map((s, idx) => ({ ...s, order: idx }));
     if (next.length !== doc.steps.length) return;
-    persist({ ...doc, steps: next });
+    persistNonInputChange({ ...doc, steps: normalizeStepOrder(next) });
   }
 
   return (
@@ -193,7 +233,9 @@ export function ManageTab() {
         title="Trip files (passports, plane tickets, reservations, receipts)"
         attachments={doc.tripAttachments}
         uploadPathPrefix={`trips/${doc.id}/trip-attachments`}
-        onChange={(tripAttachments) => persist({ ...doc, tripAttachments })}
+          onChange={(tripAttachments) =>
+            persistNonInputChange({ ...doc, tripAttachments })
+          }
       />
 
       {editing ? (
@@ -204,7 +246,7 @@ export function ManageTab() {
           initial={editing.step}
           isNewStep={Boolean(editing.isNew)}
           onClose={() => setEditing(null)}
-          onSave={(saved) => {
+          onSave={async (saved) => {
             const base = latestTrip.current;
             if (!base) return;
             const idx = base.steps.findIndex((s) => s.id === saved.id);
@@ -217,8 +259,8 @@ export function ManageTab() {
                     return [...base.steps, { ...saved, order: nextOrder }];
                   })()
                 : base.steps.map((s) => (s.id === saved.id ? saved : s));
-            setTripSaveError(null);
-            persist({ ...base, steps });
+            persist({ ...base, steps: normalizeStepOrder(steps) });
+            await saveNow();
           }}
         />
       ) : null}

@@ -21,25 +21,6 @@ export interface TimeIntelWarning {
   meta?: Record<string, string | number | boolean | undefined>;
 }
 
-function parseDurationHours(duration: string): number | null {
-  const d = duration.trim().toLowerCase();
-  const hMatch = /(\d+(?:\.\d+)?)\s*h/.exec(d);
-  if (hMatch) return Number(hMatch[1]);
-  const num = Number(d.replace(/[^\d.]/g, ""));
-  return Number.isFinite(num) ? num : null;
-}
-
-function maxTransportDurationHours(step: Trip["steps"][number]): number | null {
-  if (step.type !== "transit") return null;
-  let max: number | null = null;
-  for (const option of step.transports) {
-    const hours = parseDurationHours(option.duration);
-    if (hours === null) continue;
-    max = max === null ? hours : Math.max(max, hours);
-  }
-  return max;
-}
-
 export function collectTimeIntelligenceWarnings(trip: Trip): TimeIntelWarning[] {
   const out: TimeIntelWarning[] = [];
   const steps = [...trip.steps].sort((a, b) => a.order - b.order);
@@ -65,10 +46,6 @@ export function collectTimeIntelligenceWarnings(trip: Trip): TimeIntelWarning[] 
       out.push({ code: "hotels_cover", stepId: s.id });
     }
 
-    const hours = maxTransportDurationHours(s);
-    if (hours !== null && hours >= 6) {
-      out.push({ code: "long_transfer", stepId: s.id, meta: { hours } });
-    }
   }
 
   for (let i = 0; i < steps.length - 1; i++) {

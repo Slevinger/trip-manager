@@ -10,10 +10,12 @@ export function HotelsEditor({
   hotels,
   onChange,
   onAddRequested,
+  minDate,
 }: {
   hotels: Hotel[];
   onChange: (next: Hotel[]) => void;
   onAddRequested?: () => void;
+  minDate?: string;
 }) {
   const { t } = useI18n();
 
@@ -31,15 +33,18 @@ export function HotelsEditor({
       onAddRequested();
       return;
     }
+    const last = hotels[hotels.length - 1];
+    const seedDate = last?.checkoutDate?.trim() || "";
+    const seedTime = last?.checkoutTime?.trim() || "";
     onChange([
       ...hotels,
       {
         id: uuidv4(),
         name: "",
-        checkinDate: "",
-        checkinTime: "",
-        checkoutDate: "",
-        checkoutTime: "",
+        checkinDate: seedDate,
+        checkinTime: seedTime,
+        checkoutDate: seedDate,
+        checkoutTime: seedTime,
         bookingUrl: "",
         cost: 0,
         notes: "",
@@ -92,6 +97,7 @@ export function HotelsEditor({
                     className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                     date={h.checkinDate}
                     time={h.checkinTime}
+                    minDate={minDate}
                     onDateChange={(checkinDate) => updateAt(idx, { checkinDate })}
                     onTimeChange={(checkinTime) => updateAt(idx, { checkinTime })}
                   />
@@ -102,6 +108,7 @@ export function HotelsEditor({
                     className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                     date={h.checkoutDate}
                     time={h.checkoutTime}
+                    minDate={h.checkinDate.trim() || minDate}
                     onDateChange={(checkoutDate) => updateAt(idx, { checkoutDate })}
                     onTimeChange={(checkoutTime) => updateAt(idx, { checkoutTime })}
                   />

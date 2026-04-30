@@ -154,11 +154,17 @@ function normalizeTransports(raw: unknown): TransitStep["transports"] {
   if (!Array.isArray(raw)) return [];
   return raw.map((item) => {
     const r = (item ?? {}) as Record<string, unknown>;
+    const start = splitStoredDateAndTime(r.startDate, r.startTime);
+    const end = splitStoredDateAndTime(r.endDate, r.endTime);
     return {
       id: String(r.id ?? ""),
       title: String(r.title ?? ""),
       from: String(r.from ?? ""),
       to: String(r.to ?? ""),
+      startDate: start.date,
+      startTime: start.time,
+      endDate: end.date,
+      endTime: end.time,
       details: String(r.details ?? ""),
       duration: String(r.duration ?? ""),
       cost: String(r.cost ?? ""),
@@ -214,6 +220,15 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
   if (type === "stay") return { ...shared, type, hotels };
   const fromStayStepId = String(s.fromStayStepId ?? "").trim();
   const toStayStepId = String(s.toStayStepId ?? "").trim();
+  const transitTypeRaw = String(s.transitType ?? "").trim();
+  const transitType =
+    transitTypeRaw === "airplane" ||
+    transitTypeRaw === "minivan" ||
+    transitTypeRaw === "taxi" ||
+    transitTypeRaw === "ferry" ||
+    transitTypeRaw === "speedboat"
+      ? transitTypeRaw
+      : undefined;
   const transit: TransitStep = {
     ...shared,
     type,
@@ -221,6 +236,7 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     endDateOpen: false,
     nights: 0,
     transitEndManual: Boolean(s.transitEndManual),
+    ...(transitType ? { transitType } : {}),
     ...(fromStayStepId ? { fromStayStepId } : {}),
     ...(toStayStepId ? { toStayStepId } : {}),
   };
@@ -308,7 +324,7 @@ export function normalizeTripFromFirestore(
 }
 
 export function tripToFirestorePayload(trip: Trip): Record<string, unknown> {
-  return {
+  return stripUndefinedDeep({
     id: trip.id,
     title: trip.title,
     tripStartDate: trip.tripStartDate,
@@ -323,7 +339,20 @@ export function tripToFirestorePayload(trip: Trip): Record<string, unknown> {
     autoCurrentByDate: trip.autoCurrentByDate,
     steps: trip.steps,
     updatedAt: serverTimestamp(),
-  };
+  });
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, stripUndefinedDeep(v)]);
+    return Object.fromEntries(entries) as T;
+  }
+  return value;
 }
 
 export async function createTrip(

@@ -100,23 +100,12 @@ function maxOfInstantParts(candidates: TripDateTimeParts[]): TripDateTimeParts |
   return ok.reduce((a, b) => maxTripDateTime(a, b));
 }
 
-/**
- * When transit has arrival options and `transitEndManual` is not set, copy step end from
- * the last option’s end (if that end date is set).
- */
 export function applyTransitEndFromArrivals<T extends TripStep>(step: T): T {
-  if (step.type !== "transit" || step.transitEndManual) return step;
-  if (step.arrivalOptions.length === 0) return step;
-  const last = step.arrivalOptions[step.arrivalOptions.length - 1];
-  const endDate = last.endDate.trim();
-  const endTime = last.endTime.trim();
-  if (!endDate) return step;
-  return { ...step, endDate, endTime } as T;
+  return step;
 }
 
 /**
- * Transit step `duration` label: earliest of (step start, first arrival start) → latest of
- * (step end, last arrival end). Arrival order is `arrivalOptions` array order.
+ * Transit step `duration` label from step-level start/end only.
  */
 export function transitStepDurationFromArrivals(step: TripStep): string {
   if (step.type !== "transit") return "";
@@ -130,18 +119,6 @@ export function transitStepDurationFromArrivals(step: TripStep): string {
   };
   const startCandidates: TripDateTimeParts[] = [manualStart];
   const endCandidates: TripDateTimeParts[] = [manualEnd];
-  if (step.arrivalOptions.length > 0) {
-    const first = step.arrivalOptions[0];
-    const last = step.arrivalOptions[step.arrivalOptions.length - 1];
-    startCandidates.push({
-      date: first.startDate.trim(),
-      time: first.startTime.trim(),
-    });
-    endCandidates.push({
-      date: last.endDate.trim(),
-      time: last.endTime.trim(),
-    });
-  }
   const effStart = minOfInstantParts(startCandidates);
   const effEnd = maxOfInstantParts(endCandidates);
   if (!effStart || !effEnd) return "";

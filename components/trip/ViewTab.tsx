@@ -22,6 +22,15 @@ function pickCurrentStep(trip: Trip) {
   return active ?? ordered[0] ?? null;
 }
 
+function stepEmoji(step: Trip["steps"][number]): string {
+  if (step.type === "stay") return "🏨";
+  if (step.transitType === "minivan") return "🚐";
+  if (step.transitType === "taxi") return "🚕";
+  if (step.transitType === "ferry") return "⛴️";
+  if (step.transitType === "speedboat") return "🚤";
+  return "✈️";
+}
+
 export function ViewTab() {
   const { trip } = useTripDocument();
   const { t, locale } = useI18n();
@@ -45,7 +54,7 @@ export function ViewTab() {
         {current ? (
           <div className="mt-3 rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-900/50">
             <div className="font-semibold text-zinc-900 dark:text-zinc-50">
-              {current.title.trim() || t("step.title")}
+              {stepEmoji(current)} {current.title.trim() || t("step.title")}
             </div>
             {current.location.trim() ? (
               <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">

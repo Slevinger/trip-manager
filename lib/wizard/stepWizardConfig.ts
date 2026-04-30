@@ -3,7 +3,7 @@
  * Flow logic lives in StepFlowWizard; this file is the single source for i18n keys and step counts.
  */
 
-export type StepWizardEntry = "full" | "hotels_only" | "transports_only";
+export type StepWizardEntry = "full" | "hotels_only";
 
 export const STAY_WIZARD_TOTAL_STEPS = 5;
 
@@ -30,7 +30,7 @@ export const STAY_WIZARD_SHELL = [
   },
 ] as const;
 
-export const TRANSIT_WIZARD_TOTAL_STEPS = 5;
+export const TRANSIT_WIZARD_TOTAL_STEPS = 3;
 
 export const TRANSIT_WIZARD_SHELL = [
   {
@@ -40,14 +40,6 @@ export const TRANSIT_WIZARD_SHELL = [
   {
     titleKey: "stepWizard.transitWhenTitle",
     descKey: "stepWizard.transitWhenHint",
-  },
-  {
-    titleKey: "stepWizard.transitTransportTitle",
-    descKey: "stepWizard.transitTransportHint",
-  },
-  {
-    titleKey: "stepWizard.afterListItemTitle",
-    descKey: "stepWizard.transitAfterTransportBody",
   },
   {
     titleKey: "stepWizard.reviewTitle",

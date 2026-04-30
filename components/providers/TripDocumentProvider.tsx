@@ -40,6 +40,7 @@ import {
   subscribeToTrip,
 } from "@/lib/trips";
 import { resolveAutoActiveStepId } from "@/lib/timeline/autoCurrentStep";
+import { instantFromParts } from "@/lib/timeline/dates";
 import { defaultTrip } from "@/lib/tripDefaults";
 
 const TRIP_LOCAL_SNAPSHOT_PREFIX = "trip-doc-snapshot:";
@@ -161,6 +162,37 @@ function applyAutoStatuses(trip: Trip, now: Date): Trip {
   return { ...trip, steps };
 }
 
+function orderTripSteps(steps: TripStep[]): TripStep[] {
+  const enriched = steps.map((step, idx) => {
+    const instant = instantFromParts({
+      date: step.startDate.trim(),
+      time: step.startTime.trim(),
+    });
+    return {
+      step,
+      originalOrder: step.order,
+      originalIndex: idx,
+      hasDate: Boolean(instant),
+      dateMs: instant?.getTime() ?? 0,
+    };
+  });
+  enriched.sort((a, b) => {
+    if (a.hasDate && b.hasDate) {
+      if (a.dateMs !== b.dateMs) return a.dateMs - b.dateMs;
+      if (a.originalOrder !== b.originalOrder) return a.originalOrder - b.originalOrder;
+      return a.originalIndex - b.originalIndex;
+    }
+    if (a.hasDate !== b.hasDate) return a.hasDate ? -1 : 1;
+    if (a.originalOrder !== b.originalOrder) return a.originalOrder - b.originalOrder;
+    return a.originalIndex - b.originalIndex;
+  });
+  return enriched.map((item, idx) => ({ ...item.step, order: idx }));
+}
+
+function normalizeTripStepOrder(trip: Trip): Trip {
+  return { ...trip, steps: orderTripSteps(trip.steps) };
+}
+
 export function TripDocumentProvider({
   tripId,
   children,
@@ -215,7 +247,7 @@ function TripDocumentInner({
 
   const persist = useCallback(
     (next: Trip) => {
-      const normalized = { ...next, id: tripId };
+      const normalized = normalizeTripStepOrder({ ...next, id: tripId });
       dispatch(userPersisted(normalized));
       rememberTripSnapshot(normalized);
       writeTripLocalSnapshot(tripId, normalized, true);
@@ -227,7 +259,7 @@ function TripDocumentInner({
     (patch: Partial<Trip>) => {
       const prev = store.getState().tripDocument.trip;
       if (!prev) return;
-      const next = mergeTrip(prev, patch);
+      const next = normalizeTripStepOrder(mergeTrip(prev, patch));
       dispatch(userPersisted(next));
       rememberTripSnapshot(next);
       writeTripLocalSnapshot(tripId, next, true);
@@ -237,7 +269,7 @@ function TripDocumentInner({
 
   const persistUpdate = useCallback(
     (patch: Partial<Trip>) => {
-      const next = mergeLatestTrip(tripId, patch);
+      const next = normalizeTripStepOrder(mergeLatestTrip(tripId, patch));
       dispatch(userPersisted(next));
       rememberTripSnapshot(next);
       writeTripLocalSnapshot(tripId, next, true);

@@ -76,11 +76,17 @@ function normalizeTransports(raw: unknown): TransportOption[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((item) => {
     const t = toRecord(item);
+    const st = splitStoredDateAndTime(t.startDate, t.startTime);
+    const en = splitStoredDateAndTime(t.endDate, t.endTime);
     return {
       id: String(t.id ?? ""),
       title: String(t.title ?? ""),
       from: String(t.from ?? ""),
       to: String(t.to ?? ""),
+      startDate: st.date,
+      startTime: st.time,
+      endDate: en.date,
+      endTime: en.time,
       details: String(t.details ?? ""),
       duration: String(t.duration ?? ""),
       cost: String(t.cost ?? ""),
@@ -146,6 +152,10 @@ function normalizeStep(raw: unknown): TripStep {
               title: legacyTransport,
               from: "",
               to: "",
+              startDate: "",
+              startTime: "",
+              endDate: "",
+              endTime: "",
               details: "",
               duration: "",
               cost: "",

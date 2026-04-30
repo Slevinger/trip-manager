@@ -32,6 +32,14 @@ export interface TransportOption {
   title: string;
   from: string;
   to: string;
+  /** Segment start `dd-mm-yyyy`. */
+  startDate: string;
+  /** `HH:mm` or empty. */
+  startTime: string;
+  /** Segment end `dd-mm-yyyy`. */
+  endDate: string;
+  /** `HH:mm` or empty. */
+  endTime: string;
   details: string;
   duration: string;
   cost: string;
@@ -91,6 +99,7 @@ export interface StayStep extends TripStepBase {
 
 export interface TransitStep extends TripStepBase {
   type: "transit";
+  transitType?: "airplane" | "minivan" | "taxi" | "ferry" | "speedboat";
   transports: TransportOption[];
   /** Stay step id this transit leaves from (same trip). */
   fromStayStepId?: string;

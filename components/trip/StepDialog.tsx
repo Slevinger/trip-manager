@@ -1,8 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { v4 as uuidv4 } from "uuid";
-import type { ArrivalOption, StayStep, TransportOption, TripStep } from "@/lib/types/trip";
+import type { StayStep, TripStep } from "@/lib/types/trip";
 import { stayStepsSorted } from "@/lib/tripStayEndpoints";
 import { TransitStaySelects } from "@/components/trip/TransitStaySelects";
 import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
@@ -10,7 +9,11 @@ import { HotelsEditor } from "@/components/trip/HotelsEditor";
 import { AttachmentManager } from "@/components/trip/AttachmentManager";
 import { useI18n } from "@/components/providers/I18nProvider";
 import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
-import { formatSpanBetweenStoredParts, isValidDdMmYyyy } from "@/lib/timeline/dates";
+import {
+  formatSpanBetweenStoredParts,
+  isValidDdMmYyyy,
+  parseDdMmYyyyCalendarDate,
+} from "@/lib/timeline/dates";
 import {
   applyOpenEndDateFromHotels,
   applyTransitEndFromArrivals,
@@ -36,7 +39,7 @@ export function StepDialog({
   /** When true, offer guided setup before the full step editor. */
   isNewStep?: boolean;
   onClose: () => void;
-  onSave: (step: TripStep) => void;
+  onSave: (step: TripStep) => void | Promise<void>;
 }) {
   const { t } = useI18n();
   const stepTypeLegendId = useId();
@@ -55,6 +58,10 @@ export function StepDialog({
   const [wizardMode, setWizardMode] = useState<"pick" | "stay_item" | "transit_item">(
     "pick"
   );
+  const startDateFloor = useMemo(
+    () => (isNewStep ? initial.startDate.trim() : ""),
+    [initial.startDate, isNewStep]
+  );
 
   const previewNights = useMemo(() => computeNightsForStep(draft), [draft]);
 
@@ -65,12 +72,17 @@ export function StepDialog({
     return transitStepDurationFromArrivals(draft);
   }, [draft]);
 
-  const transitEndFollowsLastArrival = useMemo(() => {
-    if (draft.type !== "transit" || draft.transitEndManual) return false;
-    if (!draft.arrivalOptions.length) return false;
-    const last = draft.arrivalOptions[draft.arrivalOptions.length - 1];
-    return isValidDdMmYyyy(last.endDate);
-  }, [draft]);
+  const endDateMin = useMemo(() => {
+    const start = (draft.startDate || startDateFloor).trim();
+    const parsed = parseDdMmYyyyCalendarDate(start);
+    if (!parsed) return start || undefined;
+    const next = new Date(parsed);
+    next.setDate(next.getDate() + 1);
+    const dd = String(next.getDate()).padStart(2, "0");
+    const mm = String(next.getMonth() + 1).padStart(2, "0");
+    const yyyy = String(next.getFullYear());
+    return `${dd}-${mm}-${yyyy}`;
+  }, [draft.startDate, startDateFloor]);
 
   function setHotels(hotels: StayStep["hotels"]) {
     setDraft((d) => {
@@ -82,63 +94,18 @@ export function StepDialog({
     });
   }
 
-  function setTransports(transports: TransportOption[]) {
-    setDraft((d) => {
-      if (d.type !== "transit") return d;
-      return { ...d, transports };
-    });
-  }
-
-  function addArrival() {
-    setDraft((d) => {
-      if (d.type !== "transit") return d;
-      const nextOpt: ArrivalOption = {
-        id: uuidv4(),
-        title: "",
-        details: "",
-        duration: "",
-        cost: "",
-        startDate: "",
-        startTime: "",
-        endDate: "",
-        endTime: "",
-      };
-      const withOpts = { ...d, arrivalOptions: [...d.arrivalOptions, nextOpt] };
-      return applyTransitEndFromArrivals(withOpts);
-    });
-  }
-
-  function updateArrivalOption(idx: number, patch: Partial<ArrivalOption>) {
-    setDraft((d) => {
-      if (d.type !== "transit") return d;
-      const arrivalOptions = d.arrivalOptions.map((o, i) => {
-        if (i !== idx) return o;
-        const next = { ...o, ...patch };
-        return {
-          ...next,
-          duration: formatSpanBetweenStoredParts(
-            next.startDate,
-            next.startTime,
-            next.endDate,
-            next.endTime
-          ),
-        };
-      });
-      return applyTransitEndFromArrivals({ ...d, arrivalOptions });
-    });
-  }
-
   function switchType(type: "stay" | "transit") {
     setDraft((d) => {
       if (d.type === type) return d;
       if (type === "stay") {
         if (d.type !== "transit") return d;
-        const { transports: _tr, transitEndManual: _tm, ...base } = d;
+        const { transitEndManual: _tm, ...base } = d;
         return { ...base, type: "stay", hotels: [] };
       }
       return {
         ...d,
         type,
+        transitType: "airplane",
         transports: [],
         endDateOpen: false,
         transitEndManual: false,
@@ -148,10 +115,19 @@ export function StepDialog({
     });
   }
 
-  function addTransport() {
-    setSaveError(null);
-    setWizardMode("transit_item");
-    setSurface("wizard");
+  function isInvalidRange(
+    startDate: string,
+    startTime: string,
+    endDate: string,
+    endTime: string
+  ): boolean {
+    const sd = startDate.trim();
+    const ed = endDate.trim();
+    const st = startTime.trim();
+    const et = endTime.trim();
+    if (!sd || !ed || !st || !et) return false;
+    if (sd !== ed) return false;
+    return et <= st;
   }
 
   return (
@@ -182,9 +158,9 @@ export function StepDialog({
               <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
                 {t("stepWizard.pathSubtitle")}
               </p>
-              <button
-                type="button"
-                onClick={() => {
+            <button
+              type="button"
+              onClick={async () => {
                   setWizardMode("pick");
                   setSurface("wizard");
                 }}
@@ -290,10 +266,10 @@ export function StepDialog({
             >
               {(
                 [
-                  { type: "stay" as const, label: t("step.typeStay") },
-                  { type: "transit" as const, label: t("step.typeTransit") },
+                  { type: "stay" as const, label: t("step.typeStay"), icon: "🏨" },
+                  { type: "transit" as const, label: t("step.typeTransit"), icon: "✈️" },
                 ] as const
-              ).map(({ type, label }) => {
+              ).map(({ type, label, icon }) => {
                 const selected = draft.type === type;
                 return (
                   <button
@@ -311,12 +287,39 @@ export function StepDialog({
                         : "rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
                     }
                   >
+                    <span className="mr-1">{icon}</span>
                     {label}
                   </button>
                 );
               })}
             </div>
           </fieldset>
+          {draft.type === "transit" ? (
+            <label className="block text-xs text-zinc-600 dark:text-zinc-300">
+              <span>{t("step.transitType")}</span>
+              <select
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={draft.transitType ?? "airplane"}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    transitType: e.target.value as
+                      | "airplane"
+                      | "minivan"
+                      | "taxi"
+                      | "ferry"
+                      | "speedboat",
+                  })
+                }
+              >
+                <option value="airplane">✈️ {t("step.transitTypeAirplane")}</option>
+                <option value="minivan">🚐 {t("step.transitTypeMinivan")}</option>
+                <option value="taxi">🚕 {t("step.transitTypeTaxi")}</option>
+                <option value="ferry">⛴️ {t("step.transitTypeFerry")}</option>
+                <option value="speedboat">🚤 {t("step.transitTypeSpeedboat")}</option>
+              </select>
+            </label>
+          ) : null}
           {draft.type === "transit" ? (
             stayOptions.length === 0 ? (
               <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
@@ -340,13 +343,14 @@ export function StepDialog({
               />
             )
           ) : null}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <label className="block text-xs text-zinc-600 dark:text-zinc-300">
               <span>{t("step.startDate")}</span>
               <TripDateTimeInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 date={draft.startDate}
                 time={draft.startTime}
+                minDate={startDateFloor || undefined}
                 onDateChange={(startDate) => {
                   setSaveError(null);
                   setDraft({ ...draft, startDate });
@@ -361,12 +365,12 @@ export function StepDialog({
               <span>{t("step.endDate")}</span>
               <TripDateTimeInput
                 disabled={
-                  (draft.type === "stay" && draft.endDateOpen) ||
-                  transitEndFollowsLastArrival
+                  draft.type === "stay" && draft.endDateOpen
                 }
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900"
                 date={draft.endDate}
                 time={draft.endTime}
+                minDate={endDateMin}
                 onDateChange={(endDate) => {
                   setSaveError(null);
                   setDraft((d) => {
@@ -400,47 +404,6 @@ export function StepDialog({
                   });
                 }}
               />
-              {transitEndFollowsLastArrival ? (
-                <div className="mt-2 space-y-2">
-                  <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-                    {t("step.transitEndFromArrivalsHint")}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDraft((d) =>
-                        d.type === "transit" ? { ...d, transitEndManual: true } : d
-                      )
-                    }
-                    className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    {t("step.transitEndEditManual")}
-                  </button>
-                </div>
-              ) : null}
-              {draft.type === "transit" &&
-              draft.transitEndManual &&
-              draft.arrivalOptions.length > 0 &&
-              isValidDdMmYyyy(
-                draft.arrivalOptions[draft.arrivalOptions.length - 1].endDate
-              ) ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft((d) =>
-                      d.type !== "transit"
-                        ? d
-                        : applyTransitEndFromArrivals({
-                            ...d,
-                            transitEndManual: false,
-                          })
-                    )
-                  }
-                  className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] font-medium text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                >
-                  {t("step.transitEndMatchLastArrival")}
-                </button>
-              ) : null}
             </label>
           </div>
           {draft.type === "stay" ? (
@@ -497,213 +460,18 @@ export function StepDialog({
               />
             </label>
           )}
-          {draft.type === "transit" ? (
-            <>
-              <label className="block text-xs text-zinc-600 dark:text-zinc-300">
-                <span>{t("step.arrivalSummary")}</span>
-                <textarea
-                  className="mt-1 min-h-[72px] w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                  value={draft.arrivalSummary}
-                  onChange={(e) =>
-                    setDraft({ ...draft, arrivalSummary: e.target.value })
-                  }
-                />
-              </label>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                    {t("step.arrivalOptions")}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addArrival}
-                    className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-900"
-                  >
-                    {t("step.addArrival")}
-                  </button>
-                </div>
-                {draft.arrivalOptions.map((opt, idx) => (
-                  <div
-                    key={opt.id}
-                    className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
-                  >
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <input
-                        className="rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950 sm:col-span-2"
-                        value={opt.title}
-                        placeholder={t("step.title")}
-                        onChange={(e) => {
-                          const arrivalOptions = draft.arrivalOptions.map((o, i) =>
-                            i === idx ? { ...o, title: e.target.value } : o
-                          );
-                          setDraft({ ...draft, arrivalOptions });
-                        }}
-                      />
-                      <label className="block text-xs text-zinc-600 dark:text-zinc-300 sm:col-span-2">
-                        <span>{t("step.arrivalOptionStart")}</span>
-                        <TripDateTimeInput
-                          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          date={opt.startDate}
-                          time={opt.startTime}
-                          onDateChange={(startDate) => updateArrivalOption(idx, { startDate })}
-                          onTimeChange={(startTime) => updateArrivalOption(idx, { startTime })}
-                        />
-                      </label>
-                      <label className="block text-xs text-zinc-600 dark:text-zinc-300 sm:col-span-2">
-                        <span>{t("step.arrivalOptionEnd")}</span>
-                        <TripDateTimeInput
-                          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                          date={opt.endDate}
-                          time={opt.endTime}
-                          onDateChange={(endDate) => updateArrivalOption(idx, { endDate })}
-                          onTimeChange={(endTime) => updateArrivalOption(idx, { endTime })}
-                        />
-                      </label>
-                      <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-200 sm:col-span-2">
-                        <div className="font-normal">{t("step.arrivalOptionDuration")}</div>
-                        <div className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">
-                          {formatSpanBetweenStoredParts(
-                            opt.startDate,
-                            opt.startTime,
-                            opt.endDate,
-                            opt.endTime
-                          ) || "—"}
-                        </div>
-                        <p className="mt-1 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-                          {t("step.arrivalOptionDurationHint")}
-                        </p>
-                      </div>
-                      <textarea
-                        className="min-h-[56px] rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950 sm:col-span-2"
-                        value={opt.details}
-                        placeholder={t("step.notes")}
-                        onChange={(e) => {
-                          const arrivalOptions = draft.arrivalOptions.map((o, i) =>
-                            i === idx ? { ...o, details: e.target.value } : o
-                          );
-                          setDraft({ ...draft, arrivalOptions });
-                        }}
-                      />
-                      <input
-                        className="rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950 sm:col-span-2"
-                        value={opt.cost}
-                        placeholder={t("hotels.cost")}
-                        onChange={(e) => {
-                          const arrivalOptions = draft.arrivalOptions.map((o, i) =>
-                            i === idx ? { ...o, cost: e.target.value } : o
-                          );
-                          setDraft({ ...draft, arrivalOptions });
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : null}
-
           {draft.type === "stay" ? (
             <HotelsEditor
               hotels={draft.hotels}
               onChange={setHotels}
+              minDate={draft.startDate.trim() || startDateFloor || undefined}
               onAddRequested={() => {
                 setSaveError(null);
                 setWizardMode("stay_item");
                 setSurface("wizard");
               }}
             />
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                  {t("step.transport")}
-                </div>
-                <button
-                  type="button"
-                  onClick={addTransport}
-                  className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  + {t("step.transport")}
-                </button>
-              </div>
-              {draft.transports.map((opt, idx) => (
-                <div
-                  key={opt.id}
-                  className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <input
-                      className="rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                      value={opt.title}
-                      placeholder={t("step.title")}
-                      onChange={(e) => {
-                        const transports = draft.transports.map((o, i) =>
-                          i === idx ? { ...o, title: e.target.value } : o
-                        );
-                        setTransports(transports);
-                      }}
-                    />
-                    <input
-                      className="rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                      value={opt.duration}
-                      placeholder={t("step.durationFreeformPh")}
-                      onChange={(e) => {
-                        const transports = draft.transports.map((o, i) =>
-                          i === idx ? { ...o, duration: e.target.value } : o
-                        );
-                        setTransports(transports);
-                      }}
-                    />
-                    <input
-                      className="rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                      value={opt.from}
-                      placeholder={t("step.transportFrom")}
-                      onChange={(e) => {
-                        const transports = draft.transports.map((o, i) =>
-                          i === idx ? { ...o, from: e.target.value } : o
-                        );
-                        setTransports(transports);
-                      }}
-                    />
-                    <input
-                      className="rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                      value={opt.to}
-                      placeholder={t("step.transportTo")}
-                      onChange={(e) => {
-                        const transports = draft.transports.map((o, i) =>
-                          i === idx ? { ...o, to: e.target.value } : o
-                        );
-                        setTransports(transports);
-                      }}
-                    />
-                    <textarea
-                      className="sm:col-span-2 rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                      value={opt.details}
-                      placeholder={t("step.notes")}
-                      onChange={(e) => {
-                        const transports = draft.transports.map((o, i) =>
-                          i === idx ? { ...o, details: e.target.value } : o
-                        );
-                        setTransports(transports);
-                      }}
-                    />
-                    <input
-                      className="sm:col-span-2 rounded-lg border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                      value={opt.cost}
-                      placeholder={t("hotels.cost")}
-                      onChange={(e) => {
-                        const transports = draft.transports.map((o, i) =>
-                          i === idx ? { ...o, cost: e.target.value } : o
-                        );
-                        setTransports(transports);
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          ) : null}
           <AttachmentManager
             title="Step files (tickets, reservations, receipts, passports)"
             attachments={draft.attachments}
@@ -759,7 +527,7 @@ export function StepDialog({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 setSaveError(null);
                 onClose();
               }}
@@ -769,7 +537,36 @@ export function StepDialog({
             </button>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
+                if (
+                  isInvalidRange(
+                    draft.startDate,
+                    draft.startTime,
+                    draft.endDate,
+                    draft.endTime
+                  )
+                ) {
+                  setSaveError("End time must be later than start time on the same day.");
+                  return;
+                }
+
+                if (draft.type === "stay") {
+                  const badHotel = draft.hotels.find((h) =>
+                    isInvalidRange(
+                      h.checkinDate,
+                      h.checkinTime,
+                      h.checkoutDate,
+                      h.checkoutTime
+                    )
+                  );
+                  if (badHotel) {
+                    setSaveError(
+                      `Hotel "${badHotel.name.trim() || "unnamed"}": checkout time must be later than check-in time on the same day.`
+                    );
+                    return;
+                  }
+                }
+
                 if (draft.type === "transit") {
                   const stays = stayStepsSorted(tripSteps);
                   if (stays.length < 2) {
@@ -807,19 +604,16 @@ export function StepDialog({
                     ? { ...draft, arrivalSummary: "", arrivalOptions: [] }
                     : {
                         ...draft,
+                        arrivalSummary: "",
+                        arrivalOptions: [],
                         endDateOpen: false,
-                        arrivalOptions: draft.arrivalOptions.map((o) => ({
-                          ...o,
-                          duration: formatSpanBetweenStoredParts(
-                            o.startDate,
-                            o.startTime,
-                            o.endDate,
-                            o.endTime
-                          ),
-                        })),
                       };
-                onSave(syncStepWithHotels(toSave));
-                onClose();
+                try {
+                  await onSave(syncStepWithHotels(toSave));
+                  onClose();
+                } catch (error) {
+                  setSaveError(error instanceof Error ? error.message : String(error));
+                }
               }}
               className="flex-1 rounded-xl bg-zinc-900 py-2 text-sm font-semibold text-white dark:bg-white dark:text-zinc-900"
             >

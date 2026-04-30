@@ -11,6 +11,15 @@ import { instantFromParts } from "@/lib/timeline/dates";
 import { useI18n } from "@/components/providers/I18nProvider";
 import { formatTripDateTimeForLocale } from "@/lib/i18n/format";
 
+function stepEmoji(step: Trip["steps"][number]): string {
+  if (step.type === "stay") return "🏨";
+  if (step.transitType === "minivan") return "🚐";
+  if (step.transitType === "taxi") return "🚕";
+  if (step.transitType === "ferry") return "⛴️";
+  if (step.transitType === "speedboat") return "🚤";
+  return "✈️";
+}
+
 export function Timeline({
   trip,
   onStepClick,
@@ -56,7 +65,7 @@ export function Timeline({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-medium text-zinc-900 dark:text-zinc-50">
-                    {idx + 1}. {s.title.trim() || t("step.title")}
+                    {idx + 1}. {stepEmoji(s)} {s.title.trim() || t("step.title")}
                   </div>
                   {s.location.trim() ? (
                     <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
