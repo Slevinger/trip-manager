@@ -4,8 +4,7 @@ import { useState } from "react";
 import type { StayStep, TransitStep, TripStep } from "@/lib/types/trip";
 import { morphStepToStay, morphStepToTransit } from "@/lib/tripDefaults";
 import { useI18n } from "@/components/providers/I18nProvider";
-import { StayStepWizard } from "./StayStepWizard";
-import { TransitStepWizard } from "./TransitStepWizard";
+import { StepFlowWizard } from "./StepFlowWizard";
 
 type Phase =
   | { kind: "pick" }
@@ -17,14 +16,24 @@ export function MainStepWizard({
   initial,
   onBackToPathChoice,
   onComplete,
+  startMode = "pick",
 }: {
   tripSteps: TripStep[];
   initial: TripStep;
   onBackToPathChoice: () => void;
   onComplete: (step: TripStep) => void;
+  startMode?: "pick" | "stay_item" | "transit_item";
 }) {
   const { t } = useI18n();
-  const [phase, setPhase] = useState<Phase>({ kind: "pick" });
+  const [phase, setPhase] = useState<Phase>(() => {
+    if (startMode === "stay_item") {
+      return { kind: "stay", step: morphStepToStay(initial) };
+    }
+    if (startMode === "transit_item") {
+      return { kind: "transit", step: morphStepToTransit(initial) };
+    }
+    return { kind: "pick" };
+  });
 
   if (phase.kind === "pick") {
     return (
@@ -88,8 +97,11 @@ export function MainStepWizard({
 
   if (phase.kind === "stay") {
     return (
-      <StayStepWizard
+      <StepFlowWizard
+        kind="stay"
+        tripSteps={tripSteps}
         initial={phase.step}
+        entry={startMode === "stay_item" ? "hotels_only" : "full"}
         onBackToTypePick={() => setPhase({ kind: "pick" })}
         onComplete={onComplete}
       />
@@ -97,9 +109,11 @@ export function MainStepWizard({
   }
 
   return (
-    <TransitStepWizard
+    <StepFlowWizard
+      kind="transit"
       tripSteps={tripSteps}
       initial={phase.step}
+      entry={startMode === "transit_item" ? "transports_only" : "full"}
       onBackToTypePick={() => setPhase({ kind: "pick" })}
       onComplete={onComplete}
     />

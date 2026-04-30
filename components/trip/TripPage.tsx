@@ -308,7 +308,7 @@ function TripChrome({
 
   return (
     <>
-      <TripHeader title={trip?.title ?? ""} />
+      <TripHeader title={trip?.title ?? ""} tripId={tripId} />
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-4">
         {user?.email ? (
           <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">

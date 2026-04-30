@@ -52,6 +52,9 @@ export function StepDialog({
   const [surface, setSurface] = useState<"choose" | "wizard" | "edit">(() =>
     isNewStep ? "choose" : "edit"
   );
+  const [wizardMode, setWizardMode] = useState<"pick" | "stay_item" | "transit_item">(
+    "pick"
+  );
 
   const previewNights = useMemo(() => computeNightsForStep(draft), [draft]);
 
@@ -147,6 +150,7 @@ export function StepDialog({
 
   function addTransport() {
     setSaveError(null);
+    setWizardMode("transit_item");
     setSurface("wizard");
   }
 
@@ -180,7 +184,10 @@ export function StepDialog({
               </p>
               <button
                 type="button"
-                onClick={() => setSurface("wizard")}
+                onClick={() => {
+                  setWizardMode("pick");
+                  setSurface("wizard");
+                }}
                 className="group flex w-full flex-col items-start gap-2 rounded-2xl border-2 border-zinc-200 bg-white p-5 text-start shadow-sm transition hover:border-violet-400 hover:shadow-md active:scale-[0.99] dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-violet-500"
               >
                 <span className="text-2xl" aria-hidden>
@@ -220,7 +227,15 @@ export function StepDialog({
             <MainStepWizard
               tripSteps={tripSteps}
               initial={draft}
-              onBackToPathChoice={() => setSurface("choose")}
+              startMode={wizardMode}
+              onBackToPathChoice={() => {
+                if (wizardMode === "pick") {
+                  setSurface("choose");
+                  return;
+                }
+                setWizardMode("pick");
+                setSurface("edit");
+              }}
               onComplete={(step) => {
                 let s: TripStep = { ...step };
                 if (s.type === "transit") {
@@ -231,6 +246,7 @@ export function StepDialog({
                 }
                 setDraft(s);
                 setSaveError(null);
+                setWizardMode("pick");
                 setSurface("edit");
               }}
             />
@@ -593,6 +609,7 @@ export function StepDialog({
               onChange={setHotels}
               onAddRequested={() => {
                 setSaveError(null);
+                setWizardMode("stay_item");
                 setSurface("wizard");
               }}
             />
