@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import type { StayStep, TripStep } from "@/lib/types/trip";
+import type { StayStep, TransitStep, TripStep } from "@/lib/types/trip";
 import { stayStepsSorted } from "@/lib/tripStayEndpoints";
 import { TransitStaySelects } from "@/components/trip/TransitStaySelects";
 import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
@@ -21,6 +21,11 @@ import {
   syncStepWithHotels,
   transitStepDurationFromArrivals,
 } from "@/lib/timeline/hotelsAndDates";
+import {
+  applyTransitDurationToEnd,
+  clampTransitDurationParts,
+  totalMinutesFromTransitDuration,
+} from "@/lib/timeline/transitDuration";
 import { MainStepWizard } from "@/components/trip/wizard/MainStepWizard";
 import { PlaceSearchInput } from "@/components/trip/PlaceSearchInput";
 
@@ -99,19 +104,32 @@ export function StepDialog({
       if (d.type === type) return d;
       if (type === "stay") {
         if (d.type !== "transit") return d;
-        const { transitEndManual: _tm, ...base } = d;
+        const {
+          transitEndManual: _tm,
+          transitDurationDays: _tdd,
+          transitDurationHours: _tdh,
+          transitDurationMinutes: _tdm,
+          transports: _tr,
+          transitType: _tt,
+          fromStayStepId: _fs,
+          toStayStepId: _ts,
+          ...base
+        } = d;
         return { ...base, type: "stay", hotels: [] };
       }
-      return {
+      const next: TransitStep = {
         ...d,
         type,
         transitType: "airplane",
         transports: [],
         endDateOpen: false,
-        transitEndManual: false,
+        transitDurationDays: 0,
+        transitDurationHours: 1,
+        transitDurationMinutes: 0,
         fromStayStepId: d.type === "transit" ? d.fromStayStepId : undefined,
         toStayStepId: d.type === "transit" ? d.toStayStepId : undefined,
       };
+      return applyTransitDurationToEnd(next);
     });
   }
 
@@ -353,58 +371,108 @@ export function StepDialog({
                 minDate={startDateFloor || undefined}
                 onDateChange={(startDate) => {
                   setSaveError(null);
-                  setDraft({ ...draft, startDate });
+                  setDraft((d) =>
+                    d.type === "transit"
+                      ? applyTransitDurationToEnd({ ...d, startDate })
+                      : { ...d, startDate }
+                  );
                 }}
                 onTimeChange={(startTime) => {
                   setSaveError(null);
-                  setDraft({ ...draft, startTime });
+                  setDraft((d) =>
+                    d.type === "transit"
+                      ? applyTransitDurationToEnd({ ...d, startTime })
+                      : { ...d, startTime }
+                  );
                 }}
               />
             </label>
-            <label className="block text-xs text-zinc-600 dark:text-zinc-300">
-              <span>{t("step.endDate")}</span>
-              <TripDateTimeInput
-                disabled={
-                  draft.type === "stay" && draft.endDateOpen
-                }
-                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900"
-                date={draft.endDate}
-                time={draft.endTime}
-                minDate={endDateMin}
-                onDateChange={(endDate) => {
-                  setSaveError(null);
-                  setDraft((d) => {
-                    if (d.type !== "transit") return { ...d, endDate };
-                    const bothEmpty = endDate.trim() === "" && d.endTime.trim() === "";
-                    if (bothEmpty) {
-                      return applyTransitEndFromArrivals({
-                        ...d,
-                        endDate: "",
-                        endTime: "",
-                        transitEndManual: false,
-                      });
-                    }
-                    return { ...d, endDate, transitEndManual: true };
-                  });
-                }}
-                onTimeChange={(endTime) => {
-                  setSaveError(null);
-                  setDraft((d) => {
-                    if (d.type !== "transit") return { ...d, endTime };
-                    const bothEmpty = d.endDate.trim() === "" && endTime.trim() === "";
-                    if (bothEmpty) {
-                      return applyTransitEndFromArrivals({
-                        ...d,
-                        endDate: "",
-                        endTime: "",
-                        transitEndManual: false,
-                      });
-                    }
-                    return { ...d, endTime, transitEndManual: true };
-                  });
-                }}
-              />
-            </label>
+            {draft.type === "stay" ? (
+              <label className="block text-xs text-zinc-600 dark:text-zinc-300">
+                <span>{t("step.endDate")}</span>
+                <TripDateTimeInput
+                  disabled={draft.endDateOpen}
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900"
+                  date={draft.endDate}
+                  time={draft.endTime}
+                  minDate={endDateMin}
+                  onDateChange={(endDate) => {
+                    setSaveError(null);
+                    setDraft({ ...draft, endDate });
+                  }}
+                  onTimeChange={(endTime) => {
+                    setSaveError(null);
+                    setDraft({ ...draft, endTime });
+                  }}
+                />
+              </label>
+            ) : (
+              <div className="block text-xs text-zinc-600 dark:text-zinc-300">
+                <span>{t("step.transitDurationInputs")}</span>
+                <div className="mt-1 grid grid-cols-3 gap-2">
+                  <label className="block min-w-0">
+                    <span className="text-[10px] text-zinc-500">{t("step.transitDurationDays")}</span>
+                    <GroupedNumberInput
+                      min={0}
+                      className="mt-0.5 w-full rounded-xl border border-zinc-200 bg-white px-2 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                      value={draft.transitDurationDays ?? 0}
+                      onChange={(n) => {
+                        setSaveError(null);
+                        setDraft((d) => {
+                          if (d.type !== "transit") return d;
+                          const c = clampTransitDurationParts(
+                            n,
+                            d.transitDurationHours ?? 0,
+                            d.transitDurationMinutes ?? 0
+                          );
+                          return applyTransitDurationToEnd({ ...d, ...c });
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="block min-w-0">
+                    <span className="text-[10px] text-zinc-500">{t("step.transitDurationHours")}</span>
+                    <GroupedNumberInput
+                      min={0}
+                      className="mt-0.5 w-full rounded-xl border border-zinc-200 bg-white px-2 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                      value={draft.transitDurationHours ?? 0}
+                      onChange={(n) => {
+                        setSaveError(null);
+                        setDraft((d) => {
+                          if (d.type !== "transit") return d;
+                          const c = clampTransitDurationParts(
+                            d.transitDurationDays ?? 0,
+                            n,
+                            d.transitDurationMinutes ?? 0
+                          );
+                          return applyTransitDurationToEnd({ ...d, ...c });
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="block min-w-0">
+                    <span className="text-[10px] text-zinc-500">{t("step.transitDurationMinutes")}</span>
+                    <GroupedNumberInput
+                      min={0}
+                      className="mt-0.5 w-full rounded-xl border border-zinc-200 bg-white px-2 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                      value={draft.transitDurationMinutes ?? 0}
+                      onChange={(n) => {
+                        setSaveError(null);
+                        setDraft((d) => {
+                          if (d.type !== "transit") return d;
+                          const c = clampTransitDurationParts(
+                            d.transitDurationDays ?? 0,
+                            d.transitDurationHours ?? 0,
+                            n
+                          );
+                          return applyTransitDurationToEnd({ ...d, ...c });
+                        });
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
           {draft.type === "stay" ? (
             <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-200">
@@ -430,7 +498,7 @@ export function StepDialog({
             </label>
           ) : (
             <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-              {t("step.transitDatesRequired")}
+              {t("step.transitDurationHint")}
             </p>
           )}
 
@@ -538,16 +606,18 @@ export function StepDialog({
             <button
               type="button"
               onClick={async () => {
-                if (
-                  isInvalidRange(
-                    draft.startDate,
-                    draft.startTime,
-                    draft.endDate,
-                    draft.endTime
-                  )
-                ) {
-                  setSaveError("End time must be later than start time on the same day.");
-                  return;
+                if (draft.type === "stay") {
+                  if (
+                    isInvalidRange(
+                      draft.startDate,
+                      draft.startTime,
+                      draft.endDate,
+                      draft.endTime
+                    )
+                  ) {
+                    setSaveError("End time must be later than start time on the same day.");
+                    return;
+                  }
                 }
 
                 if (draft.type === "stay") {
@@ -590,11 +660,12 @@ export function StepDialog({
                     setSaveError(t("step.transitEndpointsRequired"));
                     return;
                   }
-                  if (
-                    !isValidDdMmYyyy(draft.startDate) ||
-                    !isValidDdMmYyyy(draft.endDate)
-                  ) {
+                  if (!isValidDdMmYyyy(draft.startDate)) {
                     setSaveError(t("step.transitDatesRequired"));
+                    return;
+                  }
+                  if (totalMinutesFromTransitDuration(draft) <= 0) {
+                    setSaveError(t("step.transitDurationRequired"));
                     return;
                   }
                 }

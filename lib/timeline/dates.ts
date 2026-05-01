@@ -222,3 +222,24 @@ export function maxTripDateTime(a: TripDateTimeParts, b: TripDateTimeParts): Tri
   if (!ib) return a;
   return ia.getTime() >= ib.getTime() ? a : b;
 }
+
+/** Local wall time as stored `dd-mm-yyyy` + `HH:mm`. */
+export function tripInstantToParts(inst: Date): TripDateTimeParts {
+  const dd = String(inst.getDate()).padStart(2, "0");
+  const mm = String(inst.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(inst.getFullYear());
+  const hh = String(inst.getHours()).padStart(2, "0");
+  const mi = String(inst.getMinutes()).padStart(2, "0");
+  return { date: `${dd}-${mm}-${yyyy}`, time: `${hh}:${mi}` };
+}
+
+/** Add calendar minutes to a stored start; returns null if start is invalid. */
+export function addMinutesToTripParts(
+  start: TripDateTimeParts,
+  minutes: number
+): TripDateTimeParts | null {
+  const a = instantFromParts(start);
+  if (!a) return null;
+  const m = Math.max(0, Math.floor(minutes));
+  return tripInstantToParts(new Date(a.getTime() + m * 60_000));
+}

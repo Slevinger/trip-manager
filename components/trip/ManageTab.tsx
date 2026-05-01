@@ -13,8 +13,15 @@ import { GroupedNumberInput } from "@/components/trip/GroupedNumberInput";
 import { TripDateTimeInput } from "@/components/trip/TripDateTimeInput";
 import { instantFromParts } from "@/lib/timeline/dates";
 
-export function ManageTab() {
-  const { trip, persist, canUndo, undo, hasUnsavedChanges, saveNow } = useTripDocument();
+export type ManageLockSession = { isYou: boolean; email: string } | null;
+
+export function ManageTab({
+  manageLockSession = null,
+}: {
+  manageLockSession?: ManageLockSession;
+}) {
+  const { trip, persist, canUndo, undo, canSaveToFirestore, saveNow } =
+    useTripDocument();
   const { t } = useI18n();
   const [tripSaveError, setTripSaveError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{
@@ -32,13 +39,13 @@ export function ManageTab() {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
       const el = e.target as HTMLElement | null;
       if (el?.closest("input, textarea, [contenteditable=true]")) return;
-      if (!canUndo) return;
+      if (!canUndo || !canSaveToFirestore) return;
       e.preventDefault();
       undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canUndo, undo]);
+  }, [canUndo, canSaveToFirestore, undo]);
 
   if (!trip) return null;
 
@@ -138,6 +145,32 @@ export function ManageTab() {
 
   return (
     <div className="relative">
+      {manageLockSession ? (
+        <div
+          className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200"
+          role="status"
+        >
+          <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+            {t("manage.manageSession")}
+          </span>
+          <span className="mx-1.5 text-zinc-400 dark:text-zinc-500">—</span>
+          {manageLockSession.isYou ? (
+            <>
+              {t("manage.manageSessionYou")}
+              {manageLockSession.email
+                ? ` · ${manageLockSession.email}`
+                : ` · ${t("manage.manageSessionNoEmail")}`}
+            </>
+          ) : (
+            <>
+              {t("manage.manageSessionOther")}
+              {manageLockSession.email
+                ? ` · ${manageLockSession.email}`
+                : ` · ${t("manage.manageSessionNoEmail")}`}
+            </>
+          )}
+        </div>
+      ) : null}
       <div className="space-y-6 pb-28">
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
@@ -278,18 +311,9 @@ export function ManageTab() {
         <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
-          disabled={!canUndo}
-          title={t("manage.undoHint")}
-          onClick={() => undo()}
-          className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-        >
-          {t("manage.undo")}
-        </button>
-        <button
-          type="button"
-          disabled={!hasUnsavedChanges}
+          disabled={!canSaveToFirestore}
           title={
-            hasUnsavedChanges ? t("manage.saveHint") : t("manage.saveNothing")
+            canSaveToFirestore ? t("manage.saveHint") : t("manage.saveNothing")
           }
           onClick={() => {
             setTripSaveError(null);
@@ -302,6 +326,15 @@ export function ManageTab() {
           className="rounded-xl bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-zinc-900"
         >
           {t("manage.save")}
+        </button>
+        <button
+          type="button"
+          disabled={!canUndo || !canSaveToFirestore}
+          title={t("manage.undoHint")}
+          onClick={() => undo()}
+          className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        >
+          {t("manage.undo")}
         </button>
         </div>
       </div>

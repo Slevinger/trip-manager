@@ -26,6 +26,11 @@ export type TripDocumentState = {
   userUndoStack: Trip[];
   /** True when local Redux differs from last explicit Firestore write (Save). */
   hasUnsavedChanges: boolean;
+  /**
+   * Last known Firestore document shape (normalized). Null until first remote load
+   * or when only a draft exists locally.
+   */
+  firestoreBaseline: Trip | null;
 };
 
 const initialState: TripDocumentState = {
@@ -33,6 +38,7 @@ const initialState: TripDocumentState = {
   changeLog: [],
   userUndoStack: [],
   hasUnsavedChanges: false,
+  firestoreBaseline: null,
 };
 
 function trimChangeLog(state: TripDocumentState): void {
@@ -86,6 +92,11 @@ const tripDocumentSlice = createSlice({
   initialState,
   reducers: {
     resetTripDocument: () => initialState,
+
+    setFirestoreBaseline: (state, action: PayloadAction<Trip | null>) => {
+      const p = action.payload;
+      state.firestoreBaseline = p ? cloneTrip(p) : null;
+    },
 
     remoteSnapshotApplied: (state, action: PayloadAction<Trip>) => {
       const next = action.payload;
@@ -154,6 +165,7 @@ const tripDocumentSlice = createSlice({
 
 export const {
   resetTripDocument,
+  setFirestoreBaseline,
   remoteSnapshotApplied,
   userPersisted,
   autoStatusApplied,

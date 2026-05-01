@@ -1,13 +1,17 @@
 import type { Hotel, TripStep } from "@/lib/types/trip";
 import {
   diffNightsInclusive,
-  formatTripDateTimeSpan,
   instantFromParts,
   maxTripDateTime,
   minTripDateTime,
   parseDdMmYyyyCalendarDate,
   type TripDateTimeParts,
 } from "@/lib/timeline/dates";
+import {
+  applyTransitDurationToEnd,
+  normalizeTransitStepDurationFields,
+  transitStepDurationLabel,
+} from "@/lib/timeline/transitDuration";
 
 export type HotelDateWarningCode =
   | "no_hotels_but_nights"
@@ -84,45 +88,16 @@ export function applyOpenEndDateFromHotels<T extends TripStep>(step: T): T {
   return { ...step, endDate: latest.date, endTime: latest.time } as T;
 }
 
-function partsWithInstant(p: TripDateTimeParts): boolean {
-  return instantFromParts(p) != null;
-}
-
-function minOfInstantParts(candidates: TripDateTimeParts[]): TripDateTimeParts | null {
-  const ok = candidates.filter(partsWithInstant);
-  if (ok.length === 0) return null;
-  return ok.reduce((a, b) => minTripDateTime(a, b));
-}
-
-function maxOfInstantParts(candidates: TripDateTimeParts[]): TripDateTimeParts | null {
-  const ok = candidates.filter(partsWithInstant);
-  if (ok.length === 0) return null;
-  return ok.reduce((a, b) => maxTripDateTime(a, b));
-}
-
 export function applyTransitEndFromArrivals<T extends TripStep>(step: T): T {
-  return step;
+  if (step.type !== "transit") return step;
+  return applyTransitDurationToEnd(
+    normalizeTransitStepDurationFields(step)
+  ) as T;
 }
 
-/**
- * Transit step `duration` label from step-level start/end only.
- */
+/** Human-readable transit length from day/hour/minute fields (and start). */
 export function transitStepDurationFromArrivals(step: TripStep): string {
-  if (step.type !== "transit") return "";
-  const manualStart: TripDateTimeParts = {
-    date: step.startDate.trim(),
-    time: step.startTime.trim(),
-  };
-  const manualEnd: TripDateTimeParts = {
-    date: step.endDate.trim(),
-    time: step.endTime.trim(),
-  };
-  const startCandidates: TripDateTimeParts[] = [manualStart];
-  const endCandidates: TripDateTimeParts[] = [manualEnd];
-  const effStart = minOfInstantParts(startCandidates);
-  const effEnd = maxOfInstantParts(endCandidates);
-  if (!effStart || !effEnd) return "";
-  return formatTripDateTimeSpan(effStart, effEnd);
+  return transitStepDurationLabel(step);
 }
 
 /** Persisted step fields aligned with hotel timeline rules. */
@@ -135,7 +110,7 @@ export function syncStepWithHotels(step: TripStep): TripStep {
   return {
     ...withTransitEnd,
     nights: 0,
-    duration: transitStepDurationFromArrivals(withTransitEnd),
+    duration: transitStepDurationLabel(withTransitEnd),
   };
 }
 

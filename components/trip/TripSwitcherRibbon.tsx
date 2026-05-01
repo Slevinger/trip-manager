@@ -12,6 +12,9 @@ type TripRow = {
 };
 
 const SWITCHER_AUTH_ID = "__trip_switcher__";
+const SWITCHER_POS_KEY = "trip_switcher_position_v1";
+const DRAG_THRESHOLD_PX = 4;
+const VIEWPORT_PADDING = 8;
 
 export function TripSwitcherRibbon({
   currentTripId,
@@ -27,6 +30,16 @@ export function TripSwitcherRibbon({
   const [rows, setRows] = useState<TripRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    dragging: boolean;
+  } | null>(null);
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
 
   const currentTitle = useMemo(
     () => currentTripTitle.trim() || t("app.name"),
@@ -47,6 +60,50 @@ export function TripSwitcherRibbon({
       document.removeEventListener("mousedown", onPointerDown);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(SWITCHER_POS_KEY);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { x?: number; y?: number };
+      if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+        setPosition({ x: parsed.x, y: parsed.y });
+      }
+    } catch {
+      /* ignore malformed localStorage values */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!position || typeof window === "undefined") return;
+    window.localStorage.setItem(SWITCHER_POS_KEY, JSON.stringify(position));
+  }, [position]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const clampToViewport = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const maxX = Math.max(VIEWPORT_PADDING, window.innerWidth - rect.width - VIEWPORT_PADDING);
+      const maxY = Math.max(VIEWPORT_PADDING, window.innerHeight - rect.height - VIEWPORT_PADDING);
+      if (!position) {
+        setPosition({
+          x: Math.min(maxX, Math.max(VIEWPORT_PADDING, window.innerWidth - rect.width - 16)),
+          y: Math.min(maxY, Math.max(VIEWPORT_PADDING, window.innerHeight - rect.height - 16)),
+        });
+        return;
+      }
+      const clampedX = Math.min(maxX, Math.max(VIEWPORT_PADDING, position.x));
+      const clampedY = Math.min(maxY, Math.max(VIEWPORT_PADDING, position.y));
+      if (clampedX !== position.x || clampedY !== position.y) {
+        setPosition({ x: clampedX, y: clampedY });
+      }
+    };
+    clampToViewport();
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  }, [open, position]);
 
   async function loadTripsOnce() {
     if (rows.length > 0 || loading) return;
@@ -91,14 +148,71 @@ export function TripSwitcherRibbon({
     router.push("/trip/new");
   }
 
+  function handleDragStart(event: React.PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const origin = position ?? { x: rect.left, y: rect.top };
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: origin.x,
+      originY: origin.y,
+      dragging: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleDragMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!containerRef.current || typeof window === "undefined") return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.dragging && Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX) {
+      drag.dragging = true;
+    }
+    if (!drag.dragging) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const maxX = Math.max(VIEWPORT_PADDING, window.innerWidth - rect.width - VIEWPORT_PADDING);
+    const maxY = Math.max(VIEWPORT_PADDING, window.innerHeight - rect.height - VIEWPORT_PADDING);
+    const nextX = Math.min(maxX, Math.max(VIEWPORT_PADDING, drag.originX + dx));
+    const nextY = Math.min(maxY, Math.max(VIEWPORT_PADDING, drag.originY + dy));
+    setPosition({ x: nextX, y: nextY });
+    if (open) setOpen(false);
+  }
+
+  function handleDragEnd(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.dragging) {
+      suppressNextClickRef.current = true;
+    }
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   return (
     <div
       ref={containerRef}
-      className="pointer-events-auto fixed bottom-4 right-4 z-50 sm:bottom-6 sm:right-6"
+      className={`pointer-events-auto fixed z-50 ${position ? "" : "bottom-4 right-4 sm:bottom-6 sm:right-6"}`}
+      style={position ? { left: position.x, top: position.y } : undefined}
     >
       <button
         type="button"
+        onPointerDown={handleDragStart}
+        onPointerMove={handleDragMove}
+        onPointerUp={handleDragEnd}
+        onPointerCancel={handleDragEnd}
+        style={{ touchAction: "none" }}
         onClick={() => {
+          if (suppressNextClickRef.current) {
+            suppressNextClickRef.current = false;
+            return;
+          }
           const next = !open;
           setOpen(next);
           if (next) void loadTripsOnce();

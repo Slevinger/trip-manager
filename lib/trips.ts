@@ -229,6 +229,11 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     transitTypeRaw === "speedboat"
       ? transitTypeRaw
       : undefined;
+  const rawStep = s as Record<string, unknown>;
+  const hasDurationKeys =
+    "transitDurationDays" in rawStep ||
+    "transitDurationHours" in rawStep ||
+    "transitDurationMinutes" in rawStep;
   const transit: TransitStep = {
     ...shared,
     type,
@@ -239,6 +244,13 @@ function normalizeStep(raw: unknown): Trip["steps"][number] {
     ...(transitType ? { transitType } : {}),
     ...(fromStayStepId ? { fromStayStepId } : {}),
     ...(toStayStepId ? { toStayStepId } : {}),
+    ...(hasDurationKeys
+      ? {
+          transitDurationDays: Number(s.transitDurationDays ?? 0) || 0,
+          transitDurationHours: Number(s.transitDurationHours ?? 0) || 0,
+          transitDurationMinutes: Number(s.transitDurationMinutes ?? 0) || 0,
+        }
+      : {}),
   };
   return applyTransitEndFromArrivals(transit);
 }

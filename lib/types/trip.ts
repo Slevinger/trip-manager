@@ -105,10 +105,11 @@ export interface TransitStep extends TripStepBase {
   fromStayStepId?: string;
   /** Stay step id this transit arrives at (same trip). */
   toStayStepId?: string;
-  /**
-   * When false/undefined, `endDate`/`endTime` follow the last arrival option’s end
-   * (when there is at least one arrival with a valid end date). Set true when the user edits step end manually.
-   */
+  /** How long the transit takes; `endDate`/`endTime` are derived from start + this. */
+  transitDurationDays?: number;
+  transitDurationHours?: number;
+  transitDurationMinutes?: number;
+  /** @deprecated No longer used; end is computed from duration. */
   transitEndManual?: boolean;
 }
 

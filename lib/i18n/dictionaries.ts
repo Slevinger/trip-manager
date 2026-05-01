@@ -96,6 +96,10 @@ const he: DictNode = {
     save: "שמור",
     saveHint: "כותב את הטיול מהחנות ל-Firestore (עריכות לא נשלחות עד לשמירה)",
     saveNothing: "אין שינויים שלא נשמרו",
+    manageSession: "מחובר לניהול",
+    manageSessionYou: "אתם (הדפדפן הזה)",
+    manageSessionOther: "עורך אחר",
+    manageSessionNoEmail: "משתמש מחובר בלי אימייל",
   }),
   step: leafMap({
     title: "כותרת",
@@ -107,7 +111,13 @@ const he: DictNode = {
     durationTransit: "משך מעבר",
     durationTransitHint:
       "מוקדם ביותר מתוך תחילת השלב והגעה הראשונה, עד מאוחר ביותר מתוך סוף השלב והגעה האחרונה.",
-    transitDatesRequired: "מעבר דורש תאריך התחלה וסיום תקינים (יי-ממ-שששש).",
+    transitDatesRequired: "מעבר דורש תאריך התחלה תקין (יי-ממ-שששש).",
+    transitDurationInputs: "משך המעבר",
+    transitDurationDays: "ימים",
+    transitDurationHours: "שעות",
+    transitDurationMinutes: "דקות",
+    transitDurationHint: "הזינו משך (ימים, שעות, דקות). זמן הסיום מחושב אוטומטית מההתחלה.",
+    transitDurationRequired: "הגדירו משך מעבר של לפחות דקה אחת.",
     transitEndFromArrivalsHint:
       "תאריך הסיום של השלב עוקב אחרי סיום האפשרות האחרונה. לעריכה ידנית לחצו על הכפתור.",
     transitEndEditManual: "עריכת סיום השלב ידנית",
@@ -465,6 +475,10 @@ const en: DictNode = {
     save: "Save",
     saveHint: "Write the trip from the store to Firestore (edits stay local until you save)",
     saveNothing: "Nothing to save",
+    manageSession: "Connected on Manage",
+    manageSessionYou: "You (this browser)",
+    manageSessionOther: "Another editor",
+    manageSessionNoEmail: "Signed-in editor (no email)",
   }),
   step: leafMap({
     title: "Title",
@@ -476,7 +490,14 @@ const en: DictNode = {
     durationTransit: "Transit duration",
     durationTransitHint:
       "Earliest of the step start and the first arrival’s start, through the latest of the step end and the last arrival’s end.",
-    transitDatesRequired: "Transit needs a valid start and end date (dd-mm-yyyy).",
+    transitDatesRequired: "Transit needs a valid start date (dd-mm-yyyy).",
+    transitDurationInputs: "Transit duration",
+    transitDurationDays: "Days",
+    transitDurationHours: "Hours",
+    transitDurationMinutes: "Minutes",
+    transitDurationHint:
+      "Enter how long the leg takes (days, hours, minutes). End time is computed from the start automatically.",
+    transitDurationRequired: "Set a transit duration of at least one minute.",
     transitEndFromArrivalsHint:
       "Step end follows the last arrival option’s end. Use the button below to set your own end.",
     transitEndEditManual: "Edit step end manually",
@@ -836,6 +857,10 @@ const ru: DictNode = {
     save: "Сохранить",
     saveHint: "Записать поездку из хранилища в Firestore (правки локальны, пока не сохраните)",
     saveNothing: "Нет несохранённых изменений",
+    manageSession: "Подключено к управлению",
+    manageSessionYou: "Вы (этот браузер)",
+    manageSessionOther: "Другой редактор",
+    manageSessionNoEmail: "Вошёл без email",
   }),
   step: leafMap({
     title: "Заголовок",
@@ -847,7 +872,14 @@ const ru: DictNode = {
     durationTransit: "Длительность переезда",
     durationTransitHint:
       "От самого раннего из начала шага и первого прибытия до самого позднего из конца шага и последнего прибытия.",
-    transitDatesRequired: "Для переезда нужны корректные даты начала и окончания (дд-мм-гггг).",
+    transitDatesRequired: "Для переезда нужна корректная дата начала (дд-мм-гггг).",
+    transitDurationInputs: "Длительность переезда",
+    transitDurationDays: "Дни",
+    transitDurationHours: "Часы",
+    transitDurationMinutes: "Минуты",
+    transitDurationHint:
+      "Укажите длительность (дни, часы, минуты). Время окончания считается от начала автоматически.",
+    transitDurationRequired: "Задайте длительность переезда не меньше одной минуты.",
     transitEndFromArrivalsHint:
       "Конец шага совпадает с концом последнего варианта прибытия. Для своей даты нажмите кнопку ниже.",
     transitEndEditManual: "Задать конец шага вручную",

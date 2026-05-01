@@ -74,6 +74,12 @@ function TripChrome({
   const [passwordError, setPasswordError] = useState("");
   const [manageLockError, setManageLockError] = useState("");
   const [hasManageLock, setHasManageLock] = useState(false);
+  const [manageLockHolder, setManageLockHolder] = useState<{
+    holderEmail: string;
+    holderUid: string;
+    holderSessionId: string;
+    expiresAtMs: number;
+  } | null>(null);
   const db = getDb();
   const lockRef = useMemo(
     () => (db ? doc(db, "trips", tripId, "locks", "manage") : null),
@@ -152,15 +158,36 @@ function TripChrome({
   }, [lockRef, lockSessionId]);
 
   useEffect(() => {
+    if (tab !== "manage") {
+      setManageLockHolder(null);
+    }
+  }, [tab]);
+
+  useEffect(() => {
     if (!lockRef) return;
     return onSnapshot(
       lockRef,
       (snap) => {
-        if (!snap.exists() || tab !== "manage") return;
+        if (tab !== "manage") return;
+        if (!snap.exists()) {
+          setManageLockHolder(null);
+          return;
+        }
         const data = (snap.data() ?? {}) as Record<string, unknown>;
-        const holderSessionId = String(data.holderSessionId ?? "");
+        const holderSessionIdSnap = String(data.holderSessionId ?? "");
         const expiresAtMs = Number(data.expiresAtMs ?? 0);
-        if (holderSessionId !== lockSessionId && expiresAtMs > Date.now()) {
+        const now = Date.now();
+        if (expiresAtMs <= now) {
+          setManageLockHolder(null);
+        } else {
+          setManageLockHolder({
+            holderEmail: String(data.holderEmail ?? "").trim(),
+            holderUid: String(data.holderUid ?? "").trim(),
+            holderSessionId: holderSessionIdSnap,
+            expiresAtMs,
+          });
+        }
+        if (holderSessionIdSnap !== lockSessionId && expiresAtMs > now) {
           setHasManageLock(false);
           setManageLockError("Manage tab is currently open in another browser.");
           onTab("view");
@@ -357,7 +384,24 @@ function TripChrome({
             ) : null}
           </section>
         ) : null}
-        <div className="mt-4">{tab === "view" ? <ViewTab /> : <ManageTab />}</div>
+        <div className="mt-4">
+          {tab === "view" ? (
+            <ViewTab />
+          ) : (
+            <ManageTab
+              manageLockSession={
+                manageLockHolder
+                  ? {
+                      isYou: manageLockHolder.holderSessionId === lockSessionId,
+                      email: manageLockHolder.holderEmail,
+                    }
+                  : hasManageLock
+                    ? { isYou: true, email: user?.email?.trim() ?? "" }
+                    : null
+              }
+            />
+          )}
+        </div>
       </main>
     </>
   );

@@ -21,9 +21,11 @@ import {
   markTripSynced,
   remoteSnapshotApplied,
   resetTripDocument,
+  setFirestoreBaseline,
   undoLastUserChange,
   userPersisted,
 } from "@/lib/store/tripDocumentSlice";
+import { tripContentEquals } from "@/lib/store/tripChangeLog";
 import {
   makeTripDocumentStore,
   useTripDocumentDispatch,
@@ -42,6 +44,7 @@ import {
 import { resolveAutoActiveStepId } from "@/lib/timeline/autoCurrentStep";
 import { instantFromParts } from "@/lib/timeline/dates";
 import { defaultTrip } from "@/lib/tripDefaults";
+import { mergeNewerRemoteWithLocalDraft } from "@/lib/tripMerge";
 
 const TRIP_LOCAL_SNAPSHOT_PREFIX = "trip-doc-snapshot:";
 const TRIP_LOCAL_SNAPSHOT_VERSION = 1;
@@ -118,6 +121,16 @@ function shouldPreferLocalSnapshot(local: TripLocalSnapshot, remote: Trip): bool
   return toMs(local.savedAt) >= toMs(remote.updatedAt);
 }
 
+function remoteIsNewerThanLocalSnapshot(local: TripLocalSnapshot, remote: Trip): boolean {
+  return toMs(remote.updatedAt) > toMs(local.savedAt);
+}
+
+function tripDiffersFromFirestoreBaseline(trip: Trip | null, baseline: Trip | null, hasUnsavedChanges: boolean): boolean {
+  if (!trip) return false;
+  if (baseline === null) return hasUnsavedChanges;
+  return !tripContentEquals(trip, baseline);
+}
+
 type TripDocumentContextValue = {
   tripId: string;
   trip: Trip | null;
@@ -129,6 +142,8 @@ type TripDocumentContextValue = {
   undo: () => boolean;
   /** True when local edits are not yet written to Firestore. */
   hasUnsavedChanges: boolean;
+  /** True when trip content differs from the last known Firestore snapshot (or draft with no baseline yet). */
+  canSaveToFirestore: boolean;
   /** Write the current trip from the store to Firestore. */
   saveNow: () => Promise<void>;
   user: User | null;
@@ -223,6 +238,13 @@ function TripDocumentInner({
   const hasUnsavedChanges = useTripDocumentSelector(
     (s) => s.tripDocument.hasUnsavedChanges
   );
+  const firestoreBaseline = useTripDocumentSelector(
+    (s) => s.tripDocument.firestoreBaseline
+  );
+  const canSaveToFirestore = useMemo(
+    () => tripDiffersFromFirestoreBaseline(trip, firestoreBaseline, hasUnsavedChanges),
+    [trip, firestoreBaseline, hasUnsavedChanges]
+  );
 
   const [user, setUser] = useState<User | null>(null);
   const [member, setMember] = useState<null>(null);
@@ -250,7 +272,6 @@ function TripDocumentInner({
       const normalized = normalizeTripStepOrder({ ...next, id: tripId });
       dispatch(userPersisted(normalized));
       rememberTripSnapshot(normalized);
-      writeTripLocalSnapshot(tripId, normalized, true);
     },
     [dispatch, tripId]
   );
@@ -262,7 +283,6 @@ function TripDocumentInner({
       const next = normalizeTripStepOrder(mergeTrip(prev, patch));
       dispatch(userPersisted(next));
       rememberTripSnapshot(next);
-      writeTripLocalSnapshot(tripId, next, true);
     },
     [dispatch, store, tripId]
   );
@@ -272,7 +292,6 @@ function TripDocumentInner({
       const next = normalizeTripStepOrder(mergeLatestTrip(tripId, patch));
       dispatch(userPersisted(next));
       rememberTripSnapshot(next);
-      writeTripLocalSnapshot(tripId, next, true);
       return next;
     },
     [dispatch, tripId]
@@ -292,7 +311,6 @@ function TripDocumentInner({
     const restored = store.getState().tripDocument.trip;
     if (restored) {
       rememberTripSnapshot(restored);
-      writeTripLocalSnapshot(tripId, restored, true);
     }
     return true;
   }, [dispatch, store, tripId]);
@@ -300,8 +318,12 @@ function TripDocumentInner({
   const saveNow = useCallback(async () => {
     const t = store.getState().tripDocument.trip;
     if (!t) return;
-    const normalized = { ...t, id: tripId };
+    const normalized = normalizeTripStepOrder({ ...t, id: tripId });
     await flushTripSaveNow(normalized);
+    const after = store.getState().tripDocument.trip;
+    if (after) {
+      dispatch(setFirestoreBaseline(normalizeTripStepOrder({ ...after, id: tripId })));
+    }
     dispatch(markTripSynced());
     clearTripLocalSnapshot(tripId);
   }, [dispatch, store, tripId]);
@@ -313,7 +335,12 @@ function TripDocumentInner({
         if (!state.trip) {
           return;
         }
-        writeTripLocalSnapshot(tripId, state.trip, state.hasUnsavedChanges);
+        const dirty = tripDiffersFromFirestoreBaseline(
+          state.trip,
+          state.firestoreBaseline,
+          state.hasUnsavedChanges
+        );
+        writeTripLocalSnapshot(tripId, state.trip, dirty);
       } catch {
         /* ignore localStorage quota / privacy mode errors */
       }
@@ -325,7 +352,8 @@ function TripDocumentInner({
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!store.getState().tripDocument.hasUnsavedChanges) return;
+      const s = store.getState().tripDocument;
+      if (!tripDiffersFromFirestoreBaseline(s.trip, s.firestoreBaseline, s.hasUnsavedChanges)) return;
       event.preventDefault();
       event.returnValue = UNSAVED_EXIT_WARNING;
     };
@@ -364,13 +392,15 @@ function TripDocumentInner({
 
         let local = readTripLocalSnapshot(tripId);
         if (local?.trip) {
+          const normLocal = normalizeTripStepOrder(local.trip);
           if (local.hasUnsavedChanges) {
-            dispatch(userPersisted(local.trip));
+            dispatch(setFirestoreBaseline(null));
+            dispatch(userPersisted(normLocal));
           } else {
-            dispatch(remoteSnapshotApplied(local.trip));
+            dispatch(setFirestoreBaseline(normLocal));
+            dispatch(remoteSnapshotApplied(normLocal));
           }
-          rememberTripSnapshot(local.trip);
-          writeTripLocalSnapshot(tripId, local.trip, local.hasUnsavedChanges);
+          rememberTripSnapshot(normLocal);
         }
 
         const localUnsub = subscribeToTrip(tripId, (remote, err) => {
@@ -383,23 +413,41 @@ function TripDocumentInner({
           }
           if (!remote) {
             const localBootstrap = defaultTrip(tripId);
+            dispatch(setFirestoreBaseline(null));
             dispatch(userPersisted(localBootstrap));
             rememberTripSnapshot(localBootstrap);
-            writeTripLocalSnapshot(tripId, localBootstrap, true);
             setError(null);
             setLoading(false);
             return;
           }
           local = readTripLocalSnapshot(tripId);
           if (local?.trip && shouldPreferLocalSnapshot(local, remote)) {
-            dispatch(userPersisted(local.trip));
-            rememberTripSnapshot(local.trip);
-            writeTripLocalSnapshot(tripId, local.trip, true);
+            dispatch(setFirestoreBaseline(normalizeTripStepOrder(remote)));
+            dispatch(userPersisted(normalizeTripStepOrder(local.trip)));
+            rememberTripSnapshot(normalizeTripStepOrder(local.trip));
             setLoading(false);
             setError(null);
             return;
           }
-          dispatch(remoteSnapshotApplied(remote));
+          if (
+            local?.trip &&
+            local.hasUnsavedChanges &&
+            remoteIsNewerThanLocalSnapshot(local, remote)
+          ) {
+            const normRemote = normalizeTripStepOrder(remote);
+            const merged = normalizeTripStepOrder(
+              mergeNewerRemoteWithLocalDraft(remote, local.trip)
+            );
+            dispatch(setFirestoreBaseline(normRemote));
+            dispatch(remoteSnapshotApplied(merged));
+            rememberTripSnapshot(merged);
+            setLoading(false);
+            setError(null);
+            return;
+          }
+          const normRemote = normalizeTripStepOrder(remote);
+          dispatch(setFirestoreBaseline(normRemote));
+          dispatch(remoteSnapshotApplied(normRemote));
           clearTripLocalSnapshot(tripId);
           setLoading(false);
           setError(null);
@@ -459,6 +507,7 @@ function TripDocumentInner({
       canUndo,
       undo,
       hasUnsavedChanges,
+      canSaveToFirestore,
       saveNow,
       user,
       member,
@@ -478,6 +527,7 @@ function TripDocumentInner({
       canUndo,
       undo,
       hasUnsavedChanges,
+      canSaveToFirestore,
       saveNow,
       user,
       member,

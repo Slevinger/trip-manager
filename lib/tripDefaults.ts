@@ -43,8 +43,8 @@ export function createEmptyStepInsertedAfter(afterStep: TripStep, order: number)
   const prevEnd = effectiveStepEndParts(afterStep);
   const startDate = prevEnd.date;
   const startTime = prevEnd.time;
-  const base = {
-    ...createEmptyStep(order),
+  const base: StayStep = {
+    ...(createEmptyStep(order) as StayStep),
     startDate,
     startTime,
   };
@@ -91,6 +91,9 @@ export function morphStepToStay(step: TripStep): StayStep {
   const {
     transports: _tr,
     transitEndManual: _tm,
+    transitDurationDays: _tdd,
+    transitDurationHours: _tdh,
+    transitDurationMinutes: _tdm,
     fromStayStepId: _f,
     toStayStepId: _to,
     ...base
@@ -115,7 +118,6 @@ export function morphStepToTransit(step: TripStep): TransitStep {
     transitType: "airplane",
     transports: [],
     endDateOpen: false,
-    transitEndManual: false,
     arrivalSummary: step.arrivalSummary ?? "",
     arrivalOptions: [],
     fromStayStepId: undefined,

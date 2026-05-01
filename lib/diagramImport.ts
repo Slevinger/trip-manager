@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Hotel, StepStatus, TripStep } from "@/lib/types/trip";
 import { migrateLegacyCombined } from "@/lib/timeline/dates";
+import { applyTransitEndFromArrivals } from "@/lib/timeline/hotelsAndDates";
 
 function optNum(v: unknown): number | undefined {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -125,6 +126,10 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
                     title: legacyTransport,
                     from: "",
                     to: "",
+                    startDate: start.date,
+                    startTime: start.time,
+                    endDate: end.date,
+                    endTime: end.time,
                     details: "",
                     duration: String(o.duration ?? ""),
                     cost: "",
@@ -152,6 +157,9 @@ export function diagramJsonToTripSteps(raw: unknown): TripStep[] {
     }
     if (mx !== undefined) step.mapX = mx;
     if (my !== undefined) step.mapY = my;
+    if (step.type === "transit") {
+      return applyTransitEndFromArrivals(step);
+    }
     return step;
   });
 }

@@ -17,6 +17,11 @@ import {
   transitStepDurationFromArrivals,
 } from "@/lib/timeline/hotelsAndDates";
 import {
+  applyTransitDurationToEnd,
+  clampTransitDurationParts,
+  totalMinutesFromTransitDuration,
+} from "@/lib/timeline/transitDuration";
+import {
   STAY_WIZARD_SHELL,
   STAY_WIZARD_TOTAL_STEPS,
   TRANSIT_WIZARD_SHELL,
@@ -524,13 +529,20 @@ function TransitFlowInner({
   const canAdvanceBasics =
     hasStayEndpoints &&
     (data.title.trim().length > 0 || data.location.trim().length > 0);
-  const datesOk = isValidDdMmYyyy(data.startDate) && isValidDdMmYyyy(data.endDate);
+  const datesOk =
+    isValidDdMmYyyy(data.startDate) && totalMinutesFromTransitDuration(data) > 0;
   const shell = TRANSIT_WIZARD_SHELL[step] ?? TRANSIT_WIZARD_SHELL[0];
 
   function patch(p: Partial<TransitStep>) {
-    setData((d) =>
-      applyTransitEndFromArrivals({ ...d, ...p, endDateOpen: false, transports: [] })
-    );
+    setData((d) => {
+      const merged = { ...d, ...p, endDateOpen: false, transports: [] };
+      const c = clampTransitDurationParts(
+        merged.transitDurationDays ?? 0,
+        merged.transitDurationHours ?? 0,
+        merged.transitDurationMinutes ?? 0
+      );
+      return applyTransitDurationToEnd({ ...merged, ...c });
+    });
   }
 
   function finish() {
@@ -672,26 +684,50 @@ function TransitFlowInner({
               className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base dark:border-zinc-700 dark:bg-zinc-900"
               date={data.startDate}
               time={data.startTime}
-              onDateChange={(startDate) =>
-                patch({ startDate, transitEndManual: data.transitEndManual })
-              }
+              onDateChange={(startDate) => patch({ startDate })}
               onTimeChange={(startTime) => patch({ startTime })}
             />
           </label>
-          <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-            {t("step.endDate")}
-            <TripDateTimeInput
-              className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base dark:border-zinc-700 dark:bg-zinc-900"
-              date={data.endDate}
-              time={data.endTime}
-              minDate={data.startDate.trim() || undefined}
-              onDateChange={(endDate) => patch({ endDate, transitEndManual: true })}
-              onTimeChange={(endTime) => patch({ endTime, transitEndManual: true })}
-            />
-          </label>
+          <div className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            {t("step.transitDurationInputs")}
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="block min-w-0">
+                <span className="text-[10px] font-normal text-zinc-500">{t("step.transitDurationDays")}</span>
+                <GroupedNumberInput
+                  min={0}
+                  className="mt-0.5 w-full rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-base dark:border-zinc-700 dark:bg-zinc-900"
+                  value={data.transitDurationDays ?? 0}
+                  onChange={(n) => patch({ transitDurationDays: n })}
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="text-[10px] font-normal text-zinc-500">{t("step.transitDurationHours")}</span>
+                <GroupedNumberInput
+                  min={0}
+                  className="mt-0.5 w-full rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-base dark:border-zinc-700 dark:bg-zinc-900"
+                  value={data.transitDurationHours ?? 0}
+                  onChange={(n) => patch({ transitDurationHours: n })}
+                />
+              </label>
+              <label className="block min-w-0">
+                <span className="text-[10px] font-normal text-zinc-500">{t("step.transitDurationMinutes")}</span>
+                <GroupedNumberInput
+                  min={0}
+                  className="mt-0.5 w-full rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-base dark:border-zinc-700 dark:bg-zinc-900"
+                  value={data.transitDurationMinutes ?? 0}
+                  onChange={(n) => patch({ transitDurationMinutes: n })}
+                />
+              </label>
+            </div>
+            <p className="mt-2 text-[11px] font-normal leading-snug text-zinc-500 dark:text-zinc-400">
+              {t("step.transitDurationHint")}
+            </p>
+          </div>
           {!datesOk ? (
             <p className="text-xs text-amber-700 dark:text-amber-400/90">
-              {t("step.transitDatesRequired")}
+              {!isValidDdMmYyyy(data.startDate)
+                ? t("step.transitDatesRequired")
+                : t("step.transitDurationRequired")}
             </p>
           ) : null}
         </div>
