@@ -16,6 +16,8 @@
 # next.js
 /.next/
 /out/
+planner-next/.next/
+planner-next/node_modules/
 
 # production
 /build

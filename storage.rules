@@ -1,0 +1,81 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function currentEmailLower() {
+      return request.auth != null && request.auth.token.email is string
+        ? request.auth.token.email.lower()
+        : "";
+    }
+
+    function canonicalTripData(tripId) {
+      return firestore.get(/databases/(default)/documents/canonicalTrips/$(tripId)).data;
+    }
+
+    function ctPartyMapEmailEq(m) {
+      return m is map &&
+        currentEmailLower() != "" &&
+        (
+          (
+            m.keys().hasAny(['email']) &&
+            m.email is string &&
+            m.email.lower() == currentEmailLower()
+          ) ||
+          (
+            m.keys().hasAny(['Email']) &&
+            m.Email is string &&
+            m.Email.lower() == currentEmailLower()
+          )
+        );
+    }
+
+    function ctPartyListEmailAt(list, idx) {
+      return list is list &&
+        list.size() > idx &&
+        list[idx] is map &&
+        ctPartyMapEmailEq(list[idx]);
+    }
+
+    /** Owner or listed traveler on `travelers[]` (not view-only viewers). */
+    function canonicalTripManageStorage(tripId) {
+      return request.auth != null &&
+        firestore.exists(/databases/(default)/documents/canonicalTrips/$(tripId)) &&
+        (
+          canonicalTripData(tripId).ownerUid == request.auth.uid ||
+          (
+            canonicalTripData(tripId).keys().hasAny(['travelers']) &&
+            canonicalTripData(tripId).travelers is list && (
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 0) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 1) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 2) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 3) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 4) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 5) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 6) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 7) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 8) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 9) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 10) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 11) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 12) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 13) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 14) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 15) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 16) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 17) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 18) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 19) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 20) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 21) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 22) ||
+              ctPartyListEmailAt(canonicalTripData(tripId).travelers, 23)
+            )
+          )
+        );
+    }
+
+    match /canonicalTrips/{tripId}/{allPaths=**} {
+      allow read, delete: if canonicalTripManageStorage(tripId);
+      allow create, update: if canonicalTripManageStorage(tripId);
+    }
+  }
+}

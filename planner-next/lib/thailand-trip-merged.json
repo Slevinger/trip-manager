@@ -1,0 +1,239 @@
+{
+  "description": "",
+  "startDate": "2026-05-28T20:30:00.000Z",
+  "documents": [],
+  "warnings": [],
+  "title": "תאילנד",
+  "id": "65708f1c-708f-487d-9fcf-2649870a4643",
+  "budget": {
+    "totalBudget": {
+      "currency": "ILS",
+      "amount": 12000
+    }
+  },
+  "createdAt": "2026-05-02T07:04:32.832Z",
+  "currency": "ILS",
+  "steps": [
+    {
+      "id": "9de7c92c-b102-4aba-b3b0-3354e28e365a",
+      "order": 0,
+      "title": "פוקט",
+      "startTime": "2026-05-29T13:00:00.000Z",
+      "endTime": "2026-05-30T05:30:00.000Z",
+      "stepType": "stay",
+      "targetDestinationId": "15ce9d1c-3710-4a30-992f-56db9abaadc3",
+      "stepIntervals": [
+        {
+          "endTime": "2026-05-30T05:30:00.000Z",
+          "intervalType": "stay",
+          "id": "ee9ede88-be97-4128-9392-0567b5eabd59",
+          "title": "Nai Yang Beach Resort",
+          "startTime": "2026-05-29T13:00:00.000Z",
+          "price": { "amount": 104, "currency": "USD" },
+          "stayType": "resort",
+          "comment": "Phuket Province, Thailand\nNai Yang Beach Resort, Sakhu, Phuket Province, Thailand, 83140",
+          "destinationId": "4ddee98e-c63c-4770-9bfb-377ef1676446"
+        }
+      ]
+    },
+    {
+      "id": "7312fb11-b078-4e3b-bd14-74afe979b963",
+      "order": 1,
+      "title": "מעבר לקאו סוק",
+      "startTime": "2026-05-30T07:00:00.000Z",
+      "endTime": "2026-05-30T11:30:00.000Z",
+      "stepType": "transit",
+      "fromStayId": "4ddee98e-c63c-4770-9bfb-377ef1676446",
+      "toStayId": "f4176eab-9dc3-4155-954d-c989861e0f18",
+      "targetDestinationId": "7955f5bc-7710-4590-8f14-410b9431d18e",
+      "stepIntervals": [
+        {
+          "comment": "To: Khao Sok National Park, Surat Thani Province, Thailand",
+          "startTime": "2026-05-30T07:00:00.000Z",
+          "transitType": "minivan",
+          "intervalType": "transit",
+          "endTime": "2026-05-30T11:30:00.000Z",
+          "title": "נסיעה בבוקר ",
+          "id": "faa76ebc-7e93-429c-aa44-5b896a038326",
+          "fromDestinationId": "4ddee98e-c63c-4770-9bfb-377ef1676446",
+          "toDestinationId": "1ed0a580-8914-4589-b7b9-5e294b94d180"
+        }
+      ]
+    },
+    {
+      "id": "74b51fff-ebb2-4220-8a07-fdecf0837d7a",
+      "order": 2,
+      "title": "קאו סוק",
+      "startTime": "2026-05-30T11:00:00.000Z",
+      "endTime": "2026-06-01T08:00:00.000Z",
+      "stepType": "stay",
+      "targetDestinationId": "f4176eab-9dc3-4155-954d-c989861e0f18",
+      "stepIntervals": [
+        {
+          "comment": "Khao Sok National Park, Surat Thani Province, Thailand\n41, Lost Horizon Resort, Surat Thani Province, Thailand, 84250",
+          "startTime": "2026-05-30T11:00:00.000Z",
+          "stayType": "resort",
+          "price": { "amount": 380, "currency": "ILS" },
+          "title": "Lost Horizon Resort",
+          "id": "b6fd330b-e852-4eba-b844-f4dcd90b118e",
+          "intervalType": "stay",
+          "endTime": "2026-05-31T08:31:00.000Z",
+          "destinationId": "1ed0a580-8914-4589-b7b9-5e294b94d180"
+        },
+        {
+          "endTime": "2026-06-01T08:00:00.000Z",
+          "intervalType": "stay",
+          "id": "b9cc310b-cecb-4675-8001-b1faf62c4a08",
+          "title": "360 issara Floating Resort",
+          "startTime": "2026-05-31T11:00:00.000Z",
+          "stayType": "resort",
+          "price": { "currency": "ILS", "amount": 1080 },
+          "comment": "Khao Phang Camping, Ban Ta Khun, Surat Thani Province, Thailand, 84230",
+          "destinationId": "1323afce-43b9-40e8-8cbc-858aee120423"
+        }
+      ]
+    },
+    {
+      "id": "44bbfd89-436c-457b-90e1-bfb811c143eb",
+      "order": 3,
+      "title": "מסע לקו יאו נוי",
+      "startTime": "2026-06-01T08:30:00.000Z",
+      "endTime": "2026-06-01T15:30:00.000Z",
+      "stepType": "transit",
+      "fromStayId": "856289fa-3d19-4d7b-ac04-b5afcdc22c10",
+      "toStayId": "f60d13bf-a76e-4c16-b06c-cfcdbd4fad1e",
+      "targetDestinationId": "7955f5bc-7710-4590-8f14-410b9431d18e",
+      "stepIntervals": [
+        {
+          "intervalType": "transit",
+          "endTime": "2026-06-01T11:30:00.000Z",
+          "title": "נסיעה לנמל בפוקט",
+          "id": "4c49e1f8-e5f0-452c-8e43-e99e0ee625f8",
+          "comment": "To: Soi Kohkaew 2, Laem Hin Pier, Ko Kaeo, Phuket Province, Thailand\nFrom: cheow lan lake, Surat Thani Province, Thailand\nFrom: Khao Sok National Park, Surat Thani Province, Thailand",
+          "startTime": "2026-06-01T08:30:00.000Z",
+          "transitType": "minivan",
+          "fromDestinationId": "856289fa-3d19-4d7b-ac04-b5afcdc22c10",
+          "toDestinationId": "ca491d44-221d-4a28-8351-4ee923370135"
+        },
+        {
+          "transitType": "ferry",
+          "comment": "To: Phang-nga Province, Thailand\nFrom: Soi Kohkaew 2, Laem Hin Pier, Ko Kaeo, Phuket Province, Thailand",
+          "startTime": "2026-06-01T14:00:00.000Z",
+          "title": "הפלגה לקו יאו נוי",
+          "id": "9885f33c-db1d-46dd-99b9-54bbc355c2df",
+          "intervalType": "transit",
+          "endTime": "2026-06-01T15:30:00.000Z",
+          "fromDestinationId": "ca491d44-221d-4a28-8351-4ee923370135",
+          "toDestinationId": "e1a0892d-1596-4793-a76f-cc86ef1ad803"
+        }
+      ]
+    },
+    {
+      "id": "b5038426-eea0-43a3-9682-61f70cd8dd00",
+      "order": 4,
+      "title": "קו יאו נוי",
+      "startTime": "2026-06-01T10:30:00.000Z",
+      "endTime": "2026-06-03T06:30:00.000Z",
+      "stepType": "stay",
+      "targetDestinationId": "1fbd298c-3ca9-4144-87f7-52b77ed10620",
+      "stepIntervals": [
+        {
+          "stayType": "resort",
+          "endTime": "2026-06-03T06:30:00.000Z",
+          "startTime": "2026-06-01T10:30:00.000Z",
+          "intervalType": "stay",
+          "comment": "Cape Kudu Hotel, Haad Tha Kao, Phang-nga Province, Thailand, 82160\naccessible when low tide, Coastal Escape Koh Yao Noi, Haad Tha Kao, Phang-nga Province, Thailand, 82160\naccessible when low tide, Cape Kudu Hotel, Haad Tha Kao, Phang-nga Province, Thailand, 82160",
+          "id": "9bf0e12c-21fa-4808-8f05-5afb3d2b0591",
+          "title": "Cape Kudu",
+          "destinationId": "e1a0892d-1596-4793-a76f-cc86ef1ad803"
+        }
+      ]
+    }
+  ],
+  "travelers": [
+    {
+      "email": "shir.levinger@gmail.com",
+      "name": "shir",
+      "id": "b3b4d70b-e998-4993-bb49-b8e23f51deeb"
+    },
+    {
+      "id": "d822f019-e074-4209-9e02-c7b5acf7489d",
+      "email": "annakatz36@gmail.com",
+      "name": "anna"
+    }
+  ],
+  "tasks": [],
+  "updatedAt": "2026-05-02T13:54:17.216Z",
+  "endDate": "2026-06-16T11:30:00.000Z",
+  "destinations": [
+    {
+      "location": "Phuket Province, Thailand",
+      "id": "15ce9d1c-3710-4a30-992f-56db9abaadc3",
+      "title": "Phuket Province",
+      "coordinates": { "lon": 98.3529292, "lat": 7.9366015 },
+      "description": ""
+    },
+    {
+      "id": "4ddee98e-c63c-4770-9bfb-377ef1676446",
+      "title": "Nai Yang Beach Resort",
+      "location": "Nai Yang Beach Resort, Sakhu, Phuket Province, Thailand, 83140",
+      "description": "Nai Yang Beach Resort, Sakhu, Phuket Province, Thailand, 83140"
+    },
+    {
+      "id": "7955f5bc-7710-4590-8f14-410b9431d18e",
+      "location": "",
+      "title": "Transit leg",
+      "description": ""
+    },
+    {
+      "location": "Khao Sok National Park, Surat Thani Province, Thailand",
+      "id": "f4176eab-9dc3-4155-954d-c989861e0f18",
+      "coordinates": { "lat": 9.0686898, "lon": 98.5738024 },
+      "title": "Khao Sok National Park",
+      "description": ""
+    },
+    {
+      "id": "1ed0a580-8914-4589-b7b9-5e294b94d180",
+      "title": "Lost Horizon Resort",
+      "location": "41, Lost Horizon Resort, Surat Thani Province, Thailand, 84250",
+      "description": "41, Lost Horizon Resort, Surat Thani Province, Thailand, 84250"
+    },
+    {
+      "id": "1323afce-43b9-40e8-8cbc-858aee120423",
+      "title": "360 issara Floating Resort",
+      "location": "Khao Phang Camping, Ban Ta Khun, Surat Thani Province, Thailand, 84230",
+      "description": "Khao Phang Camping, Ban Ta Khun, Surat Thani Province, Thailand, 84230"
+    },
+    {
+      "location": "Khao Phang Camping, Ban Ta Khun, Surat Thani Province, Thailand, 84230",
+      "id": "856289fa-3d19-4d7b-ac04-b5afcdc22c10",
+      "title": "קאו סוק",
+      "description": ""
+    },
+    {
+      "location": "Tambon Ko Yao Noi, Chang Wat, Phang Nga, Thailand",
+      "id": "f60d13bf-a76e-4c16-b06c-cfcdbd4fad1e",
+      "title": "קו יאו נוי",
+      "description": ""
+    },
+    {
+      "title": "Phuket Province",
+      "coordinates": { "lon": 98.4099919, "lat": 7.9366343 },
+      "id": "ca491d44-221d-4a28-8351-4ee923370135",
+      "location": "Soi Kohkaew 2, Laem Hin Pier, Ko Kaeo, Phuket Province, Thailand",
+      "description": ""
+    },
+    {
+      "id": "1fbd298c-3ca9-4144-87f7-52b77ed10620",
+      "location": "Cape Kudu Hotel, Haad Tha Kao, Phang-nga Province, Thailand, 82160",
+      "title": "Koh Yao Noi",
+      "description": ""
+    },
+    {
+      "id": "e1a0892d-1596-4793-a76f-cc86ef1ad803",
+      "title": "Cape Kudu",
+      "location": "Cape Kudu Hotel, Haad Tha Kao, Phang-nga Province, Thailand, 82160",
+      "description": "Cape Kudu Hotel, Haad Tha Kao, Phang-nga Province, Thailand, 82160"
+    }
+  ]
+}

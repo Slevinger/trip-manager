@@ -89,5 +89,179 @@ service cloud.firestore {
     match /trips/{tripId}/locks/{lockId} {
       allow read, create, update, delete: if signedIn();
     }
+
+    /**
+     * Google-backed session. Prefer `firebase.sign_in_provider`; some tokens expose Google only
+     * under `firebase.identities` (e.g. linked accounts / SDK differences).
+     */
+    function canonicalTripGoogle() {
+      return signedIn() &&
+        request.auth.token.keys().hasAny(['firebase']) &&
+        request.auth.token.firebase is map &&
+        (
+          (
+            request.auth.token.firebase.keys().hasAny(['sign_in_provider']) &&
+            request.auth.token.firebase.sign_in_provider == 'google.com'
+          ) ||
+          (
+            request.auth.token.firebase.keys().hasAny(['identities']) &&
+            request.auth.token.firebase.identities is map &&
+            request.auth.token.firebase.identities.keys().hasAny(['google.com'])
+          )
+        );
+    }
+
+    function canonicalTripParticipantEmailRead() {
+      return currentEmailLower() != "" &&
+        resource.data.keys().hasAny(['participantEmailsLower']) &&
+        resource.data.participantEmailsLower is list &&
+        resource.data.participantEmailsLower.hasAny([currentEmailLower()]);
+    }
+
+    /** Party row email matches JWT email (lowercase). Accepts `email` or `Email` field names. */
+    function canonicalTripPartyMapEmailEq(m) {
+      return m is map &&
+        currentEmailLower() != "" &&
+        (
+          (
+            m.keys().hasAny(['email']) &&
+            m.email is string &&
+            m.email.lower() == currentEmailLower()
+          ) ||
+          (
+            m.keys().hasAny(['Email']) &&
+            m.Email is string &&
+            m.Email.lower() == currentEmailLower()
+          )
+        );
+    }
+
+    function canonicalTripPartyListEmailAt(list, idx) {
+      return list is list &&
+        list.size() > idx &&
+        list[idx] is map &&
+        canonicalTripPartyMapEmailEq(list[idx]);
+    }
+
+    /** Manage (save): JWT email matches a `travelers[]` row only — not view-only `viewers`. */
+    function canonicalTripNestedTravelerEmailWrite() {
+      return currentEmailLower() != "" &&
+        resource.data.keys().hasAny(['travelers']) &&
+        resource.data.travelers is list && (
+          canonicalTripPartyListEmailAt(resource.data.travelers, 0) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 1) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 2) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 3) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 4) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 5) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 6) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 7) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 8) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 9) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 10) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 11) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 12) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 13) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 14) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 15) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 16) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 17) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 18) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 19) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 20) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 21) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 22) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 23)
+        );
+    }
+
+    /**
+     * Fallback when `participantEmailsLower` was never written or is stale: check nested
+     * `travelers` / `viewers` (first 24 rows each — same cap as practical trip size).
+     */
+    function canonicalTripNestedPartyEmailRead() {
+      return currentEmailLower() != "" && (
+        (resource.data.keys().hasAny(['travelers']) && resource.data.travelers is list && (
+          canonicalTripPartyListEmailAt(resource.data.travelers, 0) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 1) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 2) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 3) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 4) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 5) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 6) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 7) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 8) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 9) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 10) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 11) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 12) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 13) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 14) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 15) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 16) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 17) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 18) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 19) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 20) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 21) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 22) ||
+          canonicalTripPartyListEmailAt(resource.data.travelers, 23)
+        )) ||
+        (resource.data.keys().hasAny(['viewers']) && resource.data.viewers is list && (
+          canonicalTripPartyListEmailAt(resource.data.viewers, 0) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 1) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 2) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 3) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 4) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 5) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 6) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 7) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 8) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 9) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 10) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 11) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 12) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 13) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 14) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 15) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 16) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 17) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 18) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 19) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 20) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 21) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 22) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 23)
+        ))
+      );
+    }
+
+    /**
+     * Canonical trip model (planner-next): Google sign-in only.
+     * Read: trip owner uid, or email listed on the trip (travelers / viewers / owner email copy).
+     * Update: owner, or listed traveler (same email as JWT on `travelers[]`); may not change `ownerUid`.
+     * Delete: owner only.
+     */
+    match /canonicalTrips/{tripId} {
+      allow read: if canonicalTripGoogle() && (
+        resource.data.ownerUid == request.auth.uid ||
+        canonicalTripParticipantEmailRead() ||
+        canonicalTripNestedPartyEmailRead()
+      );
+      allow create: if canonicalTripGoogle() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.id is string &&
+        request.resource.data.id == tripId &&
+        request.resource.data.participantEmailsLower is list;
+      allow update: if canonicalTripGoogle() && (
+        resource.data.ownerUid == request.auth.uid ||
+        (
+          canonicalTripNestedTravelerEmailWrite() &&
+          request.resource.data.ownerUid == resource.data.ownerUid
+        )
+      );
+      allow delete: if canonicalTripGoogle() &&
+        resource.data.ownerUid == request.auth.uid;
+    }
   }
 }
