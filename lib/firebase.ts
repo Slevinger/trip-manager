@@ -9,7 +9,6 @@ import {
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
-/** Trim helper — env *names* must be referenced statically so Next.js can inline `NEXT_PUBLIC_*`. */
 function trimEnv(value: string | undefined): string | undefined {
   if (value == null) return undefined;
   const t = value.trim();
@@ -27,13 +26,10 @@ const firebaseConfig = {
 
 function hasConfig(): boolean {
   return Boolean(
-    firebaseConfig.apiKey &&
-      firebaseConfig.projectId &&
-      firebaseConfig.appId
+    firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId
   );
 }
 
-/** Names of required public env vars that are empty (for error UI). */
 export function getMissingFirebasePublicEnv(): string[] {
   const missing: string[] = [];
   if (!trimEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY)) {
@@ -50,22 +46,17 @@ export function getMissingFirebasePublicEnv(): string[] {
 
 let app: FirebaseApp | undefined;
 let firestore: Firestore | undefined;
+let storage: FirebaseStorage | undefined;
 let auth: Auth | undefined;
 let authPersistenceReady: Promise<void> | null = null;
-let storage: FirebaseStorage | undefined;
 let googleProvider: GoogleAuthProvider | undefined;
 
-/** Ensures auth state survives refresh + OAuth redirect return (browser only). */
 export async function ensureAuthPersistence(): Promise<void> {
   if (typeof window === "undefined") return;
   const a = getClientAuth();
   if (!a) return;
   if (!authPersistenceReady) {
-    authPersistenceReady = setPersistence(a, browserLocalPersistence).catch(
-      () => {
-        /* already configured or unsupported */
-      }
-    );
+    authPersistenceReady = setPersistence(a, browserLocalPersistence).catch(() => {});
   }
   await authPersistenceReady;
 }
@@ -78,7 +69,6 @@ export function getFirebaseApp(): FirebaseApp | undefined {
   return app;
 }
 
-/** Firestore instance; undefined when env is not configured. */
 export function getDb(): Firestore | undefined {
   if (!hasConfig()) return undefined;
   if (!firestore) {
@@ -87,6 +77,17 @@ export function getDb(): Firestore | undefined {
     firestore = getFirestore(a);
   }
   return firestore;
+}
+
+/** Storage client; undefined when Firebase env is incomplete. */
+export function getClientStorage(): FirebaseStorage | undefined {
+  if (!hasConfig()) return undefined;
+  if (!storage) {
+    const a = getFirebaseApp();
+    if (!a) return undefined;
+    storage = getStorage(a);
+  }
+  return storage;
 }
 
 export function getClientAuth(): Auth | undefined {
@@ -99,16 +100,6 @@ export function getClientAuth(): Auth | undefined {
   return auth;
 }
 
-export function getClientStorage(): FirebaseStorage | undefined {
-  if (!hasConfig()) return undefined;
-  if (!storage) {
-    const a = getFirebaseApp();
-    if (!a) return undefined;
-    storage = getStorage(a);
-  }
-  return storage;
-}
-
 export function getGoogleAuthProvider(): GoogleAuthProvider {
   if (!googleProvider) {
     googleProvider = new GoogleAuthProvider();
@@ -118,6 +109,3 @@ export function getGoogleAuthProvider(): GoogleAuthProvider {
   }
   return googleProvider;
 }
-
-/** Alias for `getDb()`. */
-export { getDb as db };

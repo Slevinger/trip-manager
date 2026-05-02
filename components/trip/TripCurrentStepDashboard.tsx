@@ -108,7 +108,7 @@ function StepBody({ step, destinations }: { step: TripStep; destinations: Trip["
             {from?.title || from?.location || "—"}
           </p>
           {(from?.location ?? "").trim() ? (
-            <p className="text-xs text-white/70">{from.location}</p>
+            <p className="text-xs text-white/70">{from?.location}</p>
           ) : null}
         </div>
         <div className="rounded-xl bg-white/10 px-3 py-2">
@@ -117,7 +117,7 @@ function StepBody({ step, destinations }: { step: TripStep; destinations: Trip["
             {to?.title || to?.location || "—"}
           </p>
           {(to?.location ?? "").trim() ? (
-            <p className="text-xs text-white/70">{to.location}</p>
+            <p className="text-xs text-white/70">{to?.location}</p>
           ) : null}
         </div>
       </div>
@@ -129,7 +129,7 @@ function StepBody({ step, destinations }: { step: TripStep; destinations: Trip["
     <>
       <p className="mt-1 text-lg font-semibold text-white">{d?.title || "Activity"}</p>
       {(d?.location ?? "").trim() ? (
-        <p className="mt-1 text-sm text-white/80">{d.location}</p>
+        <p className="mt-1 text-sm text-white/80">{d?.location}</p>
       ) : null}
     </>
   );
@@ -144,6 +144,8 @@ export function TripCurrentStepDashboard({
   focus: CurrentStepFocus;
   nowMs: number;
 }) {
+  const sortedSteps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
+
   if (focus.kind === "none") {
     return (
       <div className="mt-8 rounded-2xl border border-zinc-200 bg-white p-6 text-center dark:border-zinc-800 dark:bg-zinc-950">
@@ -161,7 +163,7 @@ export function TripCurrentStepDashboard({
     endMs != null &&
     nowMs >= endMs &&
     focus.kind === "active" &&
-    step.id === sortTripStepsByStartTime(trip.steps).at(-1)?.id;
+    step.id === sortedSteps.at(-1)?.id;
 
   const headerTint =
     step.stepType === "stay"
@@ -171,7 +173,6 @@ export function TripCurrentStepDashboard({
         : "from-emerald-600 to-emerald-900";
 
   const untilTripEnd = msUntilTripEnd(trip, nowMs);
-  const sortedSteps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
 
   return (
     <div className="mt-8">

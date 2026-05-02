@@ -1,26 +1,12 @@
 import type { NextConfig } from "next";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["firebase-admin"],
-  async redirects() {
-    return [{ source: "/trips", destination: "/trip", permanent: true }];
-  },
-  /**
-   * Relaxes COOP so any remaining OAuth popup paths (or third-party scripts) are less likely
-   * to hit `window.closed` / `window.close` warnings. Primary Google sign-in uses redirect.
-   */
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Cross-Origin-Opener-Policy",
-            value: "same-origin-allow-popups",
-          },
-        ],
-      },
-    ];
+  turbopack: {
+    root: appRoot,
   },
 };
 

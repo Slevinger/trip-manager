@@ -1,17 +1,8 @@
 import { NextResponse } from "next/server";
-import {
-  isPhotonLangCode,
-  type PhotonLangCode,
-} from "@/lib/places/photonLang";
+import { searchGooglePlacesForAutocomplete } from "@/lib/places/googlePlacesServer";
+import { isPhotonLangCode, type PhotonLangCode } from "@/lib/places/photonLang";
 import type { PlaceSearchHit } from "@/lib/places/types";
 
-/**
- * Proxies place search to Photon (OpenStreetMap data, Komoot-hosted).
- * Keeps requests server-side (stable User-Agent, no browser CORS to third parties).
- *
- * Alternatives you can swap in here: Mapbox Geocoding, HERE, TomTom,
- * self-hosted Nominatim, or Google Places — same response shape if you adapt mapping.
- */
 const PHOTON = "https://photon.komoot.io/api/";
 
 type PhotonFeature = {
@@ -41,6 +32,58 @@ function labelFromProperties(p: NonNullable<PhotonFeature["properties"]>): strin
   return chunks.join(", ") || p.name?.trim() || "";
 }
 
+async function fetchPhotonHits(
+  raw: string,
+  lang: PhotonLangCode
+): Promise<{ hits: PlaceSearchHit[]; upstreamError: boolean }> {
+  const url = new URL(PHOTON);
+  url.searchParams.set("q", raw);
+  url.searchParams.set("limit", "10");
+  url.searchParams.set("lang", lang);
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "TripPlannerNext/1.0 (place-search)",
+      "Accept-Language": lang === "default" ? "*" : lang,
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return { hits: [], upstreamError: true };
+  }
+  const data = (await res.json()) as { features?: PhotonFeature[] };
+  const features = data.features ?? [];
+  const hits: PlaceSearchHit[] = [];
+
+  for (const f of features) {
+    const coords = f.geometry?.coordinates;
+    const p = f.properties;
+    if (!coords || coords.length < 2 || !p) continue;
+    const [lng, lat] = coords;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const label = labelFromProperties(p).trim();
+    if (!label) continue;
+    const id =
+      p.osm_type && p.osm_id != null
+        ? `${p.osm_type}:${p.osm_id}`
+        : `${lat},${lng},${label}`;
+    const title = p.name?.trim() || undefined;
+    const descParts = [p.city, p.state, p.country].filter(Boolean).map((s) => String(s).trim());
+    const description = (descParts.length ? descParts.join(", ") : label).trim();
+    hits.push({
+      id,
+      label,
+      lat,
+      lng,
+      provider: "photon",
+      ...(title ? { title } : {}),
+      description,
+    });
+  }
+  return { hits, upstreamError: false };
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const raw = searchParams.get("q")?.trim() ?? "";
@@ -54,50 +97,17 @@ export async function GET(req: Request) {
   const langRaw = searchParams.get("lang")?.toLowerCase() ?? "en";
   const lang: PhotonLangCode = isPhotonLangCode(langRaw) ? langRaw : "en";
 
-  const url = new URL(PHOTON);
-  url.searchParams.set("q", raw);
-  url.searchParams.set("limit", "10");
-  url.searchParams.set("lang", lang);
-
   try {
-    const res = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "TripPlanner/1.0 (place-search)",
-        "Accept-Language": lang === "default" ? "*" : lang,
-      },
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      return NextResponse.json(
-        { results: [], error: "upstream" },
-        { status: 502 }
-      );
+    const [googleHits, photonPack] = await Promise.all([
+      searchGooglePlacesForAutocomplete(raw, langRaw),
+      fetchPhotonHits(raw, lang),
+    ]);
+    const results = [...googleHits, ...photonPack.hits];
+    if (photonPack.upstreamError && googleHits.length === 0) {
+      return NextResponse.json({ results: [], error: "upstream" }, { status: 502 });
     }
-    const data = (await res.json()) as { features?: PhotonFeature[] };
-    const features = data.features ?? [];
-    const results: PlaceSearchHit[] = [];
-
-    for (const f of features) {
-      const coords = f.geometry?.coordinates;
-      const p = f.properties;
-      if (!coords || coords.length < 2 || !p) continue;
-      const [lng, lat] = coords;
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      const label = labelFromProperties(p).trim();
-      if (!label) continue;
-      const id =
-        p.osm_type && p.osm_id != null
-          ? `${p.osm_type}:${p.osm_id}`
-          : `${lat},${lng},${label}`;
-      results.push({ id, label, lat, lng });
-    }
-
     return NextResponse.json({ results });
   } catch {
-    return NextResponse.json(
-      { results: [], error: "fetch" },
-      { status: 502 }
-    );
+    return NextResponse.json({ results: [], error: "fetch" }, { status: 502 });
   }
 }

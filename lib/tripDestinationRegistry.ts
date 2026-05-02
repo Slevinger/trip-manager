@@ -170,7 +170,7 @@ export function migrateTripToDestinationRegistry(data: unknown): Trip {
       const intervals = (Array.isArray(o.stepIntervals) ? o.stepIntervals : []) as TransitStepInterval[];
       const nextIntervals = intervals.map((int) => {
         if (int.intervalType !== "transit") return int;
-        const raw = int as Record<string, unknown>;
+        const raw = int as unknown as Record<string, unknown>;
         const src = ingest(destinations, raw.sourceDestination as Destination | undefined);
         const tgt = ingest(destinations, raw.targetDestination as Destination | undefined);
         const ti = int as TransitStepInterval;
@@ -208,7 +208,7 @@ export function migrateTripToDestinationRegistry(data: unknown): Trip {
       const intervals = (Array.isArray(o.stepIntervals) ? o.stepIntervals : []) as ActivityStepInterval[];
       const nextIntervals = intervals.map((int) => {
         if (int.intervalType !== "activity") return int;
-        const raw = int as Record<string, unknown>;
+        const raw = int as unknown as Record<string, unknown>;
         const slotId = ingest(destinations, raw.destination as Destination | undefined);
         const { destination: _d, ...rest } = raw as Record<string, unknown> & { destination?: unknown };
         return {

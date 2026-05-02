@@ -1,21 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-noto-he), var(--font-noto), ui-sans-serif, system-ui,
-    sans-serif;
+  --background: #fafafa;
+  --foreground: #18181b;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #09090b;
+    --foreground: #fafafa;
   }
 }
 
@@ -24,79 +17,30 @@ body {
   color: var(--foreground);
 }
 
-.leaflet-container {
-  width: 100%;
-  height: 100%;
-  min-height: 360px;
-  background: #e5e7eb;
-  direction: ltr;
-}
-
-.trip-step-badge-bubble {
-  background: #ffffff;
-  border: 1px solid rgba(39, 39, 42, 0.15);
-  border-radius: 9999px;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
-  margin: 0;
-  padding: 5px 9px;
-  color: #18181b;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.02em;
-  direction: ltr;
-  unicode-bidi: isolate;
-  white-space: nowrap;
-  display: inline-block;
-}
-
-.trip-step-badge-bubble-active {
-  background: #2563eb;
-  border-color: #1d4ed8;
-  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.35);
-}
-
-.trip-step-badge-bubble-active .trip-step-badge-date,
-.trip-step-badge-bubble-active .trip-step-badge-location {
-  color: #ffffff;
-}
-
-.trip-step-badge-bubble-active .trip-step-badge-sep {
-  color: #ffffff;
-  opacity: 0.85;
-}
-
-.trip-step-badge-tooltip,
-.trip-step-badge-tooltip.leaflet-tooltip {
+/* Leaflet itinerary map: arrowhead div icons */
+.leaflet-div-icon.trip-map-arrow-marker {
   background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
+  border: none !important;
 }
 
-.trip-step-badge-tooltip.leaflet-tooltip-top::before,
-.trip-step-badge-tooltip.leaflet-tooltip-bottom::before,
-.trip-step-badge-tooltip.leaflet-tooltip-left::before,
-.trip-step-badge-tooltip.leaflet-tooltip-right::before {
-  display: none !important;
+.trip-map-arrow-shape {
+  width: 0;
+  height: 0;
+  margin: 0 auto;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 14px solid var(--arrow-color, #0ea5e9);
+  transform-origin: 50% 70%;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.2));
 }
 
-.trip-step-badge-tooltip * {
-  pointer-events: none;
+/* Leaflet defaults to very dark #333; soften so tooltip copy matches app UI */
+.leaflet-tooltip {
+  color: #52525b;
 }
 
-.trip-step-badge-date {
-  font-weight: 800;
-  color: #0f172a;
+@media (prefers-color-scheme: dark) {
+  .leaflet-tooltip {
+    color: #d4d4d8;
+  }
 }
-
-.trip-step-badge-sep {
-  opacity: 0.65;
-}
-
-.trip-step-badge-location {
-  font-weight: 600;
-  color: #334155;
-}
-

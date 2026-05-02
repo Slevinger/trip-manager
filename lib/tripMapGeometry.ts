@@ -219,11 +219,11 @@ export function transitIntervalsToMapEdges(
     const legFrom = destinationFromList(destinations, interval.fromDestinationId);
     const legTo = destinationFromList(destinations, interval.toDestinationId);
 
-    let from: LatLng | null =
+    const from: LatLng | null =
       coordsFromDestination(legFrom) ??
       (firstTransitLeg ? coordsFromDestination(fromStay) : null) ??
       prevTo;
-    let to: LatLng | null =
+    const to: LatLng | null =
       coordsFromDestination(legTo) ??
       (!isLastTransit ? nextLegStart : null) ??
       (isLastTransit ? coordsFromDestination(toStay) : null) ??
