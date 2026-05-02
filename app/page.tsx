@@ -146,11 +146,10 @@ export default function HomePage() {
     <main className="mx-auto max-w-3xl px-4 py-10">
       {missingEnv.length > 0 ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
-          Firebase env not set — trips are stored in <strong>localStorage</strong> only. Copy{" "}
-          <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">NEXT_PUBLIC_FIREBASE_*</code> from the
-          root app&apos;s <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">.env.local</code> into{" "}
-          <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">planner-next/.env.local</code>, then
-          restart dev. Deploy updated <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">firestore.rules</code> for{" "}
+          Firebase env not set — trips are stored in <strong>localStorage</strong> only. Add{" "}
+          <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">NEXT_PUBLIC_FIREBASE_*</code> to{" "}
+          <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">.env.local</code> at the project root,
+          then restart dev. Deploy updated <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">firestore.rules</code> for{" "}
           <code className="rounded bg-white/80 px-1 dark:bg-zinc-900">canonicalTrips</code>.
         </p>
       ) : (
