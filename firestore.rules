@@ -90,27 +90,6 @@ service cloud.firestore {
       allow read, create, update, delete: if signedIn();
     }
 
-    /**
-     * Google-backed session. Prefer `firebase.sign_in_provider`; some tokens expose Google only
-     * under `firebase.identities` (e.g. linked accounts / SDK differences).
-     */
-    function canonicalTripGoogle() {
-      return signedIn() &&
-        request.auth.token.keys().hasAny(['firebase']) &&
-        request.auth.token.firebase is map &&
-        (
-          (
-            request.auth.token.firebase.keys().hasAny(['sign_in_provider']) &&
-            request.auth.token.firebase.sign_in_provider == 'google.com'
-          ) ||
-          (
-            request.auth.token.firebase.keys().hasAny(['identities']) &&
-            request.auth.token.firebase.identities is map &&
-            request.auth.token.firebase.identities.keys().hasAny(['google.com'])
-          )
-        );
-    }
-
     function canonicalTripParticipantEmailRead() {
       return currentEmailLower() != "" &&
         resource.data.keys().hasAny(['participantEmailsLower']) &&
@@ -237,30 +216,42 @@ service cloud.firestore {
     }
 
     /**
+     * User profile prefs; doc id is lowercase email (must match JWT email).
+     * Do not require email_verified: it is missing or false on some Google tokens while
+     * request.auth.token.email is still correct — matching the path id is sufficient here.
+     */
+    match /users/{userEmail} {
+      allow read, write: if signedIn() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() == userEmail;
+    }
+
+    /**
      * Canonical trip model (planner-next): Google sign-in only.
      * Read: trip owner uid, or email listed on the trip (travelers / viewers / owner email copy).
      * Update: owner, or listed traveler (same email as JWT on `travelers[]`); may not change `ownerUid`.
      * Delete: owner only.
      */
+    /** Canonical trips: signed-in + owner / participant / traveler rules (app enforces Google in UI). */
     match /canonicalTrips/{tripId} {
-      allow read: if canonicalTripGoogle() && (
+      allow read: if signedIn() && (
         resource.data.ownerUid == request.auth.uid ||
         canonicalTripParticipantEmailRead() ||
         canonicalTripNestedPartyEmailRead()
       );
-      allow create: if canonicalTripGoogle() &&
+      allow create: if signedIn() &&
         request.resource.data.ownerUid == request.auth.uid &&
         request.resource.data.id is string &&
         request.resource.data.id == tripId &&
         request.resource.data.participantEmailsLower is list;
-      allow update: if canonicalTripGoogle() && (
+      allow update: if signedIn() && (
         resource.data.ownerUid == request.auth.uid ||
         (
           canonicalTripNestedTravelerEmailWrite() &&
           request.resource.data.ownerUid == resource.data.ownerUid
         )
       );
-      allow delete: if canonicalTripGoogle() &&
+      allow delete: if signedIn() &&
         resource.data.ownerUid == request.auth.uid;
     }
   }

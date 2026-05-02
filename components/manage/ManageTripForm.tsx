@@ -1,26 +1,56 @@
 "use client";
 
+import { useState } from "react";
+import { useI18n } from "@/lib/i18n/context";
 import { newId } from "@/lib/canonicalIds";
 import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
-import type { CurrencyCode, TaskStatus, Trip, TripTask } from "@/lib/types/trip";
+import type { CurrencyCode, TaskStatus, Trip, TripTask, UserPreferences } from "@/lib/types/trip";
+import { MultiSelectDialog } from "@/components/manage/MultiSelectDialog";
+import {
+  ACTIVITY_TYPES,
+  HOBBY_OPTIONS,
+  LIFESTYLE_OPTIONS,
+} from "@/components/manage/stepEditorConstants";
 
 const CURRENCIES: CurrencyCode[] = ["ILS", "USD", "EUR", "THB"];
 const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"];
 
+type PrefsKey = keyof UserPreferences;
+
+function prefsOptions(key: PrefsKey): readonly string[] {
+  switch (key) {
+    case "hobbies":
+      return HOBBY_OPTIONS;
+    case "activities":
+      return ACTIVITY_TYPES;
+    case "lifestyle":
+      return LIFESTYLE_OPTIONS;
+    default: {
+      const _x: never = key;
+      return _x;
+    }
+  }
+}
+
 export function ManageTripForm({
   trip,
   onChange,
+  profilePreferences,
 }: {
   trip: Trip;
   onChange: (next: Trip) => void;
+  /** Signed-in user defaults from `users/{emailLower}`; optional when offline / unsigned. */
+  profilePreferences?: UserPreferences | null;
 }) {
+  const { t } = useI18n();
   const budgetAmount = trip.budget?.totalBudget?.amount ?? "";
   const tasks = trip.tasks ?? [];
+  const [prefsDlg, setPrefsDlg] = useState<{ travelerId: string; key: PrefsKey } | null>(null);
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-        Trip title
+        {t("manage.tripTitle")}
         <input
           className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
           value={trip.title}
@@ -29,7 +59,7 @@ export function ManageTripForm({
       </label>
 
       <label className="mt-4 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-        Description
+        {t("manage.description")}
         <textarea
           rows={3}
           className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
@@ -40,7 +70,7 @@ export function ManageTripForm({
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-          Trip start
+          {t("manage.tripStart")}
           <input
             type="datetime-local"
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
@@ -49,7 +79,7 @@ export function ManageTripForm({
           />
         </label>
         <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-          Trip end
+          {t("manage.tripEnd")}
           <input
             type="datetime-local"
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
@@ -61,7 +91,7 @@ export function ManageTripForm({
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-          Currency
+          {t("manage.currency")}
           <select
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
             value={trip.currency}
@@ -78,12 +108,12 @@ export function ManageTripForm({
           </select>
         </label>
         <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-          Total budget (optional)
+          {t("manage.totalBudgetOptional")}
           <input
             type="number"
             min={0}
             step="1"
-            placeholder="Optional"
+            placeholder={t("manage.optional")}
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
             value={budgetAmount === "" ? "" : budgetAmount}
             onChange={(e) => {
@@ -105,22 +135,17 @@ export function ManageTripForm({
           />
         </label>
       </div>
-      <p className="mt-1 text-xs text-zinc-500">Budget uses the trip currency above.</p>
+      <p className="mt-1 text-xs text-zinc-500">{t("manage.budgetCurrencyHint")}</p>
 
       <p className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/80 px-2 py-1.5 text-[10px] text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
-        <strong className="font-medium text-zinc-700 dark:text-zinc-300">Cloud access:</strong> add each
-        person&apos;s <span className="whitespace-nowrap">Google account email</span> on travelers or viewers so
-        they can open this trip after signing in with Google (viewers stay read-only).
+        {t("manage.cloudAccessBody")}
       </p>
 
       <div className="mt-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">Travelers</h3>
-            <p className="text-[10px] text-zinc-500">
-              Party on the trip; optional Google email matches cloud access (View). Only the Firestore owner can use
-              Manage.
-            </p>
+            <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t("manage.travelers")}</h3>
+            <p className="text-[10px] text-zinc-500">{t("manage.travelersHint")}</p>
           </div>
           <button
             type="button"
@@ -132,53 +157,82 @@ export function ManageTripForm({
               })
             }
           >
-            Add traveler
+            {t("manage.addTraveler")}
           </button>
         </div>
-        <ul className="mt-2 space-y-2">
+        <ul className="mt-2 space-y-3">
           {trip.travelers.map((tr) => (
-            <li key={tr.id} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <input
-                className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                placeholder="Name"
-                value={tr.name}
-                onChange={(e) => {
-                  const next = trip.travelers.map((x) =>
-                    x.id === tr.id ? { ...x, name: e.target.value } : x
+            <li key={tr.id} className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                  placeholder={t("manage.namePlaceholder")}
+                  value={tr.name}
+                  onChange={(e) => {
+                    const next = trip.travelers.map((x) =>
+                      x.id === tr.id ? { ...x, name: e.target.value } : x
+                    );
+                    onChange({ ...trip, travelers: next });
+                  }}
+                />
+                <input
+                  className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                  placeholder={t("manage.googleEmailPlaceholder")}
+                  value={tr.email ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value.trim();
+                    const next = trip.travelers.map((x) => {
+                      if (x.id !== tr.id) return x;
+                      if (!v) {
+                        const rest = { ...x };
+                        delete rest.email;
+                        return rest;
+                      }
+                      return { ...x, email: v };
+                    });
+                    onChange({ ...trip, travelers: next });
+                  }}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 self-start rounded-xl border border-red-200 px-2 py-1 text-xs text-red-800 disabled:opacity-40 dark:border-red-900/50 dark:text-red-200 sm:self-center"
+                  disabled={trip.travelers.length <= 1}
+                  onClick={() =>
+                    onChange({
+                      ...trip,
+                      travelers: trip.travelers.filter((x) => x.id !== tr.id),
+                    })
+                  }
+                >
+                  {t("common.remove")}
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(["hobbies", "activities", "lifestyle"] as const).map((key) => {
+                  const cat =
+                    key === "hobbies"
+                      ? t("profile.hobbies")
+                      : key === "activities"
+                        ? t("profile.activities")
+                        : t("profile.lifestyle");
+                  const hasOverride = Boolean(tr.preferences && key in tr.preferences);
+                  const overrideLen = hasOverride ? (tr.preferences?.[key]?.length ?? 0) : 0;
+                  const profileLen = profilePreferences?.[key]?.length ?? 0;
+                  const label = hasOverride
+                    ? `${cat} (${overrideLen})`
+                    : `${cat} · ${t("manage.profileWord")} (${profileLen})`;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200"
+                      onClick={() => setPrefsDlg({ travelerId: tr.id, key })}
+                    >
+                      {label}
+                    </button>
                   );
-                  onChange({ ...trip, travelers: next });
-                }}
-              />
-              <input
-                className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                placeholder="Google email (optional, for cloud access)"
-                value={tr.email ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value.trim();
-                  const next = trip.travelers.map((x) => {
-                    if (x.id !== tr.id) return x;
-                    if (!v) {
-                      const { email: _omit, ...rest } = x;
-                      return rest;
-                    }
-                    return { ...x, email: v };
-                  });
-                  onChange({ ...trip, travelers: next });
-                }}
-              />
-              <button
-                type="button"
-                className="shrink-0 self-start rounded-xl border border-red-200 px-2 py-1 text-xs text-red-800 disabled:opacity-40 dark:border-red-900/50 dark:text-red-200 sm:self-center"
-                disabled={trip.travelers.length <= 1}
-                onClick={() =>
-                  onChange({
-                    ...trip,
-                    travelers: trip.travelers.filter((x) => x.id !== tr.id),
-                  })
-                }
-              >
-                Remove
-              </button>
+                })}
+              </div>
             </li>
           ))}
         </ul>
@@ -187,8 +241,8 @@ export function ManageTripForm({
       <div className="mt-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">Viewers</h3>
-            <p className="text-[10px] text-zinc-500">View-only (itinerary & summary); not travelers</p>
+            <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t("manage.viewers")}</h3>
+            <p className="text-[10px] text-zinc-500">{t("manage.viewersHint")}</p>
           </div>
           <button
             type="button"
@@ -201,7 +255,7 @@ export function ManageTripForm({
               });
             }}
           >
-            Add viewer
+            {t("manage.addViewer")}
           </button>
         </div>
         <ul className="mt-2 space-y-2">
@@ -209,7 +263,7 @@ export function ManageTripForm({
             <li key={vw.id} className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                placeholder="Name"
+                placeholder={t("manage.namePlaceholder")}
                 value={vw.name}
                 onChange={(e) => {
                   const list = trip.viewers ?? [];
@@ -223,7 +277,7 @@ export function ManageTripForm({
               />
               <input
                 className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                placeholder="Email (optional)"
+                placeholder={t("manage.emailOptionalShort")}
                 value={vw.email ?? ""}
                 onChange={(e) => {
                   const list = trip.viewers ?? [];
@@ -233,7 +287,8 @@ export function ManageTripForm({
                     viewers: list.map((x) => {
                       if (x.id !== vw.id) return x;
                       if (!v) {
-                        const { email: _omit, ...rest } = x;
+                        const rest = { ...x };
+                        delete rest.email;
                         return rest;
                       }
                       return { ...x, email: v };
@@ -253,19 +308,19 @@ export function ManageTripForm({
                   });
                 }}
               >
-                Remove
+                {t("common.remove")}
               </button>
             </li>
           ))}
         </ul>
         {(trip.viewers ?? []).length === 0 ? (
-          <p className="mt-1 text-xs text-zinc-500">No viewers — add people who should follow the trip read-only.</p>
+          <p className="mt-1 text-xs text-zinc-500">{t("manage.noViewers")}</p>
         ) : null}
       </div>
 
       <div className="mt-6">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">Tasks</h3>
+          <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t("manage.tasks")}</h3>
           <button
             type="button"
             className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-medium dark:border-zinc-700 dark:bg-zinc-900"
@@ -278,7 +333,7 @@ export function ManageTripForm({
               onChange({ ...trip, tasks: [...tasks, task] });
             }}
           >
-            Add task
+            {t("manage.addTask")}
           </button>
         </div>
         <ul className="mt-2 space-y-2">
@@ -286,7 +341,7 @@ export function ManageTripForm({
             <li key={task.id} className="flex flex-wrap items-center gap-2">
               <input
                 className="min-w-[8rem] flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                placeholder="Task title"
+                placeholder={t("manage.taskTitlePlaceholder")}
                 value={task.title}
                 onChange={(e) => {
                   const next = tasks.map((x) =>
@@ -307,7 +362,13 @@ export function ManageTripForm({
               >
                 {TASK_STATUSES.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {s === "todo"
+                      ? t("manage.taskStatusTodo")
+                      : s === "in_progress"
+                        ? t("manage.taskStatusInProgress")
+                        : s === "done"
+                          ? t("manage.taskStatusDone")
+                          : t("manage.taskStatusCancelled")}
                   </option>
                 ))}
               </select>
@@ -316,13 +377,69 @@ export function ManageTripForm({
                 className="rounded-xl border border-red-200 px-2 py-1 text-xs text-red-800 dark:border-red-900/50 dark:text-red-200"
                 onClick={() => onChange({ ...trip, tasks: tasks.filter((x) => x.id !== task.id) })}
               >
-                Remove
+                {t("common.remove")}
               </button>
             </li>
           ))}
         </ul>
-        {tasks.length === 0 ? <p className="mt-1 text-xs text-zinc-500">No tasks yet.</p> : null}
+        {tasks.length === 0 ? <p className="mt-1 text-xs text-zinc-500">{t("manage.noTasksYet")}</p> : null}
       </div>
+
+      {prefsDlg ? (
+        (() => {
+          const tr = trip.travelers.find((t) => t.id === prefsDlg.travelerId);
+          if (!tr) return null;
+          const key = prefsDlg.key;
+          const cat =
+            key === "hobbies"
+              ? t("profile.hobbies")
+              : key === "activities"
+                ? t("profile.activities")
+                : t("profile.lifestyle");
+          const hasOverride = Boolean(tr.preferences && key in tr.preferences);
+          const selected = hasOverride ? [...(tr.preferences?.[key] ?? [])] : [];
+          const profileN = profilePreferences?.[key]?.length ?? 0;
+          return (
+            <MultiSelectDialog
+              open
+              title={t("manage.prefsDialogTitle", {
+                category: cat,
+                name: tr.name.trim() || t("manage.travelerDefaultName"),
+              })}
+              options={prefsOptions(key)}
+              selected={selected}
+              hint={hasOverride ? undefined : t("manage.prefsHintNoOverride", { count: profileN })}
+              onOpenChange={(open) => {
+                if (!open) setPrefsDlg(null);
+              }}
+              onSave={(next) => {
+                const nextTravelers = trip.travelers.map((x) => {
+                  if (x.id !== tr.id) return x;
+                  return { ...x, preferences: { ...(x.preferences ?? {}), [key]: next } };
+                });
+                onChange({ ...trip, travelers: nextTravelers });
+              }}
+              onClearOverride={
+                hasOverride
+                  ? () => {
+                      const nextTravelers = trip.travelers.map((x) => {
+                        if (x.id !== tr.id) return x;
+                        const p = x.preferences;
+                        if (!p || !(key in p)) return x;
+                        const { [key]: _removed, ...rest } = p;
+                        return {
+                          ...x,
+                          preferences: Object.keys(rest).length ? rest : undefined,
+                        };
+                      });
+                      onChange({ ...trip, travelers: nextTravelers });
+                    }
+                  : undefined
+              }
+            />
+          );
+        })()
+      ) : null}
     </section>
   );
 }

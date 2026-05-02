@@ -1,0 +1,394 @@
+import { NextRequest, NextResponse } from "next/server";
+import { buildTripAssistantSystemPrompt } from "@/lib/tripAssistantPrompt";
+import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
+import type { Trip, UserPreferences } from "@/lib/types/trip";
+
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+
+type TripAssistantProvider = "openai" | "anthropic";
+
+/** Server-only OpenAI secret (`sk-…` / `sk-proj-…`). */
+function openaiKey(): string | undefined {
+  return (
+    process.env.OPENAI_SA_KEY?.trim() ||
+    process.env.OPENAI_API_KEY?.trim() ||
+    undefined
+  );
+}
+
+function openaiModel(): string {
+  return process.env.OPENAI_CHAT_MODEL?.trim() || "gpt-4o-mini";
+}
+
+/** Server-only Anthropic API key. */
+function anthropicKey(): string | undefined {
+  return process.env.ANTHROPIC_API_KEY?.trim();
+}
+
+/** Default: current Haiku (Claude 4.5) per https://docs.anthropic.com/en/docs/about-claude/models/overview */
+function anthropicModel(): string {
+  return process.env.ANTHROPIC_CHAT_MODEL?.trim() || "claude-haiku-4-5";
+}
+
+/**
+ * `TRIP_ASSISTANT_PROVIDER`: exactly `openai` or `anthropic`.
+ * If unset: use Anthropic when only `ANTHROPIC_API_KEY` is set; otherwise OpenAI.
+ */
+function resolveTripAssistantProvider(): TripAssistantProvider {
+  const explicit = process.env.TRIP_ASSISTANT_PROVIDER?.trim().toLowerCase();
+  if (explicit === "anthropic") return "anthropic";
+  if (explicit === "openai") return "openai";
+  const hasOpen = Boolean(openaiKey());
+  const hasAnt = Boolean(anthropicKey());
+  if (hasAnt && !hasOpen) return "anthropic";
+  return "openai";
+}
+
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+const REPLY_MAX_WORDS = 50;
+
+/** Enforces the product word cap even if the model drifts. */
+function capReplyWords(text: string, maxWords: number): string {
+  const t = text.trim();
+  if (!t) return t;
+  const words = t.split(/\s+/);
+  if (words.length <= maxWords) return t;
+  return `${words.slice(0, maxWords).join(" ")}…`;
+}
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return x != null && typeof x === "object" && !Array.isArray(x);
+}
+
+const OPENAI_BILLING_URL = "https://platform.openai.com/account/billing";
+
+function parseOpenAiError(status: number, bodyText: string): { message: string; omitDetail: boolean } {
+  const trimmed = bodyText.trim();
+  try {
+    const j = JSON.parse(trimmed) as {
+      error?: { message?: string; code?: string; type?: string };
+    };
+    const code = j.error?.code;
+    const typ = j.error?.type;
+    if (code === "insufficient_quota" || typ === "insufficient_quota") {
+      return {
+        message: `OpenAI quota exceeded for this API key. Add billing or credits: ${OPENAI_BILLING_URL}`,
+        omitDetail: true,
+      };
+    }
+    if (code === "invalid_api_key") {
+      return {
+        message: "OpenAI rejected the API key — create one at https://platform.openai.com/api-keys",
+        omitDetail: true,
+      };
+    }
+    const msg = j.error?.message?.trim();
+    if (msg) {
+      return {
+        message: msg.length > 280 ? `${msg.slice(0, 280)}…` : msg,
+        omitDetail: false,
+      };
+    }
+  } catch {
+    /* not JSON */
+  }
+  if (status === 401) {
+    return {
+      message: "OpenAI rejected the API key (check OPENAI_API_KEY / OPENAI_SA_KEY).",
+      omitDetail: false,
+    };
+  }
+  if (status === 429) {
+    return {
+      message: "OpenAI rate limit — wait a moment and try again.",
+      omitDetail: false,
+    };
+  }
+  if (status === 402 || status === 403) {
+    return {
+      message: `OpenAI account or permission issue — check ${OPENAI_BILLING_URL}`,
+      omitDetail: false,
+    };
+  }
+  return { message: `OpenAI returned HTTP ${status}.`, omitDetail: false };
+}
+
+const ANTHROPIC_CONSOLE = "https://console.anthropic.com/settings/plans";
+
+const ANTHROPIC_MODELS_DOC = "https://docs.anthropic.com/en/docs/models-overview";
+
+function parseAnthropicError(
+  status: number,
+  bodyText: string,
+  attemptedModel: string
+): { message: string; omitDetail: boolean } {
+  const trimmed = bodyText.trim();
+  try {
+    const j = JSON.parse(trimmed) as { error?: { message?: string; type?: string } };
+    const typ = j.error?.type;
+    const msg = j.error?.message?.trim();
+    const mLower = msg?.toLowerCase() ?? "";
+    if (
+      typ === "not_found_error" ||
+      (msg && /^model:\s*\S+/i.test(msg)) ||
+      (typ === "invalid_request_error" &&
+        (mLower.includes("model") || mLower.includes("not found")))
+    ) {
+      return {
+        message: `Anthropic did not accept model "${attemptedModel}". Set ANTHROPIC_CHAT_MODEL in env to a model id from ${ANTHROPIC_MODELS_DOC}`,
+        omitDetail: true,
+      };
+    }
+    if (typ === "authentication_error") {
+      return {
+        message: "Anthropic rejected the API key — check ANTHROPIC_API_KEY at https://console.anthropic.com/settings/keys",
+        omitDetail: true,
+      };
+    }
+    if (typ === "rate_limit_error") {
+      return { message: "Anthropic rate limit — wait a moment and try again.", omitDetail: true };
+    }
+    if (typ === "invalid_request_error" && msg?.toLowerCase().includes("credit")) {
+      return {
+        message: `Anthropic billing or credits issue. Check ${ANTHROPIC_CONSOLE}`,
+        omitDetail: true,
+      };
+    }
+    if (msg) {
+      return {
+        message: msg.length > 280 ? `${msg.slice(0, 280)}…` : msg,
+        omitDetail: false,
+      };
+    }
+  } catch {
+    /* not JSON */
+  }
+  if (status === 401) {
+    return { message: "Anthropic rejected the API key (check ANTHROPIC_API_KEY).", omitDetail: false };
+  }
+  if (status === 429) {
+    return { message: "Anthropic rate limit — try again shortly.", omitDetail: false };
+  }
+  return { message: `Anthropic returned HTTP ${status}.`, omitDetail: false };
+}
+
+function parsePreferences(raw: unknown): UserPreferences | undefined {
+  if (!isRecord(raw)) return undefined;
+  const hobbies = Array.isArray(raw.hobbies)
+    ? raw.hobbies.filter((x): x is string => typeof x === "string")
+    : [];
+  const activities = Array.isArray(raw.activities)
+    ? raw.activities.filter((x): x is string => typeof x === "string")
+    : [];
+  const lifestyle = Array.isArray(raw.lifestyle)
+    ? raw.lifestyle.filter((x): x is string => typeof x === "string")
+    : [];
+  return { hobbies, activities, lifestyle };
+}
+
+/** Minimal shape check so we never stringify huge arbitrary JSON as “trip”. */
+function isTripPayload(x: unknown): x is Record<string, unknown> & {
+  id: string;
+  title: string;
+  currency: string;
+  startDate: string;
+  endDate: string;
+  travelers: unknown[];
+  destinations: unknown[];
+  steps: unknown[];
+} {
+  if (!isRecord(x)) return false;
+  if (typeof x.id !== "string" || typeof x.title !== "string") return false;
+  if (typeof x.currency !== "string") return false;
+  if (typeof x.startDate !== "string" || typeof x.endDate !== "string") return false;
+  if (!Array.isArray(x.travelers) || !Array.isArray(x.destinations) || !Array.isArray(x.steps))
+    return false;
+  return true;
+}
+
+function normalizeTripForPrompt(raw: Record<string, unknown>): Trip {
+  const now = new Date().toISOString();
+  return {
+    ...(raw as unknown as Trip),
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : now,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : now,
+  };
+}
+
+/**
+ * POST JSON:
+ * - `trip` (canonical trip object) + optional `preferences`, `contextAtMs`, `messages[]` (full thread)
+ * - `messages`: `{ role: "user" | "assistant", content }[]` (no client-supplied system; server builds it)
+ *
+ * Provider: `TRIP_ASSISTANT_PROVIDER=openai` or `anthropic`. Default OpenAI unless only Anthropic key is set.
+ */
+export async function POST(req: NextRequest) {
+  const provider = resolveTripAssistantProvider();
+
+  if (provider === "openai" && !openaiKey()) {
+    if (anthropicKey()) {
+      return NextResponse.json(
+        {
+          error:
+            "Trip assistant is configured for OpenAI but no OpenAI key is set. Set OPENAI_API_KEY, or use TRIP_ASSISTANT_PROVIDER=anthropic with ANTHROPIC_API_KEY.",
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json(
+      {
+        error:
+          "No LLM API key: set OPENAI_API_KEY (or OPENAI_SA_KEY), or ANTHROPIC_API_KEY with TRIP_ASSISTANT_PROVIDER=anthropic.",
+      },
+      { status: 503 }
+    );
+  }
+
+  if (provider === "anthropic" && !anthropicKey()) {
+    if (openaiKey()) {
+      return NextResponse.json(
+        {
+          error:
+            "TRIP_ASSISTANT_PROVIDER requests Anthropic but ANTHROPIC_API_KEY is missing. Add the key or set TRIP_ASSISTANT_PROVIDER=openai.",
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json(
+      {
+        error:
+          "No LLM API key: set ANTHROPIC_API_KEY, or OpenAI keys for the default provider.",
+      },
+      { status: 503 }
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!isRecord(body)) {
+    return NextResponse.json({ error: "Expected JSON object" }, { status: 400 });
+  }
+
+  const rawMessages = body.messages;
+  if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
+    return NextResponse.json({ error: "messages[] is required" }, { status: 400 });
+  }
+
+  const tripRaw = body.trip;
+  if (!isTripPayload(tripRaw)) {
+    return NextResponse.json({ error: "trip object with id, title, steps, dates, etc. is required" }, { status: 400 });
+  }
+
+  const tripForPrompt = normalizeTripForPrompt(tripRaw);
+
+  const contextAtMs =
+    typeof body.contextAtMs === "number" && Number.isFinite(body.contextAtMs)
+      ? body.contextAtMs
+      : Date.now();
+  const preferences = parsePreferences(body.preferences);
+
+  const turnMessages: { role: "user" | "assistant"; content: string }[] = [];
+  for (const m of rawMessages) {
+    if (!isRecord(m)) continue;
+    const role = m.role === "user" || m.role === "assistant" ? m.role : null;
+    const content = typeof m.content === "string" ? m.content : "";
+    if (!role || !content.trim()) continue;
+    turnMessages.push({ role, content: content.slice(0, 12000) });
+  }
+
+  if (turnMessages.length === 0) {
+    return NextResponse.json({ error: "No valid user/assistant messages" }, { status: 400 });
+  }
+
+  const systemContent = buildTripAssistantSystemPrompt(tripForPrompt, {
+    nowMs: contextAtMs,
+    profilePreferences: preferences,
+  });
+
+  if (provider === "anthropic") {
+    const key = anthropicKey()!;
+    const result = await completeTripAssistantAnthropic({
+      apiKey: key,
+      model: anthropicModel(),
+      system: systemContent,
+      turns: turnMessages,
+      maxOutputTokens: 256,
+      temperature: 0.55,
+    });
+
+    if (!result.ok) {
+      const parsed = parseAnthropicError(result.status, result.body, anthropicModel());
+      const upstreamStatus = result.status >= 400 && result.status < 600 ? result.status : 502;
+      return NextResponse.json(
+        {
+          error: parsed.message,
+          ...(parsed.omitDetail ? {} : { detail: result.body.slice(0, 600) }),
+          status: result.status,
+          provider: "anthropic" as const,
+        },
+        { status: upstreamStatus }
+      );
+    }
+
+    const text = capReplyWords(result.text, REPLY_MAX_WORDS);
+    return NextResponse.json({
+      reply: text,
+      provider: "anthropic" as const,
+      model: anthropicModel(),
+    });
+  }
+
+  const outMessages: ChatMessage[] = [
+    { role: "system", content: systemContent.slice(0, 100_000) },
+    ...turnMessages.slice(-40),
+  ];
+
+  const res = await fetch(OPENAI_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${openaiKey()!}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: openaiModel(),
+      messages: outMessages,
+      temperature: 0.55,
+      max_completion_tokens: 150,
+    }),
+  });
+
+  const raw = await res.text();
+  if (!res.ok) {
+    const upstreamStatus = res.status >= 400 && res.status < 600 ? res.status : 502;
+    const parsed = parseOpenAiError(res.status, raw);
+    return NextResponse.json(
+      {
+        error: parsed.message,
+        ...(parsed.omitDetail ? {} : { detail: raw.slice(0, 600) }),
+        status: res.status,
+        provider: "openai" as const,
+      },
+      { status: upstreamStatus }
+    );
+  }
+
+  let parsed: { choices?: { message?: { content?: string } }[] };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    return NextResponse.json({ error: "Invalid OpenAI response", provider: "openai" }, { status: 502 });
+  }
+
+  const text = capReplyWords(parsed.choices?.[0]?.message?.content?.trim() ?? "", REPLY_MAX_WORDS);
+  return NextResponse.json({
+    reply: text,
+    provider: "openai" as const,
+    model: openaiModel(),
+  });
+}

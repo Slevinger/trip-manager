@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useI18n } from "@/lib/i18n/context";
 import { collectReferencesToDestinationId } from "@/lib/tripDestinationRegistry";
 import { destinationHasMapCoordinates } from "@/lib/tripDestinationGeo";
 import type { Destination, TripStep } from "@/lib/types/trip";
@@ -19,6 +20,7 @@ export function TripDestinationsRoster({
   steps?: TripStep[];
   manageHint?: boolean;
 }) {
+  const { t } = useI18n();
   const refsById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof collectReferencesToDestinationId>>();
     if (!steps?.length) return m;
@@ -41,10 +43,8 @@ export function TripDestinationsRoster({
   if (rows.length === 0) {
     return (
       <section className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50/80 px-4 py-6 text-center dark:border-zinc-600 dark:bg-zinc-900/40">
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Places on this trip</h3>
-        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          No destinations yet. Add a step in Manage to create places.
-        </p>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{t("view.placesTitle")}</h3>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t("view.placesEmpty")}</p>
       </section>
     );
   }
@@ -52,20 +52,12 @@ export function TripDestinationsRoster({
   return (
     <section className="rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        Places on this trip
+        {t("view.placesTitle")}
       </h3>
       <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-        {rows.length} destination{rows.length === 1 ? "" : "s"}
-        {steps?.length
-          ? " — each id lists where it is referenced on your itinerary (field names in parentheses)."
-          : " — step references load with your itinerary."}
-        {manageHint ? (
-          <>
-            {" "}
-            To edit a place, open <strong className="text-zinc-600 dark:text-zinc-300">Manage</strong> →{" "}
-            <strong className="text-zinc-600 dark:text-zinc-300">Edit</strong> on the step listed below.
-          </>
-        ) : null}
+        {t("view.destinationsCount", { count: rows.length })}
+        {steps?.length ? t("view.destinationsWithSteps") : t("view.destinationsNoSteps")}
+        {manageHint ? t("view.editPlaceHint") : null}
       </p>
       <ul className="mt-3 divide-y divide-zinc-100 dark:divide-zinc-800">
         {rows.map((d) => {
@@ -74,7 +66,7 @@ export function TripDestinationsRoster({
             <li key={d.id} className="flex flex-col gap-1 py-2.5 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                  {(d.title || "Untitled").trim() || "Untitled"}
+                  {(d.title || t("common.untitled")).trim() || t("common.untitled")}
                 </span>
                 <span
                   className={
@@ -83,7 +75,7 @@ export function TripDestinationsRoster({
                       : "shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-950 dark:bg-amber-950/50 dark:text-amber-100"
                   }
                 >
-                  {destinationHasMapCoordinates(d) ? "On map" : "No pin"}
+                  {destinationHasMapCoordinates(d) ? t("view.onMap") : t("view.noPin")}
                 </span>
               </div>
               {(d.location || "").trim() ? (
@@ -98,7 +90,7 @@ export function TripDestinationsRoster({
                 refs.length > 0 ? (
                   <div className="mt-1 rounded-lg bg-zinc-50 px-2 py-1.5 dark:bg-zinc-900/80">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      Referenced in
+                      {t("view.referencedIn")}
                     </p>
                     <ul className="mt-1 space-y-1">
                       {refs.map((r, i) => (
@@ -113,10 +105,7 @@ export function TripDestinationsRoster({
                     </ul>
                   </div>
                 ) : (
-                  <p className="text-[11px] text-amber-800 dark:text-amber-200/90">
-                    Not referenced by any current step (orphan). It will be removed on save if still unused, or
-                    attach it via <strong>Edit</strong> on a step.
-                  </p>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-200/90">{t("view.orphanDestination")}</p>
                 )
               ) : null}
             </li>
@@ -125,12 +114,11 @@ export function TripDestinationsRoster({
       </ul>
       {manageHint ? (
         <p className="mt-3 border-t border-zinc-100 pt-2 text-[11px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          Missing coordinates? Use <strong>View</strong> alerts or <strong>Manage</strong> → <strong>Edit</strong>{" "}
-          → address search / destination dialog.
+          {t("view.missingCoordsHint")}
         </p>
       ) : (
         <p className="mt-3 border-t border-zinc-100 pt-2 text-[11px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          Open <strong>Edit</strong> on the step named above to change which id is used or to edit the place fields.
+          {t("view.editStepHintReadonly")}
         </p>
       )}
     </section>

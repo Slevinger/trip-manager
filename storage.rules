@@ -35,7 +35,26 @@ service firebase.storage {
         ctPartyMapEmailEq(list[idx]);
     }
 
-    /** Owner or listed traveler on `travelers[]` (not view-only viewers). */
+    /**
+     * Read trip files: same party as Firestore trip reads — owner uid, or email in
+     * participantEmailsLower (owner + travelers + viewers). Uses the denormalized list so
+     * view-only guests are not blocked (travelers-only checks would deny viewers).
+     */
+    function canonicalTripReadStorage(tripId) {
+      return request.auth != null &&
+        firestore.exists(/databases/(default)/documents/canonicalTrips/$(tripId)) &&
+        (
+          canonicalTripData(tripId).ownerUid == request.auth.uid ||
+          (
+            currentEmailLower() != "" &&
+            canonicalTripData(tripId).keys().hasAny(['participantEmailsLower']) &&
+            canonicalTripData(tripId).participantEmailsLower is list &&
+            canonicalTripData(tripId).participantEmailsLower.hasAny([currentEmailLower()])
+          )
+        );
+    }
+
+    /** Owner or listed traveler on `travelers[]` only (upload / change / delete objects). */
     function canonicalTripManageStorage(tripId) {
       return request.auth != null &&
         firestore.exists(/databases/(default)/documents/canonicalTrips/$(tripId)) &&
@@ -74,8 +93,9 @@ service firebase.storage {
     }
 
     match /canonicalTrips/{tripId}/{allPaths=**} {
-      allow read, delete: if canonicalTripManageStorage(tripId);
+      allow read: if canonicalTripReadStorage(tripId);
       allow create, update: if canonicalTripManageStorage(tripId);
+      allow delete: if canonicalTripManageStorage(tripId);
     }
   }
 }

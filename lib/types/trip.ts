@@ -38,11 +38,21 @@ export interface TripViewer {
   email?: string;
 }
 
+/** Profile defaults live on `users/{emailLower}`; optional per-trip overrides on {@link Traveler}. */
+export interface UserPreferences {
+  hobbies: string[];
+  /** Values from {@link ActivityType} keys, plus arbitrary custom strings. */
+  activities: string[];
+  lifestyle: string[];
+}
+
 export interface Traveler {
   id: string;
   name: string;
   email?: string;
   role?: TravelerRole;
+  /** Per-trip override per category; missing keys fall back to profile defaults. */
+  preferences?: Partial<UserPreferences>;
 }
 
 export type BookingStatus =
@@ -144,14 +154,41 @@ export interface TransitStepInterval extends BaseStepInterval {
 export type ActivityType =
   | "tour"
   | "restaurant"
+  | "museum"
+  | "gallery"
+  | "theater"
+  | "concert"
+  | "festival"
+  | "market"
+  | "shopping"
+  | "nightlife"
+  | "beach"
   | "snorkeling"
   | "diving"
+  | "surfing"
+  | "kayaking"
+  | "sailing"
   | "hike"
+  | "climbing"
+  | "cycling"
+  | "scenic_drive"
+  | "viewpoint"
+  | "photography_walk"
+  | "cooking_class"
+  | "wine_tasting"
+  | "coffee_tour"
   | "spa"
-  | "beach"
-  | "shopping"
+  | "hot_spring"
+  | "religious_site"
+  | "historic_site"
+  | "national_park"
+  | "wildlife"
+  | "theme_park"
+  | "zoo"
+  | "aquarium"
   | "free_time"
-  | "nightlife"
+  | "volunteering"
+  | "workshop"
   | "other";
 
 export interface ActivityStepInterval extends BaseStepInterval {

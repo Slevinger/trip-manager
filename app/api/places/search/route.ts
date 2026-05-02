@@ -32,9 +32,17 @@ function labelFromProperties(p: NonNullable<PhotonFeature["properties"]>): strin
   return chunks.join(", ") || p.name?.trim() || "";
 }
 
+function acceptLanguageForPhoton(langRaw: string, photonLang: PhotonLangCode): string {
+  const t = langRaw.trim();
+  if (/^[a-z]{2}(-[a-z]{2})?$/i.test(t)) return `${t},en;q=0.75`;
+  if (photonLang === "default") return "*";
+  return photonLang;
+}
+
 async function fetchPhotonHits(
   raw: string,
-  lang: PhotonLangCode
+  lang: PhotonLangCode,
+  acceptLanguage: string
 ): Promise<{ hits: PlaceSearchHit[]; upstreamError: boolean }> {
   const url = new URL(PHOTON);
   url.searchParams.set("q", raw);
@@ -45,7 +53,7 @@ async function fetchPhotonHits(
     headers: {
       Accept: "application/json",
       "User-Agent": "TripPlannerNext/1.0 (place-search)",
-      "Accept-Language": lang === "default" ? "*" : lang,
+      "Accept-Language": acceptLanguage,
     },
     cache: "no-store",
   });
@@ -94,13 +102,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ results: [] satisfies PlaceSearchHit[] });
   }
 
-  const langRaw = searchParams.get("lang")?.toLowerCase() ?? "en";
-  const lang: PhotonLangCode = isPhotonLangCode(langRaw) ? langRaw : "en";
+  const langRaw = (searchParams.get("lang") ?? "en").trim().toLowerCase() || "en";
+  const photonLang: PhotonLangCode = isPhotonLangCode(langRaw) ? langRaw : "en";
+  const acceptLanguage = acceptLanguageForPhoton(langRaw, photonLang);
 
   try {
     const [googleHits, photonPack] = await Promise.all([
       searchGooglePlacesForAutocomplete(raw, langRaw),
-      fetchPhotonHits(raw, lang),
+      fetchPhotonHits(raw, photonLang, acceptLanguage),
     ]);
     const results = [...googleHits, ...photonPack.hits];
     if (photonPack.upstreamError && googleHits.length === 0) {

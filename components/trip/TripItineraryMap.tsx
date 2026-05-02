@@ -13,6 +13,7 @@ import {
   Tooltip,
   useMap,
 } from "react-leaflet";
+import { useI18n } from "@/lib/i18n/context";
 import type { CurrentStepFocus } from "@/lib/tripViewPhase";
 import {
   bearingDegreesNorth,
@@ -107,10 +108,10 @@ function applyFitBounds(map: LeafletMap, points: LatLng[], focus: LatLng | null)
   map.fitBounds(b, { padding: [32, 32], maxZoom: 12, animate: false });
 }
 
-function formatStepWindow(isoStart: string, isoEnd?: string): string {
+function formatStepWindow(isoStart: string, isoEnd: string | undefined, empty: string): string {
   const a = new Date(isoStart);
   const b = isoEnd ? new Date(isoEnd) : null;
-  if (Number.isNaN(a.getTime())) return "—";
+  if (Number.isNaN(a.getTime())) return empty;
   const opt: Intl.DateTimeFormatOptions = {
     month: "short",
     day: "numeric",
@@ -122,6 +123,8 @@ function formatStepWindow(isoStart: string, isoEnd?: string): string {
 }
 
 function StayClusterTooltipBody({ cluster }: { cluster: StayCluster }) {
+  const { t } = useI18n();
+  const dash = t("view.emDash");
   const { stays } = cluster;
   if (stays.length === 1) {
     const s = stays[0];
@@ -129,7 +132,7 @@ function StayClusterTooltipBody({ cluster }: { cluster: StayCluster }) {
       <div className="max-w-[240px] space-y-1 text-left text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
         <p className="font-semibold text-zinc-700 dark:text-zinc-100">{s.title}</p>
         <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-          {formatStepWindow(s.startTime, s.endTime)}
+          {formatStepWindow(s.startTime, s.endTime, dash)}
         </p>
         {s.placeLabel && s.placeLabel !== "—" ? (
           <p className="text-zinc-500 dark:text-zinc-400">{s.placeLabel}</p>
@@ -140,7 +143,7 @@ function StayClusterTooltipBody({ cluster }: { cluster: StayCluster }) {
   return (
     <div className="max-w-[260px] space-y-1.5 text-left text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
       <p className="font-semibold text-zinc-700 dark:text-zinc-100">
-        {stays.length} stays at this map pin
+        {t("map.staysAtThisPin", { count: stays.length })}
       </p>
       <ul className="max-h-48 space-y-1.5 overflow-y-auto border-t border-zinc-200 pt-1.5 dark:border-zinc-600">
         {stays.map((s) => (
@@ -150,7 +153,7 @@ function StayClusterTooltipBody({ cluster }: { cluster: StayCluster }) {
           >
             <p className="font-semibold text-zinc-700 dark:text-zinc-100">{s.title}</p>
             <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-              {formatStepWindow(s.startTime, s.endTime)}
+              {formatStepWindow(s.startTime, s.endTime, dash)}
             </p>
             {s.placeLabel && s.placeLabel !== "—" ? (
               <p className="text-zinc-500 dark:text-zinc-400">{s.placeLabel}</p>
@@ -253,6 +256,7 @@ export function TripItineraryMap({
   destinations: Destination[];
   focus: CurrentStepFocus;
 }) {
+  const { t } = useI18n();
   const stayPoints = useMemo(
     () => collectStayMapPoints(sortedSteps, destinations),
     [sortedSteps, destinations]
@@ -303,12 +307,8 @@ export function TripItineraryMap({
   if (!hasMap) {
     return (
       <section className="mt-8 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/80 px-4 py-8 text-center dark:border-zinc-600 dark:bg-zinc-900/40">
-        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">No map pins yet</p>
-        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          Each destination appears here once it has saved coordinates (pick a place in{" "}
-          <strong>Manage</strong>). Stay intervals and transit legs can add extra geometry; transit
-          without leg pins still draws a straight connector between surrounding steps when possible.
-        </p>
+        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{t("map.noPinsTitle")}</p>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t("map.noPinsBody")}</p>
       </section>
     );
   }
@@ -323,17 +323,15 @@ export function TripItineraryMap({
   return (
     <section className="mt-8">
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        Route map
+        {t("map.routeMapTitle")}
       </h3>
       <p className="mb-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-        {touchPrimary ? "Tap" : "Hover"} pins for details. Teal markers are your saved destinations
-        (one per list entry with coordinates). Purple/grey clusters are stay intervals; overlapping
-        stay pins merge at this zoom — zoom in to split them.
+        {touchPrimary ? t("map.pinsGuideTap") : t("map.pinsGuideHover")}
       </p>
       <div className="relative z-0 min-h-[280px] h-[min(360px,55vh)] w-full overflow-hidden rounded-2xl border border-zinc-200 shadow-sm dark:border-zinc-700">
         {!domReady ? (
           <div className="flex h-full min-h-[inherit] items-center justify-center bg-zinc-100 text-sm text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-            Preparing map…
+            {t("map.preparingMap")}
           </div>
         ) : (
         <MapContainer
@@ -419,7 +417,7 @@ export function TripItineraryMap({
               >
                 <div className="max-w-[220px] space-y-1 text-left">
                   <p className="font-semibold text-zinc-700 dark:text-zinc-100">{r.title}</p>
-                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400">Destination</p>
+                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400">{t("map.destination")}</p>
                   {r.placeLabel && r.placeLabel !== "—" ? (
                     <p className="text-zinc-500 dark:text-zinc-400">{r.placeLabel}</p>
                   ) : null}
@@ -453,10 +451,10 @@ export function TripItineraryMap({
               >
                 <div className="max-w-[220px] space-y-1 text-left">
                   <p className="font-semibold text-zinc-700 dark:text-zinc-100">
-                    {(focus.step.title || "Activity").trim()}
+                    {(focus.step.title || t("view.defaultActivityTitle")).trim()}
                   </p>
                   <p className="font-mono text-[10px] font-normal text-zinc-500 dark:text-zinc-400">
-                    {formatStepWindow(focus.step.startTime, focus.step.endTime)}
+                    {formatStepWindow(focus.step.startTime, focus.step.endTime, t("view.emDash"))}
                   </p>
                 </div>
               </MapOverlay>

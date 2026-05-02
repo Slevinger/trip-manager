@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n/context";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import { stepIntervalEmoji } from "@/lib/stepIntervalUi";
 import { destinationFromList } from "@/lib/tripDestinationRegistry";
@@ -13,14 +15,16 @@ function stepEmoji(step: TripStep): string {
   return "✈️";
 }
 
-function stepKindLabel(step: TripStep): string {
+type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
+
+function stepKindLabel(step: TripStep, t: TFn): string {
   switch (step.stepType) {
     case "stay":
-      return "Stay";
+      return t("view.kindStay");
     case "transit":
-      return "Transit";
+      return t("view.kindTransit");
     case "activity":
-      return "Activity";
+      return t("view.kindActivity");
   }
 }
 
@@ -37,8 +41,8 @@ function formatIntervalCompact(startIso: string, endIso: string): string {
   return `${a.toLocaleString(undefined, opts)} → ${b.toLocaleString(undefined, opts)}`;
 }
 
-function intervalTitle(int: TripStep["stepIntervals"][number]): string {
-  return int.title.trim() || "Untitled";
+function intervalTitle(int: TripStep["stepIntervals"][number], t: TFn): string {
+  return int.title.trim() || t("common.untitled");
 }
 
 function stepPlaceSummary(s: TripStep, destinations: Destination[]): string {
@@ -96,6 +100,7 @@ export function CanonicalStepList({
   onReorder: (orderedStepIds: string[]) => void;
   onInsertAfter: (afterStepId: string) => void;
 }) {
+  const { t } = useI18n();
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
@@ -174,7 +179,7 @@ export function CanonicalStepList({
   }
 
   function stepDisplayTitle(step: TripStep): string {
-    return step.title.trim() || "Untitled step";
+    return step.title.trim() || t("view.untitledStep");
   }
 
   return (
@@ -185,9 +190,9 @@ export function CanonicalStepList({
           style={{ left: dragPos.x, top: dragPos.y }}
         >
           <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            {stepEmoji(draggingStep)} {draggingStep.title.trim() || "Untitled step"}
+            {stepEmoji(draggingStep)} {stepDisplayTitle(draggingStep)}
           </div>
-          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{stepKindLabel(draggingStep)}</div>
+          <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{stepKindLabel(draggingStep, t)}</div>
         </div>
       ) : null}
 
@@ -213,9 +218,9 @@ export function CanonicalStepList({
                   <button
                     type="button"
                     className="mr-2 cursor-grab touch-none text-zinc-400 active:cursor-grabbing"
-                    title="Drag to reorder"
+                    title={t("manage.listDragReorderTitle")}
                     onPointerDown={(e) => startPointerDrag(e, s.id)}
-                    aria-label="Drag step"
+                    aria-label={t("manage.listDragStepAria")}
                   >
                     ⋮⋮
                   </button>
@@ -224,12 +229,11 @@ export function CanonicalStepList({
                 {s.stepIntervals.length > 1 ? (
                   <div className="mt-1.5">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      {s.stepIntervals.length}{" "}
                       {s.stepType === "stay"
-                        ? "stays"
+                        ? t("manage.intervalCountStays", { count: s.stepIntervals.length })
                         : s.stepType === "transit"
-                          ? "legs"
-                          : "slots"}
+                          ? t("manage.intervalCountLegs", { count: s.stepIntervals.length })
+                          : t("manage.intervalCountSlots", { count: s.stepIntervals.length })}
                     </p>
                     <ul className="mt-1 max-h-28 space-y-0.5 overflow-y-auto border-l-2 border-violet-300 pl-2 dark:border-violet-700">
                       {s.stepIntervals.map((int, i) => {
@@ -256,7 +260,7 @@ export function CanonicalStepList({
                               {i + 1}.
                             </span>{" "}
                             <span className="text-zinc-800 dark:text-zinc-100">
-                              {intervalTitle(int)}
+                              {intervalTitle(int, t)}
                             </span>{" "}
                             <span className="text-zinc-500 dark:text-zinc-400">
                               {formatIntervalCompact(int.startTime, int.endTime)}
@@ -310,16 +314,16 @@ export function CanonicalStepList({
               <div className="flex shrink-0 flex-col items-end gap-2">
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
-                    {stepKindLabel(s)}
+                    {stepKindLabel(s, t)}
                   </span>
                   {deleteConfirmStepId !== s.id ? (
                     <button
                       type="button"
                       className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
                       onClick={() => setDeleteConfirmStepId(s.id)}
-                      aria-label={`Delete step: ${stepDisplayTitle(s)}`}
+                      aria-label={t("manage.deleteStepAria", { title: stepDisplayTitle(s) })}
                     >
-                      Delete
+                      {t("manage.deleteStep")}
                     </button>
                   ) : null}
                 </div>
@@ -331,8 +335,7 @@ export function CanonicalStepList({
                 role="alert"
               >
                 <p className="text-xs leading-snug text-amber-950 dark:text-amber-100">
-                  Are you sure you want to delete{" "}
-                  <span className="font-semibold">“{stepDisplayTitle(s)}”</span>?
+                  {t("manage.deleteStepConfirm", { title: stepDisplayTitle(s) })}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -340,7 +343,7 @@ export function CanonicalStepList({
                     className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
                     onClick={() => setDeleteConfirmStepId(null)}
                   >
-                    No, keep it
+                    {t("manage.keepStep")}
                   </button>
                   <button
                     type="button"
@@ -350,7 +353,7 @@ export function CanonicalStepList({
                       setDeleteConfirmStepId(null);
                     }}
                   >
-                    Yes, delete
+                    {t("manage.deleteStepYes")}
                   </button>
                 </div>
               </div>
@@ -364,14 +367,14 @@ export function CanonicalStepList({
                   onEdit(s);
                 }}
               >
-                Edit
+                {t("common.edit")}
               </button>
               <button
                 type="button"
                 className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100"
                 onClick={() => onInsertAfter(s.id)}
               >
-                Add step after
+                {t("manage.addStepAfter")}
               </button>
             </div>
           </div>
@@ -386,7 +389,7 @@ export function CanonicalStepList({
         <div className="h-4" />
       </div>
 
-      {!steps.length ? <p className="text-sm text-zinc-500">No steps yet — add one below.</p> : null}
+      {!steps.length ? <p className="text-sm text-zinc-500">{t("manage.noStepsAddBelow")}</p> : null}
     </div>
   );
 }

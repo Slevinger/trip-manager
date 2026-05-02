@@ -10,6 +10,10 @@ import {
   sessionIsGoogleSignIn,
   subscribeCanonicalTrip,
 } from "@/lib/canonicalTripsFirestore";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { TripMapLoadingPlaceholder } from "@/components/trip/TripMapLoadingPlaceholder";
+import { UserMenu } from "@/components/UserMenu";
+import { useI18n } from "@/lib/i18n/context";
 import { ManageTripWorkspace } from "@/components/manage/ManageTripWorkspace";
 import { TripCurrentStepDashboard } from "@/components/trip/TripCurrentStepDashboard";
 import { TripDestinationsRoster } from "@/components/trip/TripDestinationsRoster";
@@ -20,18 +24,17 @@ import { destinationHasMapCoordinates } from "@/lib/tripDestinationGeo";
 import { getTrip, putTrip } from "@/lib/tripLocalStore";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
-import type { Destination, Trip } from "@/lib/types/trip";
+import type { Destination, Trip, UserPreferences } from "@/lib/types/trip";
+import { messagesForTrip } from "@/lib/tripChatMessages";
+import type { TripChatMessage } from "@/lib/types/user";
+import { subscribeUser } from "@/lib/usersFirestore";
 
 const TripItineraryMap = dynamic(
   () =>
     import("@/components/trip/TripItineraryMap").then((mod) => ({ default: mod.TripItineraryMap })),
   {
     ssr: false,
-    loading: () => (
-      <section className="mt-8 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
-        Loading map…
-      </section>
-    ),
+    loading: () => <TripMapLoadingPlaceholder />,
   }
 );
 
@@ -39,6 +42,14 @@ const CreateDestinationDialog = dynamic(
   () =>
     import("@/components/manage/CreateDestinationDialog").then((m) => ({
       default: m.CreateDestinationDialog,
+    })),
+  { ssr: false }
+);
+
+const TripAssistantChatDock = dynamic(
+  () =>
+    import("@/components/trip/TripAssistantChatDock").then((m) => ({
+      default: m.TripAssistantChatDock,
     })),
   { ssr: false }
 );
@@ -58,8 +69,16 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const [destinationLocationDialogOpen, setDestinationLocationDialogOpen] = useState(false);
   const [destinationLocationEditSnapshot, setDestinationLocationEditSnapshot] =
     useState<Destination | null>(null);
+  const [profilePreferences, setProfilePreferences] = useState<UserPreferences | null>(null);
+  const [chatMemory, setChatMemory] = useState<TripChatMessage[]>([]);
 
+  const { t } = useI18n();
   const useFirestore = Boolean(getDb() && getMissingFirebasePublicEnv().length === 0);
+
+  const saveTargetLabel = useMemo(
+    () => (useFirestore && user ? t("trip.saveTargetFirestore") : t("trip.saveTargetLocal")),
+    [useFirestore, user, t]
+  );
 
   useEffect(() => {
     if (tab !== "view") return;
@@ -67,6 +86,18 @@ export function TripDetail({ tripId }: { tripId: string }) {
     const id = window.setInterval(() => setViewNowMs(Date.now()), 30_000);
     return () => window.clearInterval(id);
   }, [tab]);
+
+  useEffect(() => {
+    if (!useFirestore || !user?.email?.trim()) {
+      setProfilePreferences(null);
+      setChatMemory([]);
+      return () => {};
+    }
+    return subscribeUser(user.email!, (u) => {
+      setProfilePreferences(u?.preferences ?? null);
+      setChatMemory(u?.memory ?? []);
+    });
+  }, [useFirestore, user]);
 
   useEffect(() => {
     setLoadState("loading");
@@ -184,13 +215,12 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const canUploadTripFiles = Boolean(
     useFirestore && user && canManageFirestore && getDb() && getClientStorage()
   );
-  const uploadDisabledHint = !useFirestore
-    ? "File uploads use Firebase Storage and only work for trips saved in the cloud (configure Firebase env and sign in)."
-    : !user
-      ? "Sign in from the home page to upload files for this trip."
-      : !getClientStorage()
-        ? "Add NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET (or rely on your Firebase app’s default bucket) so Storage is available."
-        : undefined;
+  const uploadDisabledHint = useMemo(() => {
+    if (!useFirestore) return t("trip.uploadHintNoFirestore");
+    if (!user) return t("trip.uploadHintSignIn");
+    if (!getClientStorage()) return t("trip.uploadHintStorage");
+    return undefined;
+  }, [useFirestore, user, t]);
 
   async function persistTrip(next: Trip) {
     setSaveError(null);
@@ -229,7 +259,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
     try {
       const parsed = JSON.parse(advancedJson) as Trip;
       if (!parsed || typeof parsed !== "object" || parsed.id !== tripId) {
-        setSaveError("JSON must be an object whose id matches this trip URL.");
+        setSaveError(t("trip.jsonIdMismatch"));
         return;
       }
       const withMeta = { ...parsed, updatedAt: new Date().toISOString() };
@@ -253,10 +283,16 @@ export function TripDetail({ tripId }: { tripId: string }) {
     }
   }
 
+  const dockTrip = !trip ? null : tab === "manage" && manageDraft ? manageDraft : trip;
+  const tripChatMessages = useMemo(() => {
+    if (!dockTrip?.id) return [];
+    return messagesForTrip(chatMemory, dockTrip.id);
+  }, [chatMemory, dockTrip?.id]);
+
   if (loadState === "loading") {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading…</p>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">{t("trip.loading")}</p>
       </main>
     );
   }
@@ -264,10 +300,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
   if (loadState === "needs_auth") {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">Sign in required</p>
-        <p className="mt-2 text-sm text-zinc-500">Cloud trips require a signed-in Google account.</p>
+        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">{t("trip.signInRequired")}</p>
+        <p className="mt-2 text-sm text-zinc-500">{t("trip.signInRequiredBody")}</p>
         <Link href="/" className="mt-6 inline-block text-sm font-medium text-violet-600 dark:text-violet-400">
-          ← Home to sign in
+          {t("trip.homeToSignIn")}
         </Link>
       </main>
     );
@@ -276,12 +312,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
   if (loadState === "needs_google") {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">Google sign-in required</p>
-        <p className="mt-2 text-sm text-zinc-500">
-          Only Google-authenticated accounts can open cloud trips (owners, travelers, and viewers).
-        </p>
+        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">{t("trip.googleRequired")}</p>
+        <p className="mt-2 text-sm text-zinc-500">{t("trip.googleRequiredBody")}</p>
         <Link href="/" className="mt-6 inline-block text-sm font-medium text-violet-600 dark:text-violet-400">
-          ← Home to continue with Google
+          {t("trip.homeToGoogle")}
         </Link>
       </main>
     );
@@ -290,15 +324,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
   if (loadState === "access_denied") {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">No access to this trip</p>
-        <p className="mt-2 text-sm text-zinc-500">
-          Firestore rejected this read. Ask the owner to add your Google account email as a traveler or viewer,
-          then save the trip once so the access list updates. Deploy the latest{" "}
-          <code className="rounded bg-zinc-100 px-1 text-xs dark:bg-zinc-800">firestore.rules</code> if you
-          haven&apos;t yet.
-        </p>
+        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">{t("trip.accessDenied")}</p>
+        <p className="mt-2 text-sm text-zinc-500">{t("trip.accessDeniedBody")}</p>
         <Link href="/" className="mt-6 inline-block text-sm font-medium text-violet-600 dark:text-violet-400">
-          ← Back to trips
+          {t("trip.backToTrips")}
         </Link>
       </main>
     );
@@ -307,51 +336,55 @@ export function TripDetail({ tripId }: { tripId: string }) {
   if (loadState === "missing" || !trip) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">Trip not found</p>
-        <p className="mt-2 text-sm text-zinc-500">It may have been deleted or you don&apos;t have access.</p>
+        <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">{t("trip.notFound")}</p>
+        <p className="mt-2 text-sm text-zinc-500">{t("trip.notFoundBody")}</p>
         <Link href="/" className="mt-6 inline-block text-sm font-medium text-violet-600 dark:text-violet-400">
-          ← Back to trips
+          {t("trip.backToTrips")}
         </Link>
       </main>
     );
   }
 
-  const saveTarget =
-    useFirestore && user ? "Firestore collection canonicalTrips" : "localStorage";
-
   const displayTitle = tab === "manage" && manageDraft ? manageDraft.title : trip.title;
+
+  /** Chat only on this trip’s loaded doc; Firestore viewers (read-only) never see it. Local trips have no viewer role. */
+  const showTripAssistant = trip.id === tripId && (!useFirestore || canManageFirestore);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/" className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
-          ← All trips
+          {t("trip.allTrips")}
         </Link>
-        <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
-          <button
-            type="button"
-            onClick={() => setTab("view")}
-            className={
-              tab === "view"
-                ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
-                : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
-            }
-          >
-            View
-          </button>
-          {useFirestore && !canManageFirestore ? null : (
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+          <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
             <button
               type="button"
-              onClick={() => setTab("manage")}
+              onClick={() => setTab("view")}
               className={
-                tab === "manage"
+                tab === "view"
                   ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
                   : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
               }
             >
-              Manage
+              {t("trip.view")}
             </button>
-          )}
+            {useFirestore && !canManageFirestore ? null : (
+              <button
+                type="button"
+                onClick={() => setTab("manage")}
+                className={
+                  tab === "manage"
+                    ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
+                    : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
+                }
+              >
+                {t("trip.manage")}
+              </button>
+            )}
+          </div>
+          {user ? <UserMenu user={user} /> : null}
         </div>
       </div>
 
@@ -367,13 +400,13 @@ export function TripDetail({ tripId }: { tripId: string }) {
             >
               <p className="font-medium">
                 {destinationsMissingMapCoordinates.length === 1
-                  ? "One destination has no map coordinates yet."
-                  : `${destinationsMissingMapCoordinates.length} destinations have no map coordinates yet.`}{" "}
-                Set a pin so they appear on the route map.
+                  ? t("trip.destMissingOne")
+                  : t("trip.destMissingMany", { count: destinationsMissingMapCoordinates.length })}{" "}
+                {t("trip.destMissingSuffix")}
               </p>
               <ul className="mt-2 space-y-1.5">
                 {destinationsMissingMapCoordinates.map((d) => {
-                  const label = (d.title || d.location || "Untitled").trim() || "Untitled";
+                  const label = (d.title || d.location || t("common.untitled")).trim() || t("common.untitled");
                   return (
                     <li key={d.id} className="flex flex-wrap items-center gap-2">
                       <span className="text-amber-900/90 dark:text-amber-100/90">{label}</span>
@@ -386,7 +419,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
                             setDestinationLocationDialogOpen(true);
                           }}
                         >
-                          Set location
+                          {t("trip.setLocation")}
                         </button>
                       ) : null}
                     </li>
@@ -394,10 +427,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
                 })}
               </ul>
               {!canEditTripDestinations && useFirestore ? (
-                <p className="mt-2 text-xs text-amber-900/80 dark:text-amber-200/80">
-                  Sign in with an account that can edit this trip to set locations from here, or ask
-                  the owner to add map pins in Manage.
-                </p>
+                <p className="mt-2 text-xs text-amber-900/80 dark:text-amber-200/80">{t("trip.destReadOnlyHint")}</p>
               ) : null}
             </aside>
           ) : null}
@@ -436,10 +466,11 @@ export function TripDetail({ tripId }: { tripId: string }) {
             persistTrip={persistTrip}
             canUploadTripFiles={canUploadTripFiles}
             uploadDisabledHint={uploadDisabledHint}
-            saveTarget={saveTarget}
+            saveTarget={saveTargetLabel}
             saveDisabled={useFirestore && (!user || !canManageFirestore)}
             saveError={saveError}
             user={user}
+            profilePreferences={profilePreferences}
           />
 
           <details
@@ -452,10 +483,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
             }}
           >
             <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-200">
-              Advanced JSON
+              {t("trip.advancedJson")}
             </summary>
             <p className="mt-2 text-xs text-zinc-500">
-              <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">id</code> must stay{" "}
+              <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">id</code> {t("trip.advancedJsonIdHint")}{" "}
               <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">{tripId}</code>.
             </p>
             <textarea
@@ -471,13 +502,23 @@ export function TripDetail({ tripId }: { tripId: string }) {
               onClick={() => void handleSaveAdvancedJson()}
               className="mt-2 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40 dark:bg-zinc-200 dark:text-zinc-900"
             >
-              Save from JSON
+              {t("trip.saveFromJson")}
             </button>
           </details>
         </div>
       ) : (
-        <p className="mt-8 text-sm text-zinc-500">Preparing editor…</p>
+        <p className="mt-8 text-sm text-zinc-500">{t("trip.preparingEditor")}</p>
       )}
+
+      {showTripAssistant ? (
+        <TripAssistantChatDock
+          trip={dockTrip ?? trip}
+          profilePreferences={profilePreferences}
+          tripChatMessages={tripChatMessages}
+          userEmail={user?.email?.trim() ?? null}
+          canPersistMemory={Boolean(useFirestore && user?.email?.trim())}
+        />
+      ) : null}
     </main>
   );
 }

@@ -2,6 +2,7 @@
 
 import type { User } from "firebase/auth";
 import { useMemo, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n/context";
 import { TripDocumentUploads } from "@/components/TripDocumentUploads";
 import { TripDestinationsRoster } from "@/components/trip/TripDestinationsRoster";
 import { createStayStep, normalizeStepOrders } from "@/lib/canonicalStepBuilders";
@@ -10,7 +11,7 @@ import {
   pruneUnreferencedDestinations,
 } from "@/lib/tripDestinationRegistry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
-import type { Destination, Trip, TripStep } from "@/lib/types/trip";
+import type { Destination, Trip, TripStep, UserPreferences } from "@/lib/types/trip";
 import { CanonicalStepEditorDialog } from "./CanonicalStepEditorDialog";
 import { CanonicalStepList } from "./CanonicalStepList";
 import { ManageTripForm } from "./ManageTripForm";
@@ -25,6 +26,7 @@ export function ManageTripWorkspace({
   saveDisabled,
   saveError,
   user,
+  profilePreferences,
 }: {
   trip: Trip;
   onTripChange: (next: Trip) => void;
@@ -35,7 +37,9 @@ export function ManageTripWorkspace({
   saveDisabled: boolean;
   saveError: string | null;
   user: User | null;
+  profilePreferences?: UserPreferences | null;
 }) {
+  const { t } = useI18n();
   const [saving, setSaving] = useState(false);
   const pendingInsertAfterId = useRef<string | null>(null);
   const [editor, setEditor] = useState<{
@@ -132,7 +136,7 @@ export function ManageTripWorkspace({
   return (
     <div className="relative">
       <div className="space-y-6 pb-28">
-        <ManageTripForm trip={trip} onChange={onTripChange} />
+        <ManageTripForm trip={trip} onChange={onTripChange} profilePreferences={profilePreferences} />
 
         <div className="mt-6">
           <TripDestinationsRoster
@@ -143,22 +147,15 @@ export function ManageTripWorkspace({
         </div>
 
         <section className="space-y-3">
-          <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-            <strong className="text-zinc-700 dark:text-zinc-300">Where destinations live:</strong> the trip
-            keeps one <strong>destinations</strong> list (title, description, coordinates); each step
-            references those rows by id. Open <strong>Edit</strong> and use the{" "}
-            <strong>search address</strong> fields — Google addresses plus OpenStreetMap (Photon) via{" "}
-            <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">/api/places/search</code> when
-            configured.
-          </p>
+          <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t("manage.workspaceDestHelp")}</p>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">Steps</h2>
+            <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">{t("manage.steps")}</h2>
             <button
               type="button"
               onClick={addStep}
               className="rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white dark:bg-white dark:text-zinc-900"
             >
-              Add step
+              {t("manage.addStep")}
             </button>
           </div>
           <CanonicalStepList
@@ -186,8 +183,8 @@ export function ManageTripWorkspace({
           <p className="text-xs font-medium text-red-600 dark:text-red-400">{saveError}</p>
         ) : null}
         <p className="text-xs text-zinc-500">
-          Save writes to <strong>{saveTarget}</strong>.
-          {!user ? " Sign in from home to save cloud trips to Firestore." : null}
+          {t("manage.saveWritesTo", { target: saveTarget })}
+          {!user ? ` ${t("manage.saveSignInCloud")}` : null}
         </p>
         <div className="flex flex-wrap justify-end gap-2">
           <button
@@ -196,7 +193,7 @@ export function ManageTripWorkspace({
             onClick={() => void handleSaveTrip()}
             className="rounded-xl bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-zinc-900"
           >
-            {saving ? "Saving…" : "Save trip"}
+            {saving ? t("manage.saveSaving") : t("manage.saveTrip")}
           </button>
         </div>
       </div>

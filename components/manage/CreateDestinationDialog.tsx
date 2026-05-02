@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { CircleMarker, MapContainer, TileLayer, useMapEvents } from "react-leaflet";
 import { PlaceSearchInput } from "@/components/PlaceSearchInput";
+import { useI18n } from "@/lib/i18n/context";
 import type { Destination } from "@/lib/types/trip";
 import { newId } from "@/lib/canonicalIds";
 import type { PlaceSearchHit, PlaceSearchPickPayload } from "@/lib/places/types";
@@ -37,9 +38,9 @@ function MapClickSetPin({
 
 const DEFAULT_CENTER: [number, number] = [20, 0];
 
-async function fetchFirstPlaceHit(trimmed: string): Promise<PlaceSearchHit | undefined> {
+async function fetchFirstPlaceHit(trimmed: string, lang: string): Promise<PlaceSearchHit | undefined> {
   if (trimmed.length < 2) return undefined;
-  const params = new URLSearchParams({ q: trimmed, lang: "en" });
+  const params = new URLSearchParams({ q: trimmed, lang });
   const res = await fetch(`/api/places/search?${params}`);
   const data = (await res.json()) as { results?: PlaceSearchHit[] };
   const first = Array.isArray(data.results) ? data.results[0] : undefined;
@@ -64,6 +65,8 @@ export function CreateDestinationDialog({
   existingDestination = null,
   onSave,
 }: CreateDestinationDialogProps) {
+  const { locale } = useI18n();
+  const placesLang = locale.toLowerCase();
   const titleId = useId();
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
@@ -98,7 +101,7 @@ export function CreateDestinationDialog({
       if (trimmed.length < 2) return;
       setGeocodeBusy(true);
       try {
-        const first = await fetchFirstPlaceHit(trimmed);
+        const first = await fetchFirstPlaceHit(trimmed, placesLang);
         if (first) {
           applyHitToMap(first);
           setTitle((prev) => (prev.trim() ? prev : first.title?.trim() || prev));
@@ -107,7 +110,7 @@ export function CreateDestinationDialog({
         setGeocodeBusy(false);
       }
     },
-    [applyHitToMap]
+    [applyHitToMap, placesLang]
   );
 
   const geocodeSeedWithoutClearingFields = useCallback(
@@ -116,13 +119,13 @@ export function CreateDestinationDialog({
       if (trimmed.length < 2) return;
       setGeocodeBusy(true);
       try {
-        const first = await fetchFirstPlaceHit(trimmed);
+        const first = await fetchFirstPlaceHit(trimmed, placesLang);
         if (first) applyHitToMap(first);
       } finally {
         setGeocodeBusy(false);
       }
     },
-    [applyHitToMap]
+    [applyHitToMap, placesLang]
   );
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useI18n } from "@/lib/i18n/context";
 import type { TripPlacePick } from "@/lib/tripLocationCatalog";
 import type { PlaceSearchHit, PlaceSearchPickPayload } from "@/lib/places/types";
 
@@ -23,7 +24,7 @@ type PlaceSearchInputProps = {
   disabled?: boolean;
   id?: string;
   autoFocus?: boolean;
-  /** Photon `lang` query (default `en`). */
+  /** BCP-47 language for Google Places + Photon hints; defaults to the app locale from {@link useI18n}. */
   lang?: string;
   /** Trip places shown first; tap or pick without typing. Merged with Photon when query is 2+ chars. */
   localPicks?: TripPlacePick[];
@@ -46,12 +47,14 @@ export function PlaceSearchInput({
   disabled,
   id: idProp,
   autoFocus,
-  lang = "en",
+  lang,
   localPicks,
   allowCreateDestination,
   onRequestCreateDestination,
   listboxClassName,
 }: PlaceSearchInputProps) {
+  const { t, locale } = useI18n();
+  const searchLang = (lang ?? locale).toLowerCase();
   const reactId = useId();
   const listboxId = `${reactId}-listbox`;
   const inputId = idProp ?? `${reactId}-input`;
@@ -59,6 +62,8 @@ export function PlaceSearchInput({
   const wrapRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seqRef = useRef(0);
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -108,7 +113,7 @@ export function PlaceSearchInput({
       (hasRemoteQuery && (loading || fetchErr || hits.length > 0)) ||
       showCreateRow);
 
-  const runSearch = useCallback(async (q: string, langParam: string) => {
+  const runSearch = useCallback(async (q: string) => {
     const token = ++seqRef.current;
     if (q.trim().length < 2) {
       setHits([]);
@@ -121,7 +126,7 @@ export function PlaceSearchInput({
     try {
       const params = new URLSearchParams({
         q: q.trim(),
-        lang: langParam,
+        lang: searchLang,
       });
       const res = await fetch(`/api/places/search?${params}`, { method: "GET" });
       const data = (await res.json()) as { results?: PlaceSearchHit[] };
@@ -135,7 +140,7 @@ export function PlaceSearchInput({
     } finally {
       if (token === seqRef.current) setLoading(false);
     }
-  }, []);
+  }, [searchLang]);
 
   useEffect(() => {
     if (value.trim().length < 2) {
@@ -166,13 +171,23 @@ export function PlaceSearchInput({
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
 
-  function scheduleSearch(q: string) {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-      void runSearch(q, lang);
-    }, DEBOUNCE_MS);
-  }
+  const scheduleSearch = useCallback(
+    (q: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        void runSearch(q);
+      }, DEBOUNCE_MS);
+    },
+    [runSearch]
+  );
+
+  /** Re-query remote providers when UI language changes (same typed query). */
+  useEffect(() => {
+    const q = valueRef.current.trim();
+    if (q.length < 2) return;
+    scheduleSearch(valueRef.current);
+  }, [searchLang, scheduleSearch]);
 
   function applyRemoteHit(hit: PlaceSearchHit) {
     onChange(hit.label);
@@ -239,7 +254,7 @@ export function PlaceSearchInput({
           setOpen(true);
           setActive(0);
           if (value.trim().length >= 2) {
-            void runSearch(value, lang);
+            void runSearch(value);
           }
         }}
         onKeyDown={(e) => {
@@ -252,7 +267,7 @@ export function PlaceSearchInput({
             ) {
               setOpen(true);
               setActive(0);
-              if (value.trim().length >= 2) void runSearch(value, lang);
+              if (value.trim().length >= 2) void runSearch(value);
             }
             return;
           }
@@ -341,13 +356,13 @@ export function PlaceSearchInput({
                 Address search
               </div>
               {loading ? (
-                <div className="px-3 py-2.5 text-xs text-zinc-500 dark:text-zinc-400">Searching…</div>
+                <div className="px-3 py-2.5 text-xs text-zinc-500 dark:text-zinc-400">{t("place.searching")}</div>
               ) : fetchErr ? (
                 <div className="px-3 py-2.5 text-xs text-red-600 dark:text-red-400">
                   Search failed. Try again.
                 </div>
               ) : hits.length === 0 && localFiltered.length === 0 ? (
-                <div className="px-3 py-2.5 text-xs text-zinc-500 dark:text-zinc-400">No results</div>
+                <div className="px-3 py-2.5 text-xs text-zinc-500 dark:text-zinc-400">{t("place.noResults")}</div>
               ) : (
                 <>
                   {googleHits.length > 0 ? (
@@ -477,7 +492,7 @@ export function PlaceSearchInput({
                 onMouseDown={(ev) => ev.preventDefault()}
                 onClick={() => applyRowIndex(baseRowCount)}
               >
-                <span className="leading-snug font-medium">Create new destination…</span>
+                <span className="leading-snug font-medium">{t("place.createNewDestination")}</span>
                 <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
                   Use map and details for “{value.trim()}”
                 </span>

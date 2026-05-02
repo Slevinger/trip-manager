@@ -36,9 +36,14 @@ export function languageCodeForGoogle(photonOrBcpLang: string): string {
   return "en";
 }
 
-async function fetchPlaceDetailsNew(placeResourceName: string, apiKey: string): Promise<GooglePlaceDetail | null> {
+async function fetchPlaceDetailsNew(
+  placeResourceName: string,
+  apiKey: string,
+  languageCode: string
+): Promise<GooglePlaceDetail | null> {
   const path = placeResourceName.startsWith("places/") ? placeResourceName : `places/${placeResourceName}`;
-  const url = `https://places.googleapis.com/v1/${path}`;
+  const lc = encodeURIComponent(languageCodeForGoogle(languageCode));
+  const url = `https://places.googleapis.com/v1/${path}?languageCode=${lc}`;
   try {
     const res = await fetch(url, {
       headers: {
@@ -101,7 +106,10 @@ export async function searchGooglePlacesForAutocomplete(
     }
 
     const capped = predictions.slice(0, 8);
-    const details = await Promise.all(capped.map((p) => fetchPlaceDetailsNew(p.place!, apiKey)));
+    const googleLang = languageCodeForGoogle(languageCode);
+    const details = await Promise.all(
+      capped.map((p) => fetchPlaceDetailsNew(p.place!, apiKey, googleLang))
+    );
 
     const out: PlaceSearchHit[] = [];
     for (let i = 0; i < capped.length; i++) {
