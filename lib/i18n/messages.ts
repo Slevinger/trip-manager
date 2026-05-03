@@ -85,7 +85,7 @@ const en = {
   "assistant.poweredClaude": "Powered by Claude",
   "assistant.poweredGeneric": "AI assistant",
   "assistant.intro":
-    "Ask about pacing, packing, ideas for the current step, or how to phrase something for travel companions. The assistant sees your full trip and highlights where you are on the itinerary. Send #evolve (with cloud save enabled) to compress saved chat into one note.",
+    "Ask about pacing, packing, ideas for the current step, or how to phrase something for travel companions. The assistant sees your full trip and highlights where you are on the itinerary. With cloud save: Compress merges saved turns into one note; Forget clears this trip’s saved chat. (#evolve still works.) Replies are always in English.",
   "assistant.you": "You",
   "assistant.assistant": "Assistant",
   "assistant.thinking": "Thinking…",
@@ -97,12 +97,18 @@ const en = {
   "assistant.closeChat": "Close trip assistant chat",
   "assistant.genericError": "Something went wrong",
   "assistant.llmModelIdTitle": "LLM model id",
-  "assistant.evolve": "Summarize chat…",
+  "assistant.evolve": "Compress…",
   "assistant.evolveTitle":
     "Compress saved history into one assistant note. Earlier lines for this trip are removed.",
   "assistant.evolving": "Compressing…",
   "assistant.evolveNeedsMemory": "Save chat to the cloud (sign in with Firestore) to compress history.",
   "assistant.evolveNeedsHistory": "Need at least two saved lines for this trip before compressing.",
+  "assistant.forget": "Forget chat",
+  "assistant.forgetTitle":
+    "Delete only your saved assistant chat for this trip (your account). Other travelers and your other trips are unchanged.",
+  "assistant.forgetConfirm":
+    "Delete your saved assistant chat for this trip only? Other trips and other people on this trip are not affected. This cannot be undone.",
+  "assistant.forgetting": "Clearing…",
 
   "common.remove": "Remove",
   "common.edit": "Edit",
@@ -357,7 +363,7 @@ const he: Record<MessageKey, string> = {
   "assistant.poweredClaude": "מופעל על ידי Claude",
   "assistant.poweredGeneric": "עוזר AI",
   "assistant.intro":
-    "שאלו על קצב, ציוד, רעיונות לשלב הנוכחי, או איך לנסח משהו למטיילים. העוזר רואה את כל הטיול ומדגיש איפה אתם במסלול. שלחו #evolve (עם שמירה לענן) כדי לדחוס את הצ'אט השמור להערה אחת.",
+    "שאלו על קצב, ציוד, רעיונות לשלב הנוכחי, או איך לנסח משהו למטיילים. העוזר רואה את כל הטיול ומדגיש איפה אתם במסלול. עם שמירה לענן: ״סיכום צ'אט״ ממזג את השמירות להערה אחת; ״שכחה״ מוחקת את הצ'אט השמור לטיול הזה. (#evolve עדיין עובד.) התשובות מהעוזר תמיד באנגלית.",
   "assistant.you": "אתם",
   "assistant.assistant": "עוזר",
   "assistant.thinking": "חושב…",
@@ -374,6 +380,12 @@ const he: Record<MessageKey, string> = {
   "assistant.evolving": "דוחס…",
   "assistant.evolveNeedsMemory": "יש לשמור צ'אט לענן (התחברות עם Firestore) כדי לדחוס היסטוריה.",
   "assistant.evolveNeedsHistory": "נדרשות לפחות שתי שורות שמורות לטיול הזה לפני דחיסה.",
+  "assistant.forget": "שכחת צ'אט",
+  "assistant.forgetTitle":
+    "מחיקת הצ'אט השמור שלכם לטיול הזה בלבד (החשבון שלכם). לא נוגע במטיילים אחרים או בטיולים אחרים.",
+  "assistant.forgetConfirm":
+    "למחוק את הצ'אט השמור שלכם לטיול הזה בלבד? טיולים אחרים ומשתמשים אחרים לא מושפעים. לא ניתן לבטל.",
+  "assistant.forgetting": "מוחק…",
 
   "common.remove": "הסרה",
   "common.edit": "עריכה",
@@ -625,7 +637,7 @@ const ru: Record<MessageKey, string> = {
   "assistant.poweredClaude": "На базе Claude",
   "assistant.poweredGeneric": "ИИ-помощник",
   "assistant.intro":
-    "Спрашивайте о темпе, сборе вещах, идеях для текущего шага или как сформулировать что-то для попутчиков. Помощник видит всю поездку и подсвечивает ваше место в маршруте. Отправьте #evolve (с сохранением в облаке), чтобы сжать сохранённый чат в одну заметку.",
+    "Спрашивайте о темпе, сборе вещах, идеях для текущего шага или как сформулировать что-то для попутчиков. Помощник видит всю поездку и подсвечивает ваше место в маршруте. При сохранении в облаке: «Сжать чат» объединяет сохранённые реплики в одну заметку; «Забыть» удаляет сохранённый чат этой поездки. (#evolve по-прежнему работает.) Ответы помощника всегда на английском.",
   "assistant.you": "Вы",
   "assistant.assistant": "Помощник",
   "assistant.thinking": "Думаю…",
@@ -643,6 +655,12 @@ const ru: Record<MessageKey, string> = {
   "assistant.evolving": "Сжатие…",
   "assistant.evolveNeedsMemory": "Чтобы сжать историю, сохраняйте чат в облаке (вход с Firestore).",
   "assistant.evolveNeedsHistory": "Нужны минимум две сохранённые строки по этой поездке перед сжатием.",
+  "assistant.forget": "Забыть чат",
+  "assistant.forgetTitle":
+    "Удалить только ваш сохранённый чат помощника по этой поездке (ваш аккаунт). Другие участники и другие поездки не затрагиваются.",
+  "assistant.forgetConfirm":
+    "Удалить сохранённый чат по этой поездке только для вас? Другие поездки и другие люди не затрагиваются. Отменить нельзя.",
+  "assistant.forgetting": "Удаление…",
 
   "common.remove": "Удалить",
   "common.edit": "Правка",

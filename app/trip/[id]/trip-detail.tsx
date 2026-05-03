@@ -27,7 +27,7 @@ import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripView
 import type { Destination, Trip, UserPreferences } from "@/lib/types/trip";
 import { messagesForTrip } from "@/lib/tripChatMessages";
 import type { TripChatMessage } from "@/lib/types/user";
-import { subscribeUser } from "@/lib/usersFirestore";
+import { subscribeTripAssistantChat, subscribeUser } from "@/lib/usersFirestore";
 
 const TripItineraryMap = dynamic(
   () =>
@@ -71,6 +71,11 @@ export function TripDetail({ tripId }: { tripId: string }) {
     useState<Destination | null>(null);
   const [profilePreferences, setProfilePreferences] = useState<UserPreferences | null>(null);
   const [chatMemory, setChatMemory] = useState<TripChatMessage[]>([]);
+  /** Canonical transcript doc `users/.../tripAssistantChats/{tripId}` when present. */
+  const [assistantChatDoc, setAssistantChatDoc] = useState<{
+    exists: boolean;
+    messages: TripChatMessage[];
+  }>({ exists: false, messages: [] });
 
   const { t } = useI18n();
   const useFirestore = Boolean(getDb() && getMissingFirebasePublicEnv().length === 0);
@@ -98,6 +103,20 @@ export function TripDetail({ tripId }: { tripId: string }) {
       setChatMemory(u?.memory ?? []);
     });
   }, [useFirestore, user]);
+
+  useEffect(() => {
+    if (!useFirestore || !user?.email?.trim()) {
+      setAssistantChatDoc({ exists: false, messages: [] });
+      return () => {};
+    }
+    const tid = tripId.trim();
+    if (!tid) {
+      setAssistantChatDoc({ exists: false, messages: [] });
+      return () => {};
+    }
+    const email = user.email!.trim();
+    return subscribeTripAssistantChat(email, tid, email, setAssistantChatDoc);
+  }, [useFirestore, user?.email, tripId]);
 
   useEffect(() => {
     setLoadState("loading");
@@ -286,8 +305,9 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const dockTrip = !trip ? null : tab === "manage" && manageDraft ? manageDraft : trip;
   const tripChatMessages = useMemo(() => {
     if (!dockTrip?.id) return [];
+    if (assistantChatDoc.exists) return assistantChatDoc.messages;
     return messagesForTrip(chatMemory, dockTrip.id);
-  }, [chatMemory, dockTrip?.id]);
+  }, [assistantChatDoc.exists, assistantChatDoc.messages, chatMemory, dockTrip?.id]);
 
   if (loadState === "loading") {
     return (
@@ -432,6 +452,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
             </aside>
           ) : null}
           <TripItineraryMap
+            tripId={trip.id}
             sortedSteps={sortedSteps}
             destinations={trip.destinations}
             focus={viewStepFocus}

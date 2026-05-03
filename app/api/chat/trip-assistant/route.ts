@@ -1,7 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildTripAssistantSystemPrompt } from "@/lib/tripAssistantPrompt";
+import {
+  buildTripAssistantSystemPrompt,
+  TRIP_ASSISTANT_WEB_REFINE_APPENDIX,
+} from "@/lib/tripAssistantPrompt";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
+import {
+  normalizeTripAssistantTurnsForWebTool,
+  replaceLastUserContent,
+  replaceLastUserStripTrailingHashWeb,
+  stripTrailingHashWebMarker,
+  stripTripWebSearchMarkers,
+  tripExplicitWebSyntaxRequested,
+  tripUserMessageEndsWithHashWeb,
+  tripUserMessageInlineHashWeb,
+  tripUserMessageRequestsWebSearch,
+} from "@/lib/tripAssistantWebIntent";
 import type { Trip, UserPreferences } from "@/lib/types/trip";
+import { formatAssistantReplyForMarkdown } from "@/lib/formatAssistantReplyMarkdown";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -31,6 +46,18 @@ function anthropicModel(): string {
 }
 
 /**
+ * Max web searches per triggered message (`#web`, `[web]`, phrases…).
+ * Unset env → 3 so `#web` works without extra config; set `ANTHROPIC_WEB_SEARCH_MAX_USES=0` to hard-disable.
+ */
+function anthropicTripAssistantWebSearchMaxUses(): number {
+  const raw = process.env.ANTHROPIC_WEB_SEARCH_MAX_USES?.trim();
+  if (raw === undefined || raw === "") return 3;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.floor(n), 10);
+}
+
+/**
  * `TRIP_ASSISTANT_PROVIDER`: exactly `openai` or `anthropic`.
  * If unset: use Anthropic when only `ANTHROPIC_API_KEY` is set; otherwise OpenAI.
  */
@@ -45,17 +72,6 @@ function resolveTripAssistantProvider(): TripAssistantProvider {
 }
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
-
-const REPLY_MAX_WORDS = 50;
-
-/** Enforces the product word cap even if the model drifts. */
-function capReplyWords(text: string, maxWords: number): string {
-  const t = text.trim();
-  if (!t) return t;
-  const words = t.split(/\s+/);
-  if (words.length <= maxWords) return t;
-  return `${words.slice(0, maxWords).join(" ")}…`;
-}
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return x != null && typeof x === "object" && !Array.isArray(x);
@@ -207,6 +223,15 @@ function isTripPayload(x: unknown): x is Record<string, unknown> & {
   return true;
 }
 
+function lastTripAssistantUserContent(
+  turns: { role: "user" | "assistant"; content: string }[]
+): string {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i]?.role === "user") return turns[i].content;
+  }
+  return "";
+}
+
 function normalizeTripForPrompt(raw: Record<string, unknown>): Trip {
   const now = new Date().toISOString();
   return {
@@ -306,20 +331,112 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No valid user/assistant messages" }, { status: 400 });
   }
 
+  const lastUserText = lastTripAssistantUserContent(turnMessages);
+  const webCap = anthropicTripAssistantWebSearchMaxUses();
+
+  if (tripExplicitWebSyntaxRequested(lastUserText)) {
+    if (provider !== "anthropic") {
+      return NextResponse.json(
+        {
+          error:
+            "`#web` / `[web]` live search requires Claude. Set TRIP_ASSISTANT_PROVIDER=anthropic and ANTHROPIC_API_KEY.",
+          provider,
+        },
+        { status: 503 }
+      );
+    }
+    if (webCap <= 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Web search is disabled (ANTHROPIC_WEB_SEARCH_MAX_USES=0). Remove it or set a positive cap (e.g. 3) to use `#web`.",
+          provider: "anthropic" as const,
+        },
+        { status: 503 }
+      );
+    }
+  }
+  const wantsLiveWeb =
+    provider === "anthropic" &&
+    webCap > 0 &&
+    tripUserMessageRequestsWebSearch(lastUserText);
+
+  let anthropicApiTurns = turnMessages;
+  let anthropicWebUses = 0;
+
+  if (wantsLiveWeb) {
+    anthropicWebUses = webCap;
+    const endsWeb = tripUserMessageEndsWithHashWeb(lastUserText);
+    const inlineWeb = tripUserMessageInlineHashWeb(lastUserText);
+
+    if (inlineWeb) {
+      const key = anthropicKey()!;
+      const refineSystem =
+        buildTripAssistantSystemPrompt(tripForPrompt, {
+          nowMs: contextAtMs,
+          profilePreferences: preferences,
+          anthropicWebSearchEnabled: false,
+        }) + TRIP_ASSISTANT_WEB_REFINE_APPENDIX;
+
+      const refined = await completeTripAssistantAnthropic({
+        apiKey: key,
+        model: anthropicModel(),
+        system: refineSystem,
+        turns: turnMessages,
+        maxOutputTokens: 160,
+        temperature: 0.35,
+      });
+
+      if (!refined.ok) {
+        const parsed = parseAnthropicError(refined.status, refined.body, anthropicModel());
+        return NextResponse.json(
+          {
+            error: parsed.message || "Could not normalize #web query.",
+            ...(parsed.omitDetail ? {} : { detail: refined.body.slice(0, 600) }),
+            status: refined.status,
+            provider: "anthropic" as const,
+          },
+          { status: refined.status >= 400 && refined.status < 600 ? refined.status : 502 }
+        );
+      }
+
+      const line = refined.text.trim();
+      if (tripUserMessageEndsWithHashWeb(line)) {
+        anthropicApiTurns = replaceLastUserContent(
+          turnMessages,
+          stripTrailingHashWebMarker(line)
+        );
+      } else {
+        const strippedUser = stripTripWebSearchMarkers(lastUserText);
+        anthropicApiTurns = replaceLastUserContent(
+          turnMessages,
+          strippedUser.length > 0 ? strippedUser : lastUserText
+        );
+      }
+    } else if (endsWeb) {
+      anthropicApiTurns = replaceLastUserStripTrailingHashWeb(turnMessages);
+    } else {
+      anthropicApiTurns = normalizeTripAssistantTurnsForWebTool(turnMessages, true);
+    }
+  }
+
   const systemContent = buildTripAssistantSystemPrompt(tripForPrompt, {
     nowMs: contextAtMs,
     profilePreferences: preferences,
+    anthropicWebSearchEnabled: anthropicWebUses > 0,
   });
 
   if (provider === "anthropic") {
     const key = anthropicKey()!;
+    const webSearchMaxUses = anthropicWebUses;
     const result = await completeTripAssistantAnthropic({
       apiKey: key,
       model: anthropicModel(),
       system: systemContent,
-      turns: turnMessages,
-      maxOutputTokens: 256,
+      turns: anthropicApiTurns,
+      maxOutputTokens: webSearchMaxUses > 0 ? 8192 : 4096,
       temperature: 0.55,
+      ...(webSearchMaxUses > 0 ? { webSearchMaxUses } : {}),
     });
 
     if (!result.ok) {
@@ -336,7 +453,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const text = capReplyWords(result.text, REPLY_MAX_WORDS);
+    const text = formatAssistantReplyForMarkdown(result.text);
     return NextResponse.json({
       reply: text,
       provider: "anthropic" as const,
@@ -359,7 +476,7 @@ export async function POST(req: NextRequest) {
       model: openaiModel(),
       messages: outMessages,
       temperature: 0.55,
-      max_completion_tokens: 150,
+      max_completion_tokens: 4096,
     }),
   });
 
@@ -385,7 +502,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid OpenAI response", provider: "openai" }, { status: 502 });
   }
 
-  const text = capReplyWords(parsed.choices?.[0]?.message?.content?.trim() ?? "", REPLY_MAX_WORDS);
+  const text = formatAssistantReplyForMarkdown(parsed.choices?.[0]?.message?.content?.trim() ?? "");
   return NextResponse.json({
     reply: text,
     provider: "openai" as const,

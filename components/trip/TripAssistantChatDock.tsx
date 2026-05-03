@@ -7,7 +7,7 @@ import { agentEvolve } from "@/lib/agentEvolve";
 import { buildChatMemoryTripWhere } from "@/lib/chatMemoryTripContext";
 import { useI18n } from "@/lib/i18n/context";
 import { messagesForTrip } from "@/lib/tripChatMessages";
-import { appendTripChatTurn } from "@/lib/usersFirestore";
+import { appendTripChatTurn, clearTripChatMemoryForTrip } from "@/lib/usersFirestore";
 import type { Trip, UserPreferences } from "@/lib/types/trip";
 import type { TripChatMessage } from "@/lib/types/user";
 
@@ -73,6 +73,7 @@ export function TripAssistantChatDock(props: {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [evolving, setEvolving] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Set from first successful `/api/chat/trip-assistant` response. */
   const [llmBackend, setLlmBackend] = useState<"openai" | "anthropic" | null>(null);
@@ -106,7 +107,7 @@ export function TripAssistantChatDock(props: {
   useEffect(() => {
     if (!open) return;
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [lines, open, loading, evolving]);
+  }, [lines, open, loading, evolving, forgetting]);
 
   const onPointerDownHeader = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -224,9 +225,32 @@ export function TripAssistantChatDock(props: {
     t,
   ]);
 
+  const handleForgetChat = useCallback(async () => {
+    const em = props.userEmail?.trim();
+    if (!props.canPersistMemory || !em || persistedTripMessageCount < 1) return;
+    if (!window.confirm(t("assistant.forgetConfirm"))) return;
+    setForgetting(true);
+    setError(null);
+    try {
+      await clearTripChatMemoryForTrip(em.toLowerCase(), props.trip.id);
+      setLines([]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("assistant.genericError");
+      setError(msg);
+    } finally {
+      setForgetting(false);
+    }
+  }, [
+    persistedTripMessageCount,
+    props.canPersistMemory,
+    props.trip.id,
+    props.userEmail,
+    t,
+  ]);
+
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || loading || evolving) return;
+    if (!text || loading || evolving || forgetting) return;
 
     if (text.toLowerCase() === EVOLVE_COMMAND) {
       setInput("");
@@ -316,6 +340,7 @@ export function TripAssistantChatDock(props: {
     input,
     loading,
     evolving,
+    forgetting,
     handleEvolve,
     lines,
     persistedTripMessageCount,
@@ -396,9 +421,13 @@ export function TripAssistantChatDock(props: {
                   <TripAssistantMessageBody content={l.content} variant={l.role === "user" ? "user" : "assistant"} />
                 </div>
               ))}
-              {loading || evolving ? (
+              {loading || evolving || forgetting ? (
                 <p className="text-xs italic text-zinc-500 dark:text-zinc-400">
-                  {evolving ? t("assistant.evolving") : t("assistant.thinking")}
+                  {forgetting
+                    ? t("assistant.forgetting")
+                    : evolving
+                      ? t("assistant.evolving")
+                      : t("assistant.thinking")}
                 </p>
               ) : null}
               {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
@@ -417,27 +446,40 @@ export function TripAssistantChatDock(props: {
                   }}
                   placeholder={t("assistant.placeholder")}
                   className="min-h-[44px] flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-                  disabled={loading || evolving}
+                  disabled={loading || evolving || forgetting}
                 />
                 <button
                   type="button"
-                  disabled={loading || evolving || !input.trim()}
+                  disabled={loading || evolving || forgetting || !input.trim()}
                   onClick={() => void send()}
                   className="shrink-0 self-end rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
                 >
                   {t("assistant.send")}
                 </button>
               </div>
-              {props.canPersistMemory && props.userEmail?.trim() && persistedTripMessageCount >= 2 ? (
-                <button
-                  type="button"
-                  title={t("assistant.evolveTitle")}
-                  disabled={loading || evolving}
-                  onClick={() => void handleEvolve()}
-                  className="mb-1 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800/80 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  {evolving ? t("assistant.evolving") : t("assistant.evolve")}
-                </button>
+              {props.canPersistMemory && props.userEmail?.trim() && persistedTripMessageCount >= 1 ? (
+                <div className="mb-1 flex gap-2">
+                  <button
+                    type="button"
+                    title={t("assistant.evolveTitle")}
+                    disabled={
+                      loading || evolving || forgetting || persistedTripMessageCount < 2
+                    }
+                    onClick={() => void handleEvolve()}
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800/80 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    {evolving ? t("assistant.evolving") : t("assistant.evolve")}
+                  </button>
+                  <button
+                    type="button"
+                    title={t("assistant.forgetTitle")}
+                    disabled={loading || evolving || forgetting}
+                    onClick={() => void handleForgetChat()}
+                    className="min-w-0 flex-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-40 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                  >
+                    {forgetting ? t("assistant.forgetting") : t("assistant.forget")}
+                  </button>
+                </div>
               ) : null}
               {!props.canPersistMemory ? (
                 <p className="mt-1 px-1 text-[10px] text-zinc-400 dark:text-zinc-500">{t("assistant.memoryHint")}</p>

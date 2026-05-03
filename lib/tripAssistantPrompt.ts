@@ -2,6 +2,10 @@ import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import type { Trip, TripStep, UserPreferences } from "@/lib/types/trip";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
 
+/** Minimal internal hop: normalize inline `#web` → one search line (no tools). */
+export const TRIP_ASSISTANT_WEB_REFINE_APPENDIX =
+  "\n\nINTERNAL: Latest user turn has `#web` but not at EOL. Output **only** one English search-query line (trip JSON + chat facts; keywords/places/dates; no pleasantries). Must end with ` #web`.";
+
 function stepHeadline(step: TripStep): string {
   const t = step.title?.trim() || "Untitled step";
   const range = `${step.startTime}${step.endTime ? ` → ${step.endTime}` : ""}`;
@@ -18,6 +22,8 @@ export function buildTripAssistantSystemPrompt(
     nowMs: number;
     /** Signed-in user’s profile prefs — optional, phrased softly for the model. */
     profilePreferences?: UserPreferences | null;
+    /** Trip-assistant Anthropic branch only: `web_search` tool is attached this request. */
+    anthropicWebSearchEnabled?: boolean;
   }
 ): string {
   const phase = getTripViewPhase(trip, opts.nowMs);
@@ -48,6 +54,15 @@ export function buildTripAssistantSystemPrompt(
         ].join("\n")
       : "";
 
+  const webContextLines = opts.anthropicWebSearchEnabled
+    ? [
+        "Web: `web_search` is on — **never** claim no internet, hard limits, or ‘hashtags don’t enable search’. Fire **one** tight query (no redundant searches). Answer fully from trip JSON + results with **complete sentences** (no trailing cutoff mid‑clause); optional domain/title from citations; no invented URLs; no preamble/refusal/homework.",
+      ]
+    : [
+        "No live web — trip JSON + chat only; don’t claim you browsed.",
+        "No ‘can’t search’ lines or homework lists; optional soft hints when helpful.",
+      ];
+
   const tripJson = JSON.stringify(
     {
       id: trip.id,
@@ -70,10 +85,20 @@ export function buildTripAssistantSystemPrompt(
 
   return [
     "You are a professional travel agent: calm, precise, and trustworthy.",
-    "**Language:** Write every reply in the **same language as the user’s latest message** (Hebrew → Hebrew, Arabic → Arabic, Spanish → Spanish, etc.). Do not switch to English unless the user wrote in English or explicitly asked for English.",
-    "Hard rule — every reply must be **100 words or fewer** (count words before you answer; for non‑Latin scripts, keep comparable brevity). No preamble, no sign-off, no “As an AI”.",
-    "Be accurate to the trip data below; if something is unknown, say so in one short phrase and suggest a next step. Plain prose or a few tight bullets only if they fit the word cap.",
-    "You advise on pacing, packing, and ideas only — you do not book, verify live prices, or give medical/legal guarantees.",
+    "**Language:** Write **every** reply in **English only**, regardless of the user’s message language (Hebrew, Arabic, Spanish, etc.). Keep proper nouns and place names as they appear in the trip data when helpful.",
+    "**Formatting:** Use normal Markdown when helpful: put **each list item on its own line** starting with `- ` (blank line before a list if it follows a paragraph). Never cram multiple `-` items into one run-on line.",
+    "Finish every reply with proper sentence endings (period / question mark); do not stop mid‑sentence.",
+    "Be accurate to the trip data below; if something is unknown, say so briefly and suggest a next step.",
+    "`#web`: suffix → server searches text before it (Anthropic). Inline `#web` → server emits one query line ending `#web` then searches.",
+    ...webContextLines,
+    "You do not book tickets or hotels. Facts: trip JSON + chat + (if web) search blocks — quote links only from results.",
+    opts.anthropicWebSearchEnabled
+      ? "Skip disclaimers and manner filler (“happy to help”, etc.)."
+      : "No nagging disclaimers or ‘open Google Maps / TripAdvisor’; one neutral clause max if essential.",
+    "Help with budget, pacing, packing, itinerary — no medical/legal guarantees.",
+    ...(opts.anthropicWebSearchEnabled
+      ? []
+      : ["When maps/prices help without web: brief optional hints, not commands."]),
     "",
     `### Trip calendar phase (from server clock): **${phase}**`,
     currentEmphasis,

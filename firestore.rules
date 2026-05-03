@@ -224,6 +224,13 @@ service cloud.firestore {
       allow read, write: if signedIn() &&
         request.auth.token.email is string &&
         request.auth.token.email.lower() == userEmail;
+
+      /** Per-trip assistant transcript (Forget = delete this doc). */
+      match /tripAssistantChats/{tripId} {
+        allow read, write: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+      }
     }
 
     /**

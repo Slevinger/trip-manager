@@ -2,7 +2,7 @@
 
 import L from "leaflet";
 import type { Map as LeafletMap } from "leaflet";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -24,9 +24,11 @@ import {
   focusStepLatLng,
   interpolateLatLng,
   stayClusterPixelRadius,
+  type DestinationListPin,
   type LatLng,
   type StayCluster,
   type StayMapPoint,
+  type TransitMapEdge,
 } from "@/lib/tripMapGeometry";
 import type { Destination, TripStep } from "@/lib/types/trip";
 
@@ -247,99 +249,59 @@ function MapFitBoundsOnDataChange({ points, focus }: { points: LatLng[]; focus: 
   return null;
 }
 
-export function TripItineraryMap({
-  sortedSteps,
-  destinations,
-  focus,
-}: {
-  sortedSteps: TripStep[];
-  destinations: Destination[];
+type TripLeafletMapInnerProps = {
+  center: LatLng;
+  allPoints: LatLng[];
+  focusLatLng: LatLng | null;
+  transitEdges: TransitMapEdge[];
+  destinationPins: DestinationListPin[];
+  stayPoints: StayMapPoint[];
+  focusStepId: string | null;
   focus: CurrentStepFocus;
-}) {
+  touchPrimary: boolean;
+};
+
+/**
+ * Key this component by trip id so `layersReady` resets per map instance (avoids attaching layers
+ * before Leaflet panes exist — React 19 / Strict Mode appendChild races).
+ */
+function TripLeafletMapInner({
+  center,
+  allPoints,
+  focusLatLng,
+  transitEdges,
+  destinationPins,
+  stayPoints,
+  focusStepId,
+  focus,
+  touchPrimary,
+}: TripLeafletMapInnerProps) {
   const { t } = useI18n();
-  const stayPoints = useMemo(
-    () => collectStayMapPoints(sortedSteps, destinations),
-    [sortedSteps, destinations]
-  );
-  const transitEdges = useMemo(
-    () => collectTransitMapEdges(sortedSteps, destinations),
-    [sortedSteps, destinations]
-  );
-  const destinationPins = useMemo(
-    () => collectDestinationListPins(destinations),
-    [destinations]
-  );
-  const focusLatLng = useMemo(
-    () => focusStepLatLng(focus, sortedSteps, destinations),
-    [focus, sortedSteps, destinations]
-  );
-  const focusStepId = focus.kind !== "none" ? focus.step.id : null;
-
-  const allPoints = useMemo(() => {
-    const pts: LatLng[] = stayPoints.map((s) => s.position);
-    for (const e of transitEdges) {
-      pts.push(e.from, e.to);
-    }
-    for (const r of destinationPins) {
-      pts.push(r.position);
-    }
-    return pts;
-  }, [stayPoints, transitEdges, destinationPins]);
-
-  /** Avoid mounting Leaflet until layout exists (fixes TileLayer / pane appendChild races with React 19). */
-  const [domReady, setDomReady] = useState(false);
-  useLayoutEffect(() => {
-    let cancelled = false;
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!cancelled) setDomReady(true);
-      });
-    });
+  const [layersReady, setLayersReady] = useState(false);
+  const layersArmCancelledRef = useRef(false);
+  useEffect(() => {
+    layersArmCancelledRef.current = false;
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(id);
+      layersArmCancelledRef.current = true;
     };
   }, []);
 
-  const hasMap = allPoints.length > 0 || focusLatLng != null;
-  const touchPrimary = useTouchPrimary();
-
-  if (!hasMap) {
-    return (
-      <section className="mt-8 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/80 px-4 py-8 text-center dark:border-zinc-600 dark:bg-zinc-900/40">
-        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{t("map.noPinsTitle")}</p>
-        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t("map.noPinsBody")}</p>
-      </section>
-    );
-  }
-
-  const center =
-    focusLatLng ??
-    stayPoints[0]?.position ??
-    transitEdges[0]?.from ??
-    destinationPins[0]?.position ??
-    { lat: 0, lng: 0 };
-
   return (
-    <section className="mt-8">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-        {t("map.routeMapTitle")}
-      </h3>
-      <p className="mb-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-        {touchPrimary ? t("map.pinsGuideTap") : t("map.pinsGuideHover")}
-      </p>
-      <div className="relative z-0 min-h-[280px] h-[min(360px,55vh)] w-full overflow-hidden rounded-2xl border border-zinc-200 shadow-sm dark:border-zinc-700">
-        {!domReady ? (
-          <div className="flex h-full min-h-[inherit] items-center justify-center bg-zinc-100 text-sm text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-            {t("map.preparingMap")}
-          </div>
-        ) : (
-        <MapContainer
-          center={[center.lat, center.lng]}
-          zoom={11}
-          className="h-full w-full [&_.leaflet-control-attribution]:text-[10px]"
-          scrollWheelZoom
-        >
+    <MapContainer
+      center={[center.lat, center.lng]}
+      zoom={11}
+      className="h-full w-full [&_.leaflet-control-attribution]:text-[10px]"
+      scrollWheelZoom
+      whenReady={() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (!layersArmCancelledRef.current) setLayersReady(true);
+          });
+        });
+      }}
+    >
+      {layersReady ? (
+        <>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -460,7 +422,113 @@ export function TripItineraryMap({
               </MapOverlay>
             </CircleMarker>
           ) : null}
-        </MapContainer>
+        </>
+      ) : null}
+    </MapContainer>
+  );
+}
+
+export function TripItineraryMap({
+  tripId,
+  sortedSteps,
+  destinations,
+  focus,
+}: {
+  tripId: string;
+  sortedSteps: TripStep[];
+  destinations: Destination[];
+  focus: CurrentStepFocus;
+}) {
+  const { t } = useI18n();
+  const stayPoints = useMemo(
+    () => collectStayMapPoints(sortedSteps, destinations),
+    [sortedSteps, destinations]
+  );
+  const transitEdges = useMemo(
+    () => collectTransitMapEdges(sortedSteps, destinations),
+    [sortedSteps, destinations]
+  );
+  const destinationPins = useMemo(
+    () => collectDestinationListPins(destinations),
+    [destinations]
+  );
+  const focusLatLng = useMemo(
+    () => focusStepLatLng(focus, sortedSteps, destinations),
+    [focus, sortedSteps, destinations]
+  );
+  const focusStepId = focus.kind !== "none" ? focus.step.id : null;
+
+  const allPoints = useMemo(() => {
+    const pts: LatLng[] = stayPoints.map((s) => s.position);
+    for (const e of transitEdges) {
+      pts.push(e.from, e.to);
+    }
+    for (const r of destinationPins) {
+      pts.push(r.position);
+    }
+    return pts;
+  }, [stayPoints, transitEdges, destinationPins]);
+
+  /** Avoid mounting Leaflet until layout exists (fixes TileLayer / pane appendChild races with React 19). */
+  const [domReady, setDomReady] = useState(false);
+  useLayoutEffect(() => {
+    let cancelled = false;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) setDomReady(true);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
+  }, []);
+
+  const hasMap = allPoints.length > 0 || focusLatLng != null;
+  const touchPrimary = useTouchPrimary();
+
+  if (!hasMap) {
+    return (
+      <section className="mt-8 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/80 px-4 py-8 text-center dark:border-zinc-600 dark:bg-zinc-900/40">
+        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{t("map.noPinsTitle")}</p>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t("map.noPinsBody")}</p>
+      </section>
+    );
+  }
+
+  const center =
+    focusLatLng ??
+    stayPoints[0]?.position ??
+    transitEdges[0]?.from ??
+    destinationPins[0]?.position ??
+    { lat: 0, lng: 0 };
+
+  return (
+    <section className="mt-8">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {t("map.routeMapTitle")}
+      </h3>
+      <p className="mb-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+        {touchPrimary ? t("map.pinsGuideTap") : t("map.pinsGuideHover")}
+      </p>
+      <div className="relative z-0 min-h-[280px] h-[min(360px,55vh)] w-full overflow-hidden rounded-2xl border border-zinc-200 shadow-sm dark:border-zinc-700">
+        {!domReady ? (
+          <div className="flex h-full min-h-[inherit] items-center justify-center bg-zinc-100 text-sm text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            {t("map.preparingMap")}
+          </div>
+        ) : (
+          <TripLeafletMapInner
+            key={tripId}
+            center={center}
+            allPoints={allPoints}
+            focusLatLng={focusLatLng}
+            transitEdges={transitEdges}
+            destinationPins={destinationPins}
+            stayPoints={stayPoints}
+            focusStepId={focusStepId}
+            focus={focus}
+            touchPrimary={touchPrimary}
+          />
         )}
       </div>
     </section>

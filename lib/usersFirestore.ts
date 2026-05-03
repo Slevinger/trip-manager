@@ -1,4 +1,6 @@
 import {
+  deleteDoc,
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
@@ -14,6 +16,20 @@ import { parseMemoryArrayFromUserDoc } from "@/lib/tripChatMessages";
 import type { AppUser, Email, TripChatMessage } from "@/lib/types/user";
 
 export const USERS_COLLECTION = "users";
+
+/** Per-trip assistant transcript: `users/{emailLower}/tripAssistantChats/{tripId}`. */
+export const TRIP_ASSISTANT_CHATS_SUBCOLLECTION = "tripAssistantChats";
+
+export function tripAssistantChatDocRef(db: Firestore, emailLower: string, tripId: string) {
+  const tid = tripId.trim();
+  return doc(
+    db,
+    USERS_COLLECTION,
+    normalizeUserEmailKey(emailLower),
+    TRIP_ASSISTANT_CHATS_SUBCOLLECTION,
+    tid
+  );
+}
 
 export function normalizeUserEmailKey(email: string): string {
   return email.trim().toLowerCase();
@@ -142,6 +158,56 @@ export function subscribeUser(
   );
 }
 
+/**
+ * Live transcript for one trip (Firestore doc delete on “Forget”).
+ * When missing, UI falls back to `users.{email}.memory` filtered by tripId.
+ */
+export function subscribeTripAssistantChat(
+  emailLower: string,
+  tripId: string,
+  displayEmailForParse: string,
+  onNext: (snapshot: { exists: boolean; messages: TripChatMessage[] }) => void,
+  onError?: (e: Error) => void
+): Unsubscribe {
+  const db = getDb();
+  if (!db) {
+    onNext({ exists: false, messages: [] });
+    return () => {};
+  }
+
+  const key = normalizeUserEmailKey(emailLower);
+  const tid = tripId.trim();
+  if (!tid) {
+    onNext({ exists: false, messages: [] });
+    return () => {};
+  }
+
+  const ref = tripAssistantChatDocRef(db, key, tid);
+  const parseOpts = {
+    userEmailLower: key,
+    userEmailDisplay: displayEmailForParse.trim() || key,
+  };
+
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) {
+        onNext({ exists: false, messages: [] });
+        return;
+      }
+      const data = snap.data() as Record<string, unknown>;
+      const messages = parseMemoryArrayFromUserDoc(data.messages, parseOpts).filter(
+        (m) => m.tripId === tid
+      );
+      onNext({ exists: true, messages });
+    },
+    (err) => {
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+      onNext({ exists: false, messages: [] });
+    }
+  );
+}
+
 export async function updateUserPreferences(emailLower: string, prefs: UserPreferences): Promise<void> {
   const db = getDb();
   if (!db) throw new Error("Firestore is not configured");
@@ -164,8 +230,8 @@ export async function updateUserPreferences(emailLower: string, prefs: UserPrefe
 const MAX_CHAT_MESSAGES = 200;
 
 /**
- * Appends one user line and one agent line to `users/{email}.memory`
- * (flattened `TripChatMessage[]`, trimmed to last MAX_CHAT_MESSAGES).
+ * Appends one user + agent turn to `users/{email}/tripAssistantChats/{tripId}` (canonical)
+ * and mirrors into `users/{email}.memory` for backwards compatibility.
  */
 export async function appendTripChatTurn(
   emailLower: string,
@@ -182,12 +248,16 @@ export async function appendTripChatTurn(
   if (!db) return;
 
   const key = normalizeUserEmailKey(emailLower);
+  const tid = opts.tripId.trim();
+  if (!tid) return;
+
   const ref = userDocRef(db, key);
+  const subRef = tripAssistantChatDocRef(db, key, tid);
   const userFrom = normalizeUserEmailKey(opts.userFromEmail) as Email;
   const t0 = new Date(opts.sentAtMs).toISOString();
   const t1 = new Date(opts.sentAtMs + 1).toISOString();
   const userRow: TripChatMessage = {
-    tripId: opts.tripId,
+    tripId: tid,
     from: userFrom,
     content: opts.userContent.slice(0, 8000),
     timeStamp: t0,
@@ -196,11 +266,22 @@ export async function appendTripChatTurn(
       : {}),
   };
   const agentRow: TripChatMessage = {
-    tripId: opts.tripId,
+    tripId: tid,
     from: "agent",
     content: opts.agentContent.slice(0, 8000),
     timeStamp: t1,
   };
+
+  const parseOptsSub = { userEmailLower: key, userEmailDisplay: userFrom };
+
+  await runTransaction(db, async (tx) => {
+    const subSnap = await tx.get(subRef);
+    const subPrev = subSnap.exists()
+      ? parseMemoryArrayFromUserDoc((subSnap.data() as Record<string, unknown>)?.messages, parseOptsSub)
+      : [];
+    const subNext = [...subPrev, userRow, agentRow].slice(-MAX_CHAT_MESSAGES);
+    tx.set(subRef, { messages: subNext, updatedAt: isoNow() }, { merge: true });
+  });
 
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
@@ -223,8 +304,7 @@ export async function appendTripChatTurn(
 }
 
 /**
- * Removes every stored line for `tripId`, then writes a single assistant summary line
- * (used after {@link agentEvolve} compresses the transcript).
+ * Replaces this trip’s transcript with one assistant summary line (subcollection doc + legacy memory).
  */
 export async function replaceTripChatMemoryForTrip(
   emailLower: string,
@@ -240,12 +320,18 @@ export async function replaceTripChatMemoryForTrip(
   if (!tid) return;
 
   const ref = userDocRef(db, key);
+  const subRef = tripAssistantChatDocRef(db, key, tid);
   const agentRow: TripChatMessage = {
     tripId: tid,
     from: "agent",
     content: agentSummaryContent.slice(0, 8000),
     timeStamp: new Date(sentAtMs).toISOString(),
   };
+
+  await setDoc(subRef, {
+    messages: [agentRow],
+    updatedAt: isoNow(),
+  });
 
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
@@ -265,5 +351,42 @@ export async function replaceTripChatMemoryForTrip(
       },
       { merge: true }
     );
+  });
+}
+
+/**
+ * Deletes assistant chat for **this signed-in user** and **this trip id only**:
+ * removes `users/{emailLower}/tripAssistantChats/{tripId}` and drops matching rows from
+ * `users/{emailLower}.memory`. Other trips on the same account and other users’ chats are untouched.
+ */
+export async function clearTripChatMemoryForTrip(emailLower: string, tripId: string): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+
+  const key = normalizeUserEmailKey(emailLower);
+  const tid = tripId.trim();
+  if (!tid) return;
+
+  const ref = userDocRef(db, key);
+  const subRef = tripAssistantChatDocRef(db, key, tid);
+
+  await deleteDoc(subRef);
+
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data() as Record<string, unknown> | undefined;
+    const display = typeof data?.email === "string" ? data.email : key;
+    const prev = parseMemoryArrayFromUserDoc(data?.memory, {
+      userEmailLower: key,
+      userEmailDisplay: display,
+    });
+    const next = prev.filter((m) => m.tripId !== tid).slice(-MAX_CHAT_MESSAGES);
+    const patch: Record<string, unknown> = { updatedAt: isoNow() };
+    if (next.length === 0) {
+      patch.memory = deleteField();
+    } else {
+      patch.memory = next;
+    }
+    tx.set(ref, patch, { merge: true });
   });
 }
