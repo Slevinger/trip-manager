@@ -68,11 +68,15 @@ function MapOverlay({
   touchPrimary,
   tooltipClassName,
   tooltipOpacity,
+  tooltipSticky,
+  tooltipDirection,
   children,
 }: {
   touchPrimary: boolean;
   tooltipClassName: string;
   tooltipOpacity?: number;
+  tooltipSticky?: boolean;
+  tooltipDirection?: "top" | "bottom" | "left" | "right" | "center" | "auto";
   children: React.ReactNode;
 }) {
   if (touchPrimary) {
@@ -91,8 +95,8 @@ function MapOverlay({
   }
   return (
     <Tooltip
-      sticky
-      direction="top"
+      sticky={tooltipSticky ?? false}
+      direction={tooltipDirection ?? "top"}
       opacity={tooltipOpacity ?? 0.98}
       className={tooltipClassName}
     >
@@ -159,6 +163,18 @@ function transitLegDurationLabel(t: Translate, startIso: string, endIso: string)
   if (h === 0) return t("map.transitDurationMinutes", { minutes: m });
   if (m === 0) return t("map.transitDurationHours", { hours: h });
   return t("map.transitDurationHoursMinutes", { hours: h, minutes: m });
+}
+
+function transitEdgeColor(edge: TransitMapEdge, nowMs: number): string {
+  const startMs = Date.parse(edge.startTime);
+  const endMs = Date.parse(edge.endTime);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return "#991b1b";
+  if (nowMs >= endMs) return "#2563eb"; // already done
+  if (nowMs >= startMs) return "#16a34a"; // current leg
+  const minsLeft = (startMs - nowMs) / 60000;
+  if (minsLeft <= 60) return "#eab308"; // soon
+  if (minsLeft <= 6 * 60) return "#ef4444"; // later today
+  return "#7f1d1d"; // far future
 }
 
 function TransitEdgeTooltipBody({ edge }: { edge: TransitMapEdge }) {
@@ -388,6 +404,7 @@ type TripLeafletMapInnerProps = {
   stayAreaCircles: StayAreaCircle[];
   staysByPinDestination: Record<string, StayMapPoint[]>;
   focusStepId: string | null;
+  nowMs: number;
   focus: CurrentStepFocus;
   touchPrimary: boolean;
   /** When set, double-clicking a destination pin (or the focused activity pin) opens edit. */
@@ -407,6 +424,7 @@ function TripLeafletMapInner({
   stayAreaCircles,
   staysByPinDestination,
   focusStepId,
+  nowMs,
   focus,
   touchPrimary,
   onDestinationDblClick,
@@ -452,13 +470,7 @@ function TripLeafletMapInner({
             const bearing = bearingDegreesNorth(edge.from, edge.to);
             const arrowPos = interpolateLatLng(edge.from, edge.to, 0.88);
             const inferred = Boolean(edge.inferred);
-            const color = inferred
-              ? emphasized
-                ? "#b91c1c"
-                : "#ef4444"
-              : emphasized
-                ? "#7c3aed"
-                : "#0ea5e9";
+            const color = transitEdgeColor(edge, nowMs);
             const lineWeight = touchPrimary
               ? emphasized
                 ? 8
@@ -483,6 +495,8 @@ function TripLeafletMapInner({
                   <MapOverlay
                     touchPrimary={touchPrimary}
                     tooltipOpacity={0.95}
+                    tooltipSticky
+                    tooltipDirection="auto"
                     tooltipClassName="!max-w-[min(280px,85vw)] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                   >
                     <TransitEdgeTooltipBody edge={edge} />
@@ -492,6 +506,7 @@ function TripLeafletMapInner({
                   <MapOverlay
                     touchPrimary={touchPrimary}
                     tooltipOpacity={0.95}
+                    tooltipDirection="top"
                     tooltipClassName="!max-w-[min(280px,85vw)] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                   >
                     <TransitEdgeTooltipBody edge={edge} />
@@ -531,6 +546,8 @@ function TripLeafletMapInner({
                 <MapOverlay
                   touchPrimary={touchPrimary}
                   tooltipOpacity={0.95}
+                  tooltipSticky
+                  tooltipDirection="auto"
                   tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                 >
                   <DestinationPinTooltipBody pin={r} linkedStays={linkedStays} />
@@ -600,12 +617,14 @@ export function TripItineraryMap({
   sortedSteps,
   destinations,
   focus,
+  nowMs,
   onDestinationDblClick,
 }: {
   tripId: string;
   sortedSteps: TripStep[];
   destinations: Destination[];
   focus: CurrentStepFocus;
+  nowMs: number;
   onDestinationDblClick?: (destinationId: string) => void;
 }) {
   const { t } = useI18n();
@@ -700,6 +719,7 @@ export function TripItineraryMap({
             stayAreaCircles={stayAreaCircles}
             staysByPinDestination={staysByPinDestination}
             focusStepId={focusStepId}
+            nowMs={nowMs}
             focus={focus}
             touchPrimary={touchPrimary}
             onDestinationDblClick={onDestinationDblClick}

@@ -65,6 +65,12 @@ const en = {
   "trip.saveFromJson": "Save from JSON",
   "trip.preparingEditor": "Preparing editor…",
   "trip.stepsCount": "{count} steps",
+  "trip.timeSimulationLabel": "Simulate local date & time",
+  "trip.timeSimulationLive": "Live now",
+  "trip.timeSimulationSimulated": "Simulation active",
+  "trip.timeSimulationDateTime": "Local date & time",
+  "trip.timeSimulationHelp":
+    "Preview map and itinerary state using a local date/time value from this device.",
 
   "userMenu.profilePreferences": "Profile preferences…",
   "userMenu.signOut": "Sign out",
@@ -374,6 +380,12 @@ const he: Record<MessageKey, string> = {
   "trip.saveFromJson": "שמירה מ-JSON",
   "trip.preparingEditor": "מכין את העורך…",
   "trip.stepsCount": "{count} שלבים",
+  "trip.timeSimulationLabel": "סימולציה לפי תאריך ושעה מקומיים",
+  "trip.timeSimulationLive": "זמן חי",
+  "trip.timeSimulationSimulated": "סימולציה פעילה",
+  "trip.timeSimulationDateTime": "תאריך ושעה מקומיים",
+  "trip.timeSimulationHelp":
+    "תצוגת המפה והמסלול לפי תאריך/שעה מקומיים מהמכשיר הזה.",
 
   "userMenu.profilePreferences": "העדפות פרופיל…",
   "userMenu.signOut": "התנתקות",
@@ -678,6 +690,12 @@ const ru: Record<MessageKey, string> = {
   "trip.saveFromJson": "Сохранить из JSON",
   "trip.preparingEditor": "Подготовка редактора…",
   "trip.stepsCount": "{count} шагов",
+  "trip.timeSimulationLabel": "Симуляция локальной даты и времени",
+  "trip.timeSimulationLive": "Текущее время",
+  "trip.timeSimulationSimulated": "Симуляция включена",
+  "trip.timeSimulationDateTime": "Локальные дата и время",
+  "trip.timeSimulationHelp":
+    "Показывает карту и маршрут по локальной дате/времени этого устройства.",
 
   "userMenu.profilePreferences": "Настройки профиля…",
   "userMenu.signOut": "Выйти",

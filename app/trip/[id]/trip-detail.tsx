@@ -30,6 +30,16 @@ import { messagesForTrip } from "@/lib/tripChatMessages";
 import type { TripChatMessage } from "@/lib/types/user";
 import { subscribeTripAssistantChat, subscribeUser } from "@/lib/usersFirestore";
 
+function toLocalDateTimeInputValue(epochMs: number): string {
+  const d = new Date(epochMs);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
 const TripItineraryMap = dynamic(
   () =>
     import("@/components/trip/TripItineraryMap").then((mod) => ({ default: mod.TripItineraryMap })),
@@ -67,6 +77,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const [canManageFirestore, setCanManageFirestore] = useState(false);
   const [advancedJson, setAdvancedJson] = useState("");
   const [viewNowMs, setViewNowMs] = useState(() => Date.now());
+  const [simulateLocalDateTimeEnabled, setSimulateLocalDateTimeEnabled] = useState(false);
+  const [simulatedLocalDateTime, setSimulatedLocalDateTime] = useState(() =>
+    toLocalDateTimeInputValue(Date.now())
+  );
   const [destinationLocationDialogOpen, setDestinationLocationDialogOpen] = useState(false);
   const [destinationLocationEditSnapshot, setDestinationLocationEditSnapshot] =
     useState<Destination | null>(null);
@@ -92,6 +106,11 @@ export function TripDetail({ tripId }: { tripId: string }) {
     const id = window.setInterval(() => setViewNowMs(Date.now()), 30_000);
     return () => window.clearInterval(id);
   }, [tab]);
+
+  useEffect(() => {
+    if (simulateLocalDateTimeEnabled || tab !== "view") return;
+    setSimulatedLocalDateTime(toLocalDateTimeInputValue(viewNowMs));
+  }, [simulateLocalDateTimeEnabled, tab, viewNowMs]);
 
   useEffect(() => {
     if (!useFirestore || !user?.email?.trim()) {
@@ -215,14 +234,20 @@ export function TripDetail({ tripId }: { tripId: string }) {
     return sortTripStepsByStartTime(trip.steps);
   }, [trip]);
 
+  const effectiveNowMs = useMemo(() => {
+    if (!simulateLocalDateTimeEnabled) return viewNowMs;
+    const parsed = Date.parse(simulatedLocalDateTime);
+    return Number.isFinite(parsed) ? parsed : viewNowMs;
+  }, [simulateLocalDateTimeEnabled, simulatedLocalDateTime, viewNowMs]);
+
   const viewPhase = useMemo(
-    () => (trip ? getTripViewPhase(trip, viewNowMs) : "before_start"),
-    [trip, viewNowMs]
+    () => (trip ? getTripViewPhase(trip, effectiveNowMs) : "before_start"),
+    [trip, effectiveNowMs]
   );
 
   const viewStepFocus = useMemo(
-    () => (trip ? resolveCurrentStepForDashboard(trip, viewNowMs) : { kind: "none" as const }),
-    [trip, viewNowMs]
+    () => (trip ? resolveCurrentStepForDashboard(trip, effectiveNowMs) : { kind: "none" as const }),
+    [trip, effectiveNowMs]
   );
 
   const destinationsMissingMapCoordinates = useMemo(() => {
@@ -424,6 +449,41 @@ export function TripDetail({ tripId }: { tripId: string }) {
 
       {tab === "view" ? (
         <>
+          <section className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                <input
+                  type="checkbox"
+                  checked={simulateLocalDateTimeEnabled}
+                  onChange={(e) => setSimulateLocalDateTimeEnabled(e.target.checked)}
+                  className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600 dark:bg-zinc-800"
+                />
+                {t("trip.timeSimulationLabel")}
+              </label>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {simulateLocalDateTimeEnabled
+                  ? t("trip.timeSimulationSimulated")
+                  : t("trip.timeSimulationLive")}
+              </p>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="trip-local-datetime-sim"
+                className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
+              >
+                {t("trip.timeSimulationDateTime")}
+              </label>
+              <input
+                id="trip-local-datetime-sim"
+                type="datetime-local"
+                value={simulatedLocalDateTime}
+                disabled={!simulateLocalDateTimeEnabled}
+                onChange={(e) => setSimulatedLocalDateTime(e.target.value)}
+                className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+              />
+            </div>
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{t("trip.timeSimulationHelp")}</p>
+          </section>
           {destinationsMissingMapCoordinates.length > 0 ? (
             <aside
               className="mt-6 rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
@@ -467,6 +527,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
             sortedSteps={sortedSteps}
             destinations={trip.destinations}
             focus={viewStepFocus}
+            nowMs={effectiveNowMs}
             onDestinationDblClick={
               canEditTripDestinations
                 ? (destinationId) => {
@@ -488,13 +549,13 @@ export function TripDetail({ tripId }: { tripId: string }) {
             onSave={handleViewDestinationLocationSave}
           />
           {viewPhase === "before_start" ? (
-            <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={viewNowMs} variant="default" />
+            <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={effectiveNowMs} variant="default" />
           ) : null}
           {viewPhase === "during" ? (
-            <TripCurrentStepDashboard trip={trip} focus={viewStepFocus} nowMs={viewNowMs} />
+            <TripCurrentStepDashboard trip={trip} focus={viewStepFocus} nowMs={effectiveNowMs} />
           ) : null}
           {viewPhase === "after_end" ? (
-            <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={viewNowMs} variant="ended" />
+            <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={effectiveNowMs} variant="ended" />
           ) : null}
           <div className="mt-8">
             <TripDestinationsRoster
