@@ -65,6 +65,18 @@ const en = {
   "trip.saveFromJson": "Save from JSON",
   "trip.preparingEditor": "Preparing editor…",
   "trip.stepsCount": "{count} steps",
+  "trip.liveLocationToggle": "Share my live location",
+  "trip.liveLocationStatusSharing": "Sharing location",
+  "trip.liveLocationStatusOff": "Location sharing off",
+  "trip.liveLocationHelp":
+    "Your device location updates the trip map in near real time for other trip members.",
+  "trip.liveLocationRequiresTraveler":
+    "Live location sharing is available for signed-in trip travelers who can manage this trip.",
+  "trip.liveLocationNoGeolocation": "This browser does not support geolocation.",
+  "trip.liveLocationPermissionDenied":
+    "Location permission denied. Allow location access in your browser settings.",
+  "trip.liveLocationUpdateFailed": "Couldn't update live location right now.",
+  "trip.liveLocationDefaultName": "Traveler",
 
   "userMenu.profilePreferences": "Profile preferences…",
   "userMenu.signOut": "Sign out",
@@ -287,6 +299,8 @@ const en = {
   "map.transitDurationMinutes": "{minutes} min",
   "map.transitDurationHours": "{hours} h",
   "map.transitDurationHoursMinutes": "{hours} h {minutes} min",
+  "map.liveMarkerTitle": "Live: {name}",
+  "map.liveMarkerUpdated": "Updated: {time}",
 
   "manage.stayAreaCenterLabel": "Stay area center (map)",
   "manage.stayAreaCenterHint":
@@ -374,6 +388,15 @@ const he: Record<MessageKey, string> = {
   "trip.saveFromJson": "שמירה מ-JSON",
   "trip.preparingEditor": "מכין את העורך…",
   "trip.stepsCount": "{count} שלבים",
+  "trip.liveLocationToggle": "שיתוף המיקום החי שלי",
+  "trip.liveLocationStatusSharing": "שיתוף מיקום פעיל",
+  "trip.liveLocationStatusOff": "שיתוף מיקום כבוי",
+  "trip.liveLocationHelp": "מיקום המכשיר שלך מתעדכן במפת הטיול כמעט בזמן אמת עבור שאר המשתתפים.",
+  "trip.liveLocationRequiresTraveler": "שיתוף מיקום חי זמין למטיילים מחוברים שיכולים לנהל את הטיול הזה.",
+  "trip.liveLocationNoGeolocation": "הדפדפן הזה לא תומך בגישה למיקום.",
+  "trip.liveLocationPermissionDenied": "הרשאת מיקום נדחתה. אפשרו גישה למיקום בהגדרות הדפדפן.",
+  "trip.liveLocationUpdateFailed": "לא ניתן לעדכן מיקום חי כרגע.",
+  "trip.liveLocationDefaultName": "מטייל",
 
   "userMenu.profilePreferences": "העדפות פרופיל…",
   "userMenu.signOut": "התנתקות",
@@ -592,6 +615,8 @@ const he: Record<MessageKey, string> = {
   "map.transitDurationMinutes": "{minutes} דק׳",
   "map.transitDurationHours": "{hours} שע׳",
   "map.transitDurationHoursMinutes": "{hours} שע׳ {minutes} דק׳",
+  "map.liveMarkerTitle": "חי: {name}",
+  "map.liveMarkerUpdated": "עודכן: {time}",
 
   "manage.stayAreaCenterLabel": "מרכז אזור שהייה (מפה)",
   "manage.stayAreaCenterHint":
@@ -678,6 +703,18 @@ const ru: Record<MessageKey, string> = {
   "trip.saveFromJson": "Сохранить из JSON",
   "trip.preparingEditor": "Подготовка редактора…",
   "trip.stepsCount": "{count} шагов",
+  "trip.liveLocationToggle": "Делиться моей геопозицией",
+  "trip.liveLocationStatusSharing": "Геопозиция передается",
+  "trip.liveLocationStatusOff": "Передача геопозиции выключена",
+  "trip.liveLocationHelp":
+    "Местоположение вашего устройства обновляет карту поездки почти в реальном времени для остальных участников.",
+  "trip.liveLocationRequiresTraveler":
+    "Передача геопозиции доступна для вошедших участников поездки с правом управления.",
+  "trip.liveLocationNoGeolocation": "Этот браузер не поддерживает геолокацию.",
+  "trip.liveLocationPermissionDenied":
+    "Доступ к геолокации запрещён. Разрешите его в настройках браузера.",
+  "trip.liveLocationUpdateFailed": "Сейчас не удалось обновить геопозицию.",
+  "trip.liveLocationDefaultName": "Участник",
 
   "userMenu.profilePreferences": "Настройки профиля…",
   "userMenu.signOut": "Выйти",
@@ -900,6 +937,8 @@ const ru: Record<MessageKey, string> = {
   "map.transitDurationMinutes": "{minutes} мин",
   "map.transitDurationHours": "{hours} ч",
   "map.transitDurationHoursMinutes": "{hours} ч {minutes} мин",
+  "map.liveMarkerTitle": "Онлайн: {name}",
+  "map.liveMarkerUpdated": "Обновлено: {time}",
 
   "manage.stayAreaCenterLabel": "Центр зоны проживания (карта)",
   "manage.stayAreaCenterHint":
