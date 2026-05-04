@@ -8,7 +8,6 @@ import {
   or,
   query,
   setDoc,
-  updateDoc,
   where,
   type DocumentData,
   type Firestore,
@@ -41,6 +40,89 @@ export function tripDocRef(db: Firestore, tripId: string) {
   return doc(db, CANONICAL_TRIPS_COLLECTION, tripId);
 }
 
+function coerceFiniteNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function isoFromFirestoreInstant(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object") {
+    const o = raw as { toDate?: () => Date; seconds?: number; nanoseconds?: number };
+    if (typeof o.toDate === "function") {
+      try {
+        return o.toDate().toISOString();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (typeof o.seconds === "number") {
+      const ns = typeof o.nanoseconds === "number" ? o.nanoseconds : 0;
+      return new Date(o.seconds * 1000 + ns / 1e6).toISOString();
+    }
+  }
+  return new Date(0).toISOString();
+}
+
+/**
+ * Firestore update paths treat `.` as nesting. Writing `liveLocations.${email}` split
+ * `user.name@gmail.com` into nested maps instead of one key. Walk the tree and fold leaves
+ * (lat/lon payloads) into a flat map keyed by joining path segments — recovering the email.
+ */
+function flattenLiveLocationsForRead(raw: unknown): Record<string, TripLiveLocation> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, TripLiveLocation> = {};
+
+  function isLeaf(o: Record<string, unknown>): boolean {
+    const lat =
+      coerceFiniteNumber(o.lat) ??
+      coerceFiniteNumber(o.latitude);
+    const lon =
+      coerceFiniteNumber(o.lon) ??
+      coerceFiniteNumber(o.lng) ??
+      coerceFiniteNumber(o.longitude);
+    return lat != null && lon != null;
+  }
+
+  function walk(node: unknown, segments: string[]): void {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return;
+    const o = node as Record<string, unknown>;
+    if (isLeaf(o)) {
+      if (segments.length === 0) return;
+      const key = segments.join(".");
+      const lat =
+        coerceFiniteNumber(o.lat) ??
+        coerceFiniteNumber(o.latitude) ??
+        0;
+      const lon =
+        coerceFiniteNumber(o.lon) ??
+        coerceFiniteNumber(o.lng) ??
+        coerceFiniteNumber(o.longitude) ??
+        0;
+      const nameRaw = o.name;
+      const name =
+        (typeof nameRaw === "string" ? nameRaw : String(nameRaw ?? "")).trim() || "Traveler";
+      out[key] = {
+        name,
+        lat,
+        lon,
+        updatedAt: isoFromFirestoreInstant(o.updatedAt),
+      };
+      return;
+    }
+    for (const [k, v] of Object.entries(o)) {
+      walk(v, [...segments, k]);
+    }
+  }
+
+  walk(raw, []);
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function stripMeta(data: DocumentData): Trip {
   const {
     [OWNER_UID]: _u,
@@ -48,7 +130,12 @@ function stripMeta(data: DocumentData): Trip {
     [PARTICIPANT_EMAILS_LOWER]: _p,
     ...rest
   } = data as Record<string, unknown>;
-  return migrateTripToDestinationRegistry(rest);
+  const next = { ...rest };
+  if (next.liveLocations != null) {
+    const flat = flattenLiveLocationsForRead(next.liveLocations);
+    if (flat) next.liveLocations = flat;
+  }
+  return migrateTripToDestinationRegistry(next);
 }
 
 /**
@@ -209,9 +296,16 @@ export async function updateCanonicalTripLiveLocation(
   location: TripLiveLocation
 ): Promise<void> {
   const ref = tripDocRef(db, tripId);
-  await updateDoc(ref, {
-    [`liveLocations.${userLocationKey}`]: pruneUndefinedForFirestore(location),
-  });
+  /** Dot notation in `updateDoc` field paths splits on `.`; nest under `liveLocations` instead. */
+  await setDoc(
+    ref,
+    {
+      liveLocations: {
+        [userLocationKey]: pruneUndefinedForFirestore(location),
+      },
+    },
+    { merge: true }
+  );
 }
 
 export async function clearCanonicalTripLiveLocation(
@@ -220,9 +314,15 @@ export async function clearCanonicalTripLiveLocation(
   userLocationKey: string
 ): Promise<void> {
   const ref = tripDocRef(db, tripId);
-  await updateDoc(ref, {
-    [`liveLocations.${userLocationKey}`]: deleteField(),
-  });
+  await setDoc(
+    ref,
+    {
+      liveLocations: {
+        [userLocationKey]: deleteField(),
+      },
+    },
+    { merge: true }
+  );
 }
 
 export async function deleteCanonicalTrip(

@@ -136,6 +136,51 @@ const ACTIVITY_FOCUS_PIN_ICON = L.divIcon({
   iconAnchor: [9, 9],
 });
 
+function coerceFiniteNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** Live rows may be plain numbers or GeoPoint-like `{ latitude, longitude }` from tooling. */
+function readLivePosition(row: Record<string, unknown>): LatLng | null {
+  const lat =
+    coerceFiniteNumber(row.lat) ?? coerceFiniteNumber(row.latitude);
+  const lng =
+    coerceFiniteNumber(row.lon) ??
+    coerceFiniteNumber(row.lng) ??
+    coerceFiniteNumber(row.longitude);
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+function formatFirestoreInstantForLocale(raw: unknown, intlLocale: string): string {
+  let ms: number | null = null;
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    ms = Number.isFinite(t) ? t : null;
+  } else if (raw && typeof raw === "object") {
+    const o = raw as { toDate?: () => Date; seconds?: unknown; nanoseconds?: unknown };
+    if (typeof o.toDate === "function") {
+      try {
+        const d = o.toDate();
+        const t = d.getTime();
+        ms = Number.isFinite(t) ? t : null;
+      } catch {
+        ms = null;
+      }
+    } else if (typeof o.seconds === "number") {
+      const ns = typeof o.nanoseconds === "number" ? o.nanoseconds : 0;
+      ms = o.seconds * 1000 + ns / 1e6;
+    }
+  }
+  if (ms == null) return "—";
+  return new Date(ms).toLocaleString(intlLocale);
+}
+
 function applyFitBounds(map: LeafletMap, points: LatLng[], focus: LatLng | null) {
   if (points.length === 0 && !focus) return;
   const list = focus ? [...points, focus] : [...points];
@@ -441,7 +486,7 @@ type LiveMapPoint = {
   id: string;
   name: string;
   position: LatLng;
-  updatedAt: string;
+  updatedAtLabel: string;
 };
 
 /**
@@ -612,7 +657,7 @@ function TripLeafletMapInner({
                   </p>
                   <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
                     {t("map.liveMarkerUpdated", {
-                      time: new Date(m.updatedAt).toLocaleString(intlLocale),
+                      time: m.updatedAtLabel,
                     })}
                   </p>
                 </div>
@@ -690,7 +735,8 @@ export function TripItineraryMap({
   nowMs: number;
   onDestinationDblClick?: (destinationId: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
   const staysByPinDestination = useMemo((): Record<string, StayMapPoint[]> => {
     const m = collectStaysByPinDestination(sortedSteps, destinations);
     return Object.fromEntries(m);
@@ -716,16 +762,22 @@ export function TripItineraryMap({
     if (!liveLocations) return [];
     return Object.entries(liveLocations)
       .map(([id, row]) => {
-        if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lon)) return null;
+        if (!row || typeof row !== "object") return null;
+        const o = row as unknown as Record<string, unknown>;
+        const position = readLivePosition(o);
+        if (!position) return null;
+        const nameRaw = o.name;
+        const name =
+          (typeof nameRaw === "string" ? nameRaw : String(nameRaw ?? "")).trim() || "Traveler";
         return {
           id,
-          name: (row.name || "Traveler").trim() || "Traveler",
-          position: { lat: row.lat, lng: row.lon },
-          updatedAt: row.updatedAt,
+          name,
+          position,
+          updatedAtLabel: formatFirestoreInstantForLocale(o.updatedAt, intlLocale),
         };
       })
       .filter((row): row is LiveMapPoint => Boolean(row));
-  }, [liveLocations]);
+  }, [liveLocations, intlLocale]);
 
   const allPoints = useMemo(() => {
     const pts: LatLng[] = [];
@@ -772,6 +824,7 @@ export function TripItineraryMap({
     focusLatLng ??
     destinationPins[0]?.position ??
     transitEdges[0]?.from ??
+    liveMarkers[0]?.position ??
     { lat: 0, lng: 0 };
 
   return (
