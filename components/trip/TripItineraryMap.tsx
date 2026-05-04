@@ -70,13 +70,19 @@ function MapOverlay({
   tooltipOpacity,
   tooltipSticky,
   tooltipDirection,
+  tooltipOffset,
+  popupAutoPanPadding,
   children,
 }: {
   touchPrimary: boolean;
   tooltipClassName: string;
   tooltipOpacity?: number;
+  /** Sticky follows the cursor — fine on lines; thin paths behave well; avoid sticky on broad SVG fills when possible. */
   tooltipSticky?: boolean;
   tooltipDirection?: "top" | "bottom" | "left" | "right" | "center" | "auto";
+  tooltipOffset?: [number, number];
+  /** Smaller padding keeps touch popups nearer the tap after auto-pan. */
+  popupAutoPanPadding?: [number, number];
   children: React.ReactNode;
 }) {
   if (touchPrimary) {
@@ -85,7 +91,7 @@ function MapOverlay({
         keepInView
         closeButton
         autoPan
-        autoPanPadding={[20, 20]}
+        autoPanPadding={popupAutoPanPadding ?? [12, 12]}
         minWidth={160}
         className="trip-map-touch-popup"
       >
@@ -97,6 +103,7 @@ function MapOverlay({
     <Tooltip
       sticky={tooltipSticky ?? false}
       direction={tooltipDirection ?? "top"}
+      offset={tooltipOffset ?? [0, -6]}
       opacity={tooltipOpacity ?? 0.98}
       className={tooltipClassName}
     >
@@ -113,6 +120,21 @@ function arrowDivIcon(bearingDeg: number, color: string): L.DivIcon {
     iconAnchor: [11, 11],
   });
 }
+
+/** CircleMarker SVG tooltips mis-anchor in many setups; Marker + DivIcon matches Leaflet edge/tooltip behavior. */
+const DESTINATION_PIN_ICON = L.divIcon({
+  className: "trip-map-destination-marker",
+  html: '<div class="trip-map-destination-dot" aria-hidden="true"></div>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+const ACTIVITY_FOCUS_PIN_ICON = L.divIcon({
+  className: "trip-map-activity-marker",
+  html: '<div class="trip-map-activity-dot" aria-hidden="true"></div>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
 
 function applyFitBounds(map: LeafletMap, points: LatLng[], focus: LatLng | null) {
   if (points.length === 0 && !focus) return;
@@ -352,6 +374,9 @@ function StayAreaCircleLayers({
             <MapOverlay
               touchPrimary={touchPrimary}
               tooltipOpacity={0.95}
+              tooltipSticky={false}
+              tooltipDirection="top"
+              tooltipOffset={[0, -8]}
               tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
             >
               <div className="max-w-[min(280px,72vw)] space-y-1 text-left">
@@ -506,6 +531,7 @@ function TripLeafletMapInner({
                     tooltipOpacity={0.95}
                     tooltipSticky
                     tooltipDirection="auto"
+                    tooltipOffset={[0, 0]}
                     tooltipClassName="!max-w-[min(280px,85vw)] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                   >
                     <TransitEdgeTooltipBody edge={edge} />
@@ -515,7 +541,9 @@ function TripLeafletMapInner({
                   <MapOverlay
                     touchPrimary={touchPrimary}
                     tooltipOpacity={0.95}
+                    tooltipSticky={false}
                     tooltipDirection="top"
+                    tooltipOffset={[0, -8]}
                     tooltipClassName="!max-w-[min(280px,85vw)] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                   >
                     <TransitEdgeTooltipBody edge={edge} />
@@ -527,16 +555,10 @@ function TripLeafletMapInner({
           {destinationPins.map((r) => {
             const linkedStays = staysByPinDestination[r.destinationId] ?? [];
             return (
-              <CircleMarker
+              <Marker
                 key={`destination-${r.destinationId}`}
-                center={[r.position.lat, r.position.lng]}
-                radius={7}
-                pathOptions={{
-                  color: "#0f766e",
-                  weight: 2,
-                  fillColor: "#5eead4",
-                  fillOpacity: 0.35,
-                }}
+                position={[r.position.lat, r.position.lng]}
+                icon={DESTINATION_PIN_ICON}
                 eventHandlers={
                   onDestinationDblClick
                     ? {
@@ -555,13 +577,14 @@ function TripLeafletMapInner({
                 <MapOverlay
                   touchPrimary={touchPrimary}
                   tooltipOpacity={0.95}
-                  tooltipSticky
-                  tooltipDirection="auto"
+                  tooltipSticky={false}
+                  tooltipDirection="top"
+                  tooltipOffset={[0, -12]}
                   tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                 >
                   <DestinationPinTooltipBody pin={r} linkedStays={linkedStays} />
                 </MapOverlay>
-              </CircleMarker>
+              </Marker>
             );
           })}
           {liveMarkers.map((m) => (
@@ -600,15 +623,9 @@ function TripLeafletMapInner({
           focusStepId &&
           focus.kind !== "none" &&
           focus.step.stepType === "activity" ? (
-            <CircleMarker
-              center={[focusLatLng.lat, focusLatLng.lng]}
-              radius={10}
-              pathOptions={{
-                color: "#047857",
-                weight: 2,
-                fillColor: "#10b981",
-                fillOpacity: 0.85,
-              }}
+            <Marker
+              position={[focusLatLng.lat, focusLatLng.lng]}
+              icon={ACTIVITY_FOCUS_PIN_ICON}
               eventHandlers={
                 onDestinationDblClick
                   ? {
@@ -629,6 +646,9 @@ function TripLeafletMapInner({
               <MapOverlay
                 touchPrimary={touchPrimary}
                 tooltipOpacity={0.95}
+                tooltipSticky={false}
+                tooltipDirection="top"
+                tooltipOffset={[0, -14]}
                 tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-xs !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
               >
                 <div className="max-w-[220px] space-y-1 text-left">
@@ -645,7 +665,7 @@ function TripLeafletMapInner({
                   </p>
                 </div>
               </MapOverlay>
-            </CircleMarker>
+            </Marker>
           ) : null}
         </>
       ) : null}

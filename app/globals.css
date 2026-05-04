@@ -17,6 +17,24 @@ body {
   color: var(--foreground);
 }
 
+/*
+ * Leaflet assumes LTR layout for tooltip/popup placement math. With Hebrew we set
+ * document.documentElement.dir = rtl — without this, tooltips anchor far from markers (wrong side / off-map).
+ */
+.leaflet-container {
+  direction: ltr;
+}
+
+html[dir="rtl"] .leaflet-tooltip {
+  direction: rtl;
+  text-align: right;
+}
+
+html[dir="rtl"] .leaflet-popup-content-wrapper {
+  direction: rtl;
+  text-align: right;
+}
+
 /* Leaflet itinerary map: arrowhead div icons */
 .leaflet-div-icon.trip-map-arrow-marker {
   background: transparent !important;
@@ -32,6 +50,33 @@ body {
   border-bottom: 14px solid var(--arrow-color, #0ea5e9);
   transform-origin: 50% 70%;
   filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.2));
+}
+
+/* Destination / activity dots — Marker + DivIcon so tooltips anchor like edges (not SVG CircleMarker drift). */
+.leaflet-div-icon.trip-map-destination-marker,
+.leaflet-div-icon.trip-map-activity-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.trip-map-destination-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  box-sizing: border-box;
+  border: 2px solid #0f766e;
+  background: rgb(94 234 212 / 0.55);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.trip-map-activity-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  box-sizing: border-box;
+  border: 2px solid #047857;
+  background: rgb(16 185 129 / 0.85);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
 }
 
 /* Leaflet defaults to very dark #333; soften so tooltip copy matches app UI */
