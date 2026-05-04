@@ -275,6 +275,13 @@ export interface TripDocument {
   notes?: string;
 }
 
+export interface TripLiveLocation {
+  name: string;
+  lat: number;
+  lon: number;
+  updatedAt: ISODateString;
+}
+
 export interface Trip {
   id: string;
   title: string;
@@ -297,6 +304,8 @@ export interface Trip {
   budget?: TripBudget;
   tasks?: TripTask[];
   documents?: TripDocument[];
+  /** Live device positions by participant key (typically lowercased email). */
+  liveLocations?: Record<string, TripLiveLocation>;
   warnings?: TripWarning[];
   createdAt: ISODateString;
   updatedAt: ISODateString;

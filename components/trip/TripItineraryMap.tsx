@@ -33,7 +33,7 @@ import {
   type TransitMapEdge,
 } from "@/lib/tripMapGeometry";
 import { intlLocaleForApp, type MessageKey } from "@/lib/i18n/messages";
-import type { Destination, TripStep } from "@/lib/types/trip";
+import type { Destination, TripLiveLocation, TripStep } from "@/lib/types/trip";
 
 import "leaflet/dist/leaflet.css";
 
@@ -402,6 +402,7 @@ type TripLeafletMapInnerProps = {
   transitEdges: TransitMapEdge[];
   destinationPins: DestinationListPin[];
   stayAreaCircles: StayAreaCircle[];
+  liveMarkers: LiveMapPoint[];
   staysByPinDestination: Record<string, StayMapPoint[]>;
   focusStepId: string | null;
   nowMs: number;
@@ -409,6 +410,13 @@ type TripLeafletMapInnerProps = {
   touchPrimary: boolean;
   /** When set, double-clicking a destination pin (or the focused activity pin) opens edit. */
   onDestinationDblClick?: (destinationId: string) => void;
+};
+
+type LiveMapPoint = {
+  id: string;
+  name: string;
+  position: LatLng;
+  updatedAt: string;
 };
 
 /**
@@ -422,6 +430,7 @@ function TripLeafletMapInner({
   transitEdges,
   destinationPins,
   stayAreaCircles,
+  liveMarkers,
   staysByPinDestination,
   focusStepId,
   nowMs,
@@ -555,6 +564,38 @@ function TripLeafletMapInner({
               </CircleMarker>
             );
           })}
+          {liveMarkers.map((m) => (
+            <CircleMarker
+              key={`live-${m.id}`}
+              center={[m.position.lat, m.position.lng]}
+              radius={8}
+              pathOptions={{
+                color: "#1d4ed8",
+                weight: 2,
+                fillColor: "#60a5fa",
+                fillOpacity: 0.5,
+              }}
+            >
+              <MapOverlay
+                touchPrimary={touchPrimary}
+                tooltipOpacity={0.95}
+                tooltipSticky
+                tooltipDirection="auto"
+                tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
+              >
+                <div className="max-w-[220px] space-y-1 text-left text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+                  <p className="font-semibold text-zinc-700 dark:text-zinc-100">
+                    {t("map.liveMarkerTitle", { name: m.name })}
+                  </p>
+                  <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+                    {t("map.liveMarkerUpdated", {
+                      time: new Date(m.updatedAt).toLocaleString(intlLocale),
+                    })}
+                  </p>
+                </div>
+              </MapOverlay>
+            </CircleMarker>
+          ))}
           {focusLatLng &&
           focusStepId &&
           focus.kind !== "none" &&
@@ -616,6 +657,7 @@ export function TripItineraryMap({
   tripId,
   sortedSteps,
   destinations,
+  liveLocations,
   focus,
   nowMs,
   onDestinationDblClick,
@@ -623,6 +665,7 @@ export function TripItineraryMap({
   tripId: string;
   sortedSteps: TripStep[];
   destinations: Destination[];
+  liveLocations?: Record<string, TripLiveLocation>;
   focus: CurrentStepFocus;
   nowMs: number;
   onDestinationDblClick?: (destinationId: string) => void;
@@ -649,6 +692,20 @@ export function TripItineraryMap({
     [focus, sortedSteps, destinations]
   );
   const focusStepId = focus.kind !== "none" ? focus.step.id : null;
+  const liveMarkers = useMemo((): LiveMapPoint[] => {
+    if (!liveLocations) return [];
+    return Object.entries(liveLocations)
+      .map(([id, row]) => {
+        if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lon)) return null;
+        return {
+          id,
+          name: (row.name || "Traveler").trim() || "Traveler",
+          position: { lat: row.lat, lng: row.lon },
+          updatedAt: row.updatedAt,
+        };
+      })
+      .filter((row): row is LiveMapPoint => Boolean(row));
+  }, [liveLocations]);
 
   const allPoints = useMemo(() => {
     const pts: LatLng[] = [];
@@ -658,8 +715,11 @@ export function TripItineraryMap({
     for (const r of destinationPins) {
       pts.push(r.position);
     }
+    for (const m of liveMarkers) {
+      pts.push(m.position);
+    }
     return pts;
-  }, [transitEdges, destinationPins]);
+  }, [transitEdges, destinationPins, liveMarkers]);
 
   /** Avoid mounting Leaflet until layout exists (fixes TileLayer / pane appendChild races with React 19). */
   const [domReady, setDomReady] = useState(false);
@@ -717,6 +777,7 @@ export function TripItineraryMap({
             transitEdges={transitEdges}
             destinationPins={destinationPins}
             stayAreaCircles={stayAreaCircles}
+            liveMarkers={liveMarkers}
             staysByPinDestination={staysByPinDestination}
             focusStepId={focusStepId}
             nowMs={nowMs}

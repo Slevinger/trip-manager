@@ -4,11 +4,13 @@ import type { User } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  clearCanonicalTripLiveLocation,
   saveCanonicalTrip,
   sessionIsGoogleSignIn,
   subscribeCanonicalTrip,
+  updateCanonicalTripLiveLocation,
 } from "@/lib/canonicalTripsFirestore";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { TripMapLoadingPlaceholder } from "@/components/trip/TripMapLoadingPlaceholder";
@@ -81,6 +83,8 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const [simulatedLocalDateTime, setSimulatedLocalDateTime] = useState(() =>
     toLocalDateTimeInputValue(Date.now())
   );
+  const [liveLocationSharing, setLiveLocationSharing] = useState(false);
+  const [liveLocationError, setLiveLocationError] = useState<string | null>(null);
   const [destinationLocationDialogOpen, setDestinationLocationDialogOpen] = useState(false);
   const [destinationLocationEditSnapshot, setDestinationLocationEditSnapshot] =
     useState<Destination | null>(null);
@@ -91,9 +95,12 @@ export function TripDetail({ tripId }: { tripId: string }) {
     exists: boolean;
     messages: TripChatMessage[];
   }>({ exists: false, messages: [] });
+  const liveLocationWatchIdRef = useRef<number | null>(null);
+  const liveLocationLastSentRef = useRef<{ ts: number; lat: number; lon: number } | null>(null);
 
   const { t } = useI18n();
   const useFirestore = Boolean(getDb() && getMissingFirebasePublicEnv().length === 0);
+  const liveLocationUserKey = (user?.email ?? "").trim().toLowerCase();
 
   const saveTargetLabel = useMemo(
     () => (useFirestore && user ? t("trip.saveTargetFirestore") : t("trip.saveTargetLocal")),
@@ -260,12 +267,92 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const canUploadTripFiles = Boolean(
     useFirestore && user && canManageFirestore && getDb() && getClientStorage()
   );
+  const canShareLiveLocation = Boolean(
+    tab === "view" && useFirestore && user && canManageFirestore && trip?.id && liveLocationUserKey && getDb()
+  );
+  const liveLocationDisplayName = useMemo(() => {
+    const fallback = t("trip.liveLocationDefaultName");
+    if (!trip || !liveLocationUserKey) return fallback;
+    const traveler = trip.travelers.find((row) => (row.email ?? "").trim().toLowerCase() === liveLocationUserKey);
+    if (traveler?.name?.trim()) return traveler.name.trim();
+    const viewer = (trip.viewers ?? []).find(
+      (row) => (row.email ?? "").trim().toLowerCase() === liveLocationUserKey
+    );
+    if (viewer?.name?.trim()) return viewer.name.trim();
+    return fallback;
+  }, [trip, liveLocationUserKey, t]);
   const uploadDisabledHint = useMemo(() => {
     if (!useFirestore) return t("trip.uploadHintNoFirestore");
     if (!user) return t("trip.uploadHintSignIn");
     if (!getClientStorage()) return t("trip.uploadHintStorage");
     return undefined;
   }, [useFirestore, user, t]);
+
+  useEffect(() => {
+    if (!canShareLiveLocation || !liveLocationSharing) {
+      if (liveLocationWatchIdRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.clearWatch(liveLocationWatchIdRef.current);
+        liveLocationWatchIdRef.current = null;
+      }
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLiveLocationError(t("trip.liveLocationNoGeolocation"));
+      return;
+    }
+    const db = getDb();
+    if (!db || !trip?.id) return;
+    setLiveLocationError(null);
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const now = Date.now();
+        const prev = liveLocationLastSentRef.current;
+        if (prev) {
+          const minIntervalMs = 15_000;
+          const minDelta = 0.0001;
+          if (now - prev.ts < minIntervalMs && Math.abs(prev.lat - lat) < minDelta && Math.abs(prev.lon - lon) < minDelta) {
+            return;
+          }
+        }
+        liveLocationLastSentRef.current = { ts: now, lat, lon };
+        void updateCanonicalTripLiveLocation(db, trip.id, liveLocationUserKey, {
+          name: liveLocationDisplayName,
+          lat,
+          lon,
+          updatedAt: new Date().toISOString(),
+        }).catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setLiveLocationError(msg || t("trip.liveLocationUpdateFailed"));
+        });
+      },
+      (err) => {
+        const msg =
+          err.code === err.PERMISSION_DENIED
+            ? t("trip.liveLocationPermissionDenied")
+            : err.message || t("trip.liveLocationUpdateFailed");
+        setLiveLocationError(msg);
+      },
+      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 }
+    );
+    liveLocationWatchIdRef.current = watchId;
+    return () => {
+      if (liveLocationWatchIdRef.current != null) {
+        navigator.geolocation.clearWatch(liveLocationWatchIdRef.current);
+        liveLocationWatchIdRef.current = null;
+      }
+    };
+  }, [canShareLiveLocation, liveLocationDisplayName, liveLocationSharing, liveLocationUserKey, t, trip?.id]);
+
+  useEffect(() => {
+    if (liveLocationSharing || !canShareLiveLocation) return;
+    const db = getDb();
+    if (!db || !trip?.id) return;
+    void clearCanonicalTripLiveLocation(db, trip.id, liveLocationUserKey).catch(() => {});
+  }, [canShareLiveLocation, liveLocationSharing, liveLocationUserKey, trip?.id]);
 
   async function persistTrip(next: Trip) {
     setSaveError(null);
@@ -484,6 +571,38 @@ export function TripDetail({ tripId }: { tripId: string }) {
             </div>
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{t("trip.timeSimulationHelp")}</p>
           </section>
+          {useFirestore ? (
+            <section className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                  <input
+                    type="checkbox"
+                    checked={liveLocationSharing}
+                    disabled={!canShareLiveLocation}
+                    onChange={(e) => {
+                      setLiveLocationError(null);
+                      setLiveLocationSharing(e.target.checked);
+                    }}
+                    className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800"
+                  />
+                  {t("trip.liveLocationToggle")}
+                </label>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {liveLocationSharing
+                    ? t("trip.liveLocationStatusSharing")
+                    : t("trip.liveLocationStatusOff")}
+                </p>
+              </div>
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                {canShareLiveLocation
+                  ? t("trip.liveLocationHelp")
+                  : t("trip.liveLocationRequiresTraveler")}
+              </p>
+              {liveLocationError ? (
+                <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">{liveLocationError}</p>
+              ) : null}
+            </section>
+          ) : null}
           {destinationsMissingMapCoordinates.length > 0 ? (
             <aside
               className="mt-6 rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
@@ -526,6 +645,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
             tripId={trip.id}
             sortedSteps={sortedSteps}
             destinations={trip.destinations}
+            liveLocations={trip.liveLocations}
             focus={viewStepFocus}
             nowMs={effectiveNowMs}
             onDestinationDblClick={

@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -7,6 +8,7 @@ import {
   or,
   query,
   setDoc,
+  updateDoc,
   where,
   type DocumentData,
   type Firestore,
@@ -15,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { getIdTokenResult, type User } from "firebase/auth";
 import { migrateTripToDestinationRegistry } from "@/lib/tripDestinationRegistry";
-import type { Trip } from "@/lib/types/trip";
+import type { Trip, TripLiveLocation } from "@/lib/types/trip";
 
 /** Top-level collection for canonical (v2) trip documents. */
 export const CANONICAL_TRIPS_COLLECTION = "canonicalTrips";
@@ -198,6 +200,29 @@ export async function saveCanonicalTrip(
     throw new Error("Only the trip owner or a listed traveler can save changes.");
   }
   await setDoc(ref, buildCanonicalTripFirestoreDoc(trip, user, ownerUid || user.uid));
+}
+
+export async function updateCanonicalTripLiveLocation(
+  db: Firestore,
+  tripId: string,
+  userLocationKey: string,
+  location: TripLiveLocation
+): Promise<void> {
+  const ref = tripDocRef(db, tripId);
+  await updateDoc(ref, {
+    [`liveLocations.${userLocationKey}`]: pruneUndefinedForFirestore(location),
+  });
+}
+
+export async function clearCanonicalTripLiveLocation(
+  db: Firestore,
+  tripId: string,
+  userLocationKey: string
+): Promise<void> {
+  const ref = tripDocRef(db, tripId);
+  await updateDoc(ref, {
+    [`liveLocations.${userLocationKey}`]: deleteField(),
+  });
 }
 
 export async function deleteCanonicalTrip(
