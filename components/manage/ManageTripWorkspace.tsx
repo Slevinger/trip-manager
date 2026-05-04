@@ -9,6 +9,7 @@ import { createStayStep, normalizeStepOrders } from "@/lib/canonicalStepBuilders
 import {
   mergeDestinationLists,
   pruneUnreferencedDestinations,
+  upsertDestinationRow,
 } from "@/lib/tripDestinationRegistry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import type { Destination, Trip, TripStep, UserPreferences } from "@/lib/types/trip";
@@ -138,14 +139,6 @@ export function ManageTripWorkspace({
       <div className="space-y-6 pb-28">
         <ManageTripForm trip={trip} onChange={onTripChange} profilePreferences={profilePreferences} />
 
-        <div className="mt-6">
-          <TripDestinationsRoster
-            destinations={trip.destinations}
-            steps={sortedSteps}
-            manageHint={false}
-          />
-        </div>
-
         <section className="space-y-3">
           <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{t("manage.workspaceDestHelp")}</p>
           <div className="flex items-center justify-between gap-2">
@@ -173,6 +166,31 @@ export function ManageTripWorkspace({
           disabledHint={uploadDisabledHint}
           onPersist={persistTrip}
         />
+
+        {!saveDisabled ? (
+          <div className="mt-8">
+            <TripDestinationsRoster
+              destinations={trip.destinations}
+              steps={sortedSteps}
+              editable
+              manageHint={false}
+              onSaveDestination={(d) =>
+                onTripChange({
+                  ...trip,
+                  destinations: upsertDestinationRow(trip.destinations, d),
+                  updatedAt: new Date().toISOString(),
+                })
+              }
+              onDeleteDestination={(id) =>
+                onTripChange({
+                  ...trip,
+                  destinations: trip.destinations.filter((row) => row.id !== id),
+                  updatedAt: new Date().toISOString(),
+                })
+              }
+            />
+          </div>
+        ) : null}
       </div>
 
       <div

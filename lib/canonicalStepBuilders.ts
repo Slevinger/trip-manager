@@ -1,6 +1,11 @@
 import { newId } from "@/lib/canonicalIds";
 import type { PlaceSearchPickPayload } from "@/lib/places/types";
-import { mergeDestinationLists, normalizeTripDestinationRows } from "@/lib/tripDestinationRegistry";
+import {
+  destinationFromList,
+  mergeDestinationLists,
+  normalizeTripDestinationRows,
+  pruneUnreferencedDestinations,
+} from "@/lib/tripDestinationRegistry";
 import type {
   ActivityStep,
   ActivityStepInterval,
@@ -358,7 +363,146 @@ export function normalizeTripDestinations(trip: Trip): Trip {
   return normalizeTripDestinationRows(trip);
 }
 
+function hasDestinationRow(destinations: Destination[], id: string | undefined): boolean {
+  if (!id) return false;
+  return destinations.some((d) => d.id === id);
+}
+
+/**
+ * Multiple transit steps sometimes share one empty `targetDestinationId` (legacy / bad merge).
+ * Give each additional step its own registry row so per-step sync from legs does not clobber
+ * another transit’s step-level place.
+ */
+export function dedupeSharedTransitStepTargets(trip: Trip): Trip {
+  const indexed = trip.steps
+    .map((s, idx) => ({ s, idx }))
+    .filter((x): x is { s: TransitStep; idx: number } => x.s.stepType === "transit");
+
+  const byTarget = new Map<string, { s: TransitStep; idx: number }[]>();
+  for (const x of indexed) {
+    const tid = x.s.targetDestinationId;
+    if (!byTarget.has(tid)) byTarget.set(tid, []);
+    byTarget.get(tid)!.push(x);
+  }
+
+  const stepIdToNewTarget = new Map<string, string>();
+  const newRows: Destination[] = [];
+
+  for (const group of byTarget.values()) {
+    if (group.length <= 1) continue;
+    const sorted = [...group].sort((a, b) => a.idx - b.idx);
+    for (let i = 1; i < sorted.length; i++) {
+      const nid = newId();
+      newRows.push({ id: nid, title: "", location: "", description: "" });
+      stepIdToNewTarget.set(sorted[i].s.id, nid);
+    }
+  }
+
+  if (newRows.length === 0) return trip;
+
+  const steps = trip.steps.map((step) => {
+    const nid = stepIdToNewTarget.get(step.id);
+    if (!nid || step.stepType !== "transit") return step;
+    return { ...step, targetDestinationId: nid };
+  });
+
+  return {
+    ...trip,
+    steps,
+    destinations: mergeDestinationLists(trip.destinations, newRows),
+  };
+}
+
+/** If `fromStayId` / `toStayId` point at ids missing from `destinations`, fall back to the first / last transit leg ids. */
+export function repairTransitStepHubDestinationIds(trip: Trip): Trip {
+  const { destinations } = trip;
+  const steps = trip.steps.map((step) => {
+    if (step.stepType !== "transit") return step;
+    const t = step as TransitStep;
+    const legs = t.stepIntervals.filter(
+      (i): i is TransitStepInterval => i.intervalType === "transit"
+    );
+    let fromStayId = t.fromStayId;
+    let toStayId = t.toStayId;
+
+    if (!hasDestinationRow(destinations, fromStayId)) {
+      const first = legs[0];
+      if (first?.fromDestinationId?.trim()) fromStayId = first.fromDestinationId;
+    }
+    if (!hasDestinationRow(destinations, toStayId)) {
+      const last = legs[legs.length - 1];
+      if (last?.toDestinationId?.trim()) toStayId = last.toDestinationId;
+    }
+
+    if (fromStayId === t.fromStayId && toStayId === t.toStayId) return step;
+    return { ...t, fromStayId, toStayId };
+  });
+
+  return { ...trip, steps };
+}
+
+function destinationPlaceIsBare(d: Destination | undefined): boolean {
+  if (!d) return true;
+  if ((d.title ?? "").trim()) return false;
+  if ((d.location ?? "").trim()) return false;
+  const c = d.coordinates;
+  if (
+    c &&
+    typeof c.lat === "number" &&
+    typeof c.lon === "number" &&
+    Number.isFinite(c.lat) &&
+    Number.isFinite(c.lon)
+  )
+    return false;
+  return true;
+}
+
+function resolveTransitTargetSourceDestinationId(step: TransitStep): string | undefined {
+  const legs = step.stepIntervals.filter(
+    (i): i is TransitStepInterval => i.intervalType === "transit"
+  );
+  for (let i = legs.length - 1; i >= 0; i--) {
+    const id = legs[i].toDestinationId;
+    if (id?.trim()) return id;
+  }
+  const hub = step.toStayId?.trim();
+  return hub || undefined;
+}
+
+/**
+ * When the step-level transit row (`targetDestinationId`) is still empty, point it at the same
+ * registry id as the last leg’s arrival (or `toStayId`) instead of copying fields into a second
+ * row — avoids duplicate roster cards for one physical place. Drops the orphan placeholder row
+ * on prune. Leaves non-bare step-level rows untouched so a custom “step / leg place” stays separate.
+ */
+export function syncTripTransitTargetsFromLegs(trip: Trip): Trip {
+  const { destinations } = trip;
+  let changed = false;
+  const steps = trip.steps.map((step) => {
+    if (step.stepType !== "transit") return step;
+    const t = step as TransitStep;
+    const targetRow = destinationFromList(destinations, t.targetDestinationId);
+    if (!targetRow || !destinationPlaceIsBare(targetRow)) return step;
+
+    const sourceId = resolveTransitTargetSourceDestinationId(t);
+    if (!sourceId || sourceId === t.targetDestinationId) return step;
+
+    const sourceRow = destinationFromList(destinations, sourceId);
+    if (!sourceRow || destinationPlaceIsBare(sourceRow)) return step;
+
+    changed = true;
+    return { ...t, targetDestinationId: sourceId };
+  });
+
+  if (!changed) return trip;
+  return pruneUnreferencedDestinations({ ...trip, steps });
+}
+
 /** Run before cloud/local save: destination strings + step time spans from intervals. */
 export function normalizeTripForPersist(trip: Trip): Trip {
-  return syncTripStepTimesFromIntervals(normalizeTripDestinations(trip));
+  const normalized = normalizeTripDestinations(trip);
+  const dedupedTargets = dedupeSharedTransitStepTargets(normalized);
+  const hubsRepaired = repairTransitStepHubDestinationIds(dedupedTargets);
+  const withTransitTargets = syncTripTransitTargetsFromLegs(hubsRepaired);
+  return syncTripStepTimesFromIntervals(withTransitTargets);
 }

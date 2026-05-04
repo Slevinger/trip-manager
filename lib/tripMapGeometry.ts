@@ -1,9 +1,12 @@
-import L from "leaflet";
-import type { Map as LeafletMap } from "leaflet";
-import { coordsFromDestination, type LatLng } from "@/lib/tripDestinationGeo";
+import {
+  coordsFromDestination,
+  haversineDistanceMeters,
+  type LatLng,
+} from "@/lib/tripDestinationGeo";
 import { destinationFromList } from "@/lib/tripDestinationRegistry";
 import type { CurrentStepFocus } from "@/lib/tripViewPhase";
 import type {
+  ActivityStep,
   Destination,
   StayStep,
   StayStepInterval,
@@ -13,6 +16,19 @@ import type {
 } from "@/lib/types/trip";
 
 export type { LatLng } from "@/lib/tripDestinationGeo";
+
+/** Tooltip: endpoint continues from the prior drawn transit leg (no named registry row). */
+export const TRANSIT_EDGE_LABEL_PRIOR_LEG = "__transit_prior_leg__";
+/** Tooltip: endpoint bridges toward the next leg’s start (label unknown). */
+export const TRANSIT_EDGE_LABEL_NEXT_LEG = "__transit_next_leg__";
+
+export function destinationDisplayLine(d: Destination | undefined): string {
+  if (!d) return "—";
+  const title = (d.title ?? "").trim();
+  const loc = (d.location ?? "").trim();
+  if (title && loc && title !== loc) return `${title} · ${loc}`;
+  return title || loc || "—";
+}
 export { coordsFromDestination, destinationHasMapCoordinates } from "@/lib/tripDestinationGeo";
 
 export type StayMapPoint = {
@@ -36,34 +52,218 @@ function coordsFromStayInterval(si: StayStepInterval): LatLng | null {
   return null;
 }
 
-/** One map pin per stay interval (interval coords, else interval registry row, else step default). */
-export function collectStayMapPoints(sortedSteps: TripStep[], destinations: Destination[]): StayMapPoint[] {
-  const out: StayMapPoint[] = [];
+/** Resolved map position for one stay interval (interval coords → registry → step default). */
+export function resolveStayIntervalLatLng(
+  step: StayStep,
+  si: StayStepInterval,
+  destinations: Destination[]
+): LatLng | null {
+  const main = destinationFromList(destinations, step.targetDestinationId);
+  const fallbackPos = coordsFromDestination(main);
+  const intervalDest = destinationFromList(destinations, si.destinationId);
+  return (
+    coordsFromStayInterval(si) ?? coordsFromDestination(intervalDest) ?? fallbackPos ?? null
+  );
+}
+
+export type StayAreaDestinationRow = {
+  title: string;
+  /** Address / place line when present */
+  placeLine?: string;
+};
+
+export type StayAreaCircle = {
+  stepId: string;
+  center: LatLng;
+  /** Geographic radius in meters (max distance from center to any stay-interval pin). */
+  radiusMeters: number;
+  title: string;
+  placeLabel: string;
+  /**
+   * Destinations to show in the map tooltip: stay-linked rows first (area center, step default,
+   * interval-linked), then other trip destinations whose coordinates fall inside the circle.
+   */
+  destinationsInArea: StayAreaDestinationRow[];
+};
+
+const STAY_AREA_DESTINATION_RADIUS_BUFFER_M = 80;
+
+function stayDestinationRowsInCircle(
+  step: StayStep,
+  center: LatLng,
+  radiusMeters: number,
+  areaCenterDestinationId: string,
+  destinations: Destination[]
+): StayAreaDestinationRow[] {
+  const maxD = radiusMeters + STAY_AREA_DESTINATION_RADIUS_BUFFER_M;
+  const tiedIds: string[] = [];
+  const pushTied = (id: string | undefined) => {
+    if (!id) return;
+    if (!tiedIds.includes(id)) tiedIds.push(id);
+  };
+  pushTied(areaCenterDestinationId);
+  pushTied(step.targetDestinationId);
+  for (const int of step.stepIntervals) {
+    if (int.intervalType !== "stay") continue;
+    pushTied((int as StayStepInterval).destinationId);
+  }
+
+  const extraIds: string[] = [];
+  for (const d of destinations) {
+    if (tiedIds.includes(d.id)) continue;
+    const pos = coordsFromDestination(d);
+    if (!pos) continue;
+    if (haversineDistanceMeters(center, pos) <= maxD) extraIds.push(d.id);
+  }
+  extraIds.sort((a, b) => {
+    const ta = (destinationFromList(destinations, a)?.title ?? a).toLocaleLowerCase();
+    const tb = (destinationFromList(destinations, b)?.title ?? b).toLocaleLowerCase();
+    return ta.localeCompare(tb);
+  });
+
+  const rowForId = (id: string): StayAreaDestinationRow => {
+    const d = destinationFromList(destinations, id);
+    const title = ((d?.title ?? "").trim() || id).trim() || "—";
+    const loc = (d?.location ?? "").trim();
+    return loc ? { title, placeLine: loc } : { title };
+  };
+
+  return [...tiedIds, ...extraIds].map(rowForId);
+}
+
+/**
+ * One circle per stay that has {@link StayStep#areaCenterDestinationId} with coordinates and at
+ * least one anchor point. Radius is the greatest haversine distance from the center to: each stay
+ * interval’s resolved pin; registry coordinates for the **last** stay interval’s linked destination
+ * (when set); and for each **Stay → Transit → Stay** chain: the **origin** stay’s radius includes the
+ * transit journey **source** (first leg `from`); the **destination** stay’s radius includes the
+ * transit journey **target** (last leg `to`).
+ */
+export function collectStayAreaCircles(
+  sortedSteps: TripStep[],
+  destinations: Destination[]
+): StayAreaCircle[] {
+  const MIN_VISIBLE_M = 90;
+  const out: StayAreaCircle[] = [];
+  for (let stepIdx = 0; stepIdx < sortedSteps.length; stepIdx++) {
+    const s = sortedSteps[stepIdx]!;
+    if (s.stepType !== "stay") continue;
+    const step = s as StayStep;
+    const cid = step.areaCenterDestinationId;
+    if (!cid) continue;
+    const centerDest = destinationFromList(destinations, cid);
+    const center = coordsFromDestination(centerDest);
+    if (!center) continue;
+
+    const intervalPositions: LatLng[] = [];
+    let lastStayInterval: StayStepInterval | null = null;
+    for (const int of step.stepIntervals) {
+      if (int.intervalType !== "stay") continue;
+      const si = int as StayStepInterval;
+      lastStayInterval = si;
+      const pos = resolveStayIntervalLatLng(step, si, destinations);
+      if (pos) intervalPositions.push(pos);
+    }
+    if (lastStayInterval?.destinationId) {
+      const reg = coordsFromDestination(
+        destinationFromList(destinations, lastStayInterval.destinationId)
+      );
+      if (reg) intervalPositions.push(reg);
+    }
+
+    if (stepIdx + 1 < sortedSteps.length) {
+      const next = sortedSteps[stepIdx + 1]!;
+      if (next.stepType === "transit") {
+        const journeySource = stepEntryAnchor(next, destinations);
+        if (journeySource) intervalPositions.push(journeySource);
+      }
+    }
+    if (stepIdx > 0) {
+      const prev = sortedSteps[stepIdx - 1]!;
+      if (prev.stepType === "transit") {
+        const journeyTarget = stepExitAnchor(prev, destinations);
+        if (journeyTarget) intervalPositions.push(journeyTarget);
+      }
+    }
+
+    if (intervalPositions.length === 0) continue;
+
+    let maxM = 0;
+    for (const p of intervalPositions) {
+      const d = haversineDistanceMeters(center, p);
+      if (d > maxM) maxM = d;
+    }
+    const radiusMeters = maxM > 0 ? maxM : MIN_VISIBLE_M;
+
+    const placeLabel =
+      (centerDest?.location ?? "").trim() ||
+      (centerDest?.title ?? "").trim() ||
+      "—";
+    const title = (step.title || centerDest?.title || "Stay").trim() || "Stay";
+    const destinationsInArea = stayDestinationRowsInCircle(step, center, radiusMeters, cid, destinations);
+    out.push({
+      stepId: step.id,
+      center,
+      radiusMeters,
+      title,
+      placeLabel,
+      destinationsInArea,
+    });
+  }
+  return out;
+}
+
+/** Approximate corners for fitting map bounds to a geographic circle. */
+export function approximateCircleBounds(center: LatLng, radiusMeters: number): LatLng[] {
+  const R = 6371000;
+  const dLat = (radiusMeters / R) * (180 / Math.PI);
+  const cosLat = Math.cos((center.lat * Math.PI) / 180);
+  const dLng =
+    cosLat > 1e-6 ? ((radiusMeters / R) * (180 / Math.PI)) / cosLat : dLat;
+  return [
+    { lat: center.lat + dLat, lng: center.lng + dLng },
+    { lat: center.lat - dLat, lng: center.lng - dLng },
+  ];
+}
+
+/**
+ * Stay intervals grouped by the destination list row used for their map pin: interval
+ * {@link StayStepInterval#destinationId} when set, otherwise the stay step’s
+ * {@link StayStep#targetDestinationId}. Only intervals whose pin destination has saved coordinates
+ * appear (pins are always registry coordinates).
+ */
+export function collectStaysByPinDestination(
+  sortedSteps: TripStep[],
+  destinations: Destination[]
+): Map<string, StayMapPoint[]> {
+  const m = new Map<string, StayMapPoint[]>();
   for (const s of sortedSteps) {
     if (s.stepType !== "stay") continue;
     const step = s as StayStep;
     const main = destinationFromList(destinations, step.targetDestinationId);
-    const fallbackPos = coordsFromDestination(main);
-    if (!fallbackPos && step.stepIntervals.length === 0) continue;
-
     for (const int of step.stepIntervals) {
       if (int.intervalType !== "stay") continue;
       const si = int as StayStepInterval;
-      const intervalDest = destinationFromList(destinations, si.destinationId);
-      const pos =
-        coordsFromStayInterval(si) ??
-        coordsFromDestination(intervalDest) ??
-        fallbackPos;
+      const pinDestId = si.destinationId ?? step.targetDestinationId;
+      const pinDest = destinationFromList(destinations, pinDestId);
+      const pos = coordsFromDestination(pinDest);
       if (!pos) continue;
+
+      const intervalDest = destinationFromList(destinations, si.destinationId);
       const placeLabel =
         (si.location ?? "").trim() ||
         (intervalDest?.location ?? "").trim() ||
         (main?.location ?? "").trim() ||
         (main?.title ?? "").trim() ||
         "—";
+      const intervalTitle = (si.title ?? "").trim();
+      const registryTitle = (intervalDest?.title ?? "").trim();
       const title =
-        (si.title || step.title || main?.title || "Stay").trim() || "Stay";
-      out.push({
+        (si.destinationId && registryTitle
+          ? registryTitle
+          : intervalTitle || (step.title ?? "").trim() || (main?.title ?? "").trim() || "Stay") || "Stay";
+
+      const row: StayMapPoint = {
         stepId: step.id,
         intervalId: si.id,
         title,
@@ -71,16 +271,17 @@ export function collectStayMapPoints(sortedSteps: TripStep[], destinations: Dest
         startTime: si.startTime,
         endTime: si.endTime,
         placeLabel,
-      });
+      };
+      const arr = m.get(pinDestId) ?? [];
+      arr.push(row);
+      m.set(pinDestId, arr);
     }
   }
-  return out;
+  for (const arr of m.values()) {
+    arr.sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+  return m;
 }
-
-export type StayCluster = {
-  centroid: LatLng;
-  stays: StayMapPoint[];
-};
 
 /** One entry per {@link Trip#destinations} row that has {@link Destination#coordinates} (view map pins). */
 export type DestinationListPin = {
@@ -106,79 +307,16 @@ export function collectDestinationListPins(destinations: Destination[]): Destina
   return out;
 }
 
-/**
- * Group stays that overlap on screen within `clusterPx` (layer pixels). Lower map zoom uses a
- * larger effective radius so nearby stays merge when zoomed out; zoom in to split clusters.
- */
-export function clusterStayPointsScreen(
-  map: LeafletMap,
-  stays: StayMapPoint[],
-  clusterPx: number
-): StayCluster[] {
-  if (stays.length === 0) return [];
-  const n = stays.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  function find(i: number): number {
-    if (parent[i] !== i) parent[i] = find(parent[i]);
-    return parent[i];
-  }
-  function union(i: number, j: number) {
-    const ri = find(i);
-    const rj = find(j);
-    if (ri !== rj) parent[ri] = rj;
-  }
-
-  const pts = stays.map((s) =>
-    map.latLngToLayerPoint(L.latLng(s.position.lat, s.position.lng))
-  );
-
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (pts[i].distanceTo(pts[j]) <= clusterPx) union(i, j);
-    }
-  }
-
-  const byRoot = new Map<number, number[]>();
-  for (let i = 0; i < n; i++) {
-    const r = find(i);
-    const arr = byRoot.get(r) ?? [];
-    arr.push(i);
-    byRoot.set(r, arr);
-  }
-
-  const clusters: StayCluster[] = [];
-  for (const indices of byRoot.values()) {
-    const groupStays = indices.map((i) => stays[i]);
-    groupStays.sort((a, b) => a.startTime.localeCompare(b.startTime));
-    let sumLat = 0;
-    let sumLng = 0;
-    for (const st of groupStays) {
-      sumLat += st.position.lat;
-      sumLng += st.position.lng;
-    }
-    clusters.push({
-      centroid: {
-        lat: sumLat / groupStays.length,
-        lng: sumLng / groupStays.length,
-      },
-      stays: groupStays,
-    });
-  }
-  clusters.sort((a, b) => a.stays[0].startTime.localeCompare(b.stays[0].startTime));
-  return clusters;
-}
-
-/** Layer-pixel merge distance from zoom (smaller zoom level ⇒ larger px ⇒ more grouping). */
-export function stayClusterPixelRadius(zoom: number): number {
-  return Math.min(52, Math.max(14, 62 - zoom * 2.75));
-}
-
 export type TransitMapEdge = {
   stepId: string;
   intervalId: string;
   title: string;
   from: LatLng;
   to: LatLng;
+  startTime: string;
+  endTime: string;
+  fromPlaceLabel: string;
+  toPlaceLabel: string;
   /** Drawn from previous/next step pins when this transit has no leg coordinates. */
   inferred?: boolean;
 };
@@ -219,15 +357,46 @@ export function transitIntervalsToMapEdges(
     const legFrom = destinationFromList(destinations, interval.fromDestinationId);
     const legTo = destinationFromList(destinations, interval.toDestinationId);
 
-    const from: LatLng | null =
-      coordsFromDestination(legFrom) ??
-      (firstTransitLeg ? coordsFromDestination(fromStay) : null) ??
-      prevTo;
-    const to: LatLng | null =
-      coordsFromDestination(legTo) ??
-      (!isLastTransit ? nextLegStart : null) ??
-      (isLastTransit ? coordsFromDestination(toStay) : null) ??
-      (firstTransitLeg ? coordsFromDestination(toStay) : null);
+    const legFromCoords = coordsFromDestination(legFrom);
+    const fromStayCoords = coordsFromDestination(fromStay);
+    let from: LatLng | null = null;
+    let fromPlaceLabel = "—";
+    if (legFromCoords) {
+      from = legFromCoords;
+      fromPlaceLabel = destinationDisplayLine(legFrom);
+    } else if (firstTransitLeg && fromStayCoords) {
+      from = fromStayCoords;
+      fromPlaceLabel = destinationDisplayLine(fromStay);
+    } else if (prevTo != null) {
+      from = prevTo;
+      fromPlaceLabel = TRANSIT_EDGE_LABEL_PRIOR_LEG;
+    }
+
+    const legToCoords = coordsFromDestination(legTo);
+    const toStayCoords = coordsFromDestination(toStay);
+    let to: LatLng | null = null;
+    let toPlaceLabel = "—";
+    if (legToCoords) {
+      to = legToCoords;
+      toPlaceLabel = destinationDisplayLine(legTo);
+    } else if (!isLastTransit && nextLegStart) {
+      to = nextLegStart;
+      const nextInt = step.stepIntervals[idx + 1];
+      if (nextInt?.intervalType === "transit") {
+        const nd = destinationFromList(
+          destinations,
+          (nextInt as TransitStepInterval).fromDestinationId
+        );
+        toPlaceLabel = destinationDisplayLine(nd);
+        if (toPlaceLabel === "—") toPlaceLabel = TRANSIT_EDGE_LABEL_NEXT_LEG;
+      }
+    } else if (isLastTransit && toStayCoords) {
+      to = toStayCoords;
+      toPlaceLabel = destinationDisplayLine(toStay);
+    } else if (firstTransitLeg && toStayCoords) {
+      to = toStayCoords;
+      toPlaceLabel = destinationDisplayLine(toStay);
+    }
 
     if (from && to) {
       const legTitle = (interval.title || step.title || "Transit").trim() || "Transit";
@@ -237,6 +406,10 @@ export function transitIntervalsToMapEdges(
         title: legTitle,
         from,
         to,
+        startTime: interval.startTime,
+        endTime: interval.endTime,
+        fromPlaceLabel,
+        toPlaceLabel,
       });
       prevTo = to;
     } else {
@@ -247,6 +420,52 @@ export function transitIntervalsToMapEdges(
   }
 
   return out;
+}
+
+function stepMapExitPlaceLabel(step: TripStep | undefined, destinations: Destination[]): string {
+  if (!step) return "—";
+  if (step.stepType === "stay") {
+    return destinationDisplayLine(
+      destinationFromList(destinations, (step as StayStep).targetDestinationId)
+    );
+  }
+  if (step.stepType === "activity") {
+    const a = step as ActivityStep;
+    return destinationDisplayLine(
+      destinationFromList(destinations, a.destinationId) ??
+        destinationFromList(destinations, a.targetDestinationId)
+    );
+  }
+  if (step.stepType === "transit") {
+    const tr = step as TransitStep;
+    const edges = transitIntervalsToMapEdges(tr, destinations);
+    if (edges.length > 0) return edges[edges.length - 1]!.toPlaceLabel;
+    return destinationDisplayLine(destinationFromList(destinations, tr.toStayId));
+  }
+  return "—";
+}
+
+function stepMapEntryPlaceLabel(step: TripStep | undefined, destinations: Destination[]): string {
+  if (!step) return "—";
+  if (step.stepType === "stay") {
+    return destinationDisplayLine(
+      destinationFromList(destinations, (step as StayStep).targetDestinationId)
+    );
+  }
+  if (step.stepType === "activity") {
+    const a = step as ActivityStep;
+    return destinationDisplayLine(
+      destinationFromList(destinations, a.destinationId) ??
+        destinationFromList(destinations, a.targetDestinationId)
+    );
+  }
+  if (step.stepType === "transit") {
+    const tr = step as TransitStep;
+    const edges = transitIntervalsToMapEdges(tr, destinations);
+    if (edges.length > 0) return edges[0]!.fromPlaceLabel;
+    return destinationDisplayLine(destinationFromList(destinations, tr.fromStayId));
+  }
+  return "—";
 }
 
 /** Geographic “exit” after this step (for chaining lines across transit). */
@@ -325,12 +544,17 @@ export function collectTransitMapEdges(
     const from = walkExitAnchor(sortedSteps, i - 1, destinations);
     const to = walkEntryAnchor(sortedSteps, i + 1, destinations);
     if (!from || !to || sameLatLng(from, to)) continue;
+    const tr = s as TransitStep;
     out.push({
-      stepId: s.id,
-      intervalId: `inferred-${s.id}`,
-      title: (s.title || "Transit").trim() || "Transit",
+      stepId: tr.id,
+      intervalId: `inferred-${tr.id}`,
+      title: (tr.title || "Transit").trim() || "Transit",
       from,
       to,
+      startTime: tr.startTime,
+      endTime: tr.endTime ?? tr.startTime,
+      fromPlaceLabel: stepMapExitPlaceLabel(sortedSteps[i - 1], destinations),
+      toPlaceLabel: stepMapEntryPlaceLabel(sortedSteps[i + 1], destinations),
       inferred: true,
     });
   }
@@ -365,8 +589,16 @@ export function focusStepLatLng(
 ): LatLng | null {
   if (focus.kind === "none") return null;
   const s = focus.step;
-  if (s.stepType === "stay")
-    return coordsFromDestination(destinationFromList(destinations, s.targetDestinationId));
+  if (s.stepType === "stay") {
+    const st = s as StayStep;
+    const area = st.areaCenterDestinationId
+      ? coordsFromDestination(destinationFromList(destinations, st.areaCenterDestinationId))
+      : null;
+    return (
+      area ??
+      coordsFromDestination(destinationFromList(destinations, st.targetDestinationId))
+    );
+  }
   if (s.stepType === "activity") {
     return (
       coordsFromDestination(destinationFromList(destinations, s.destinationId)) ??

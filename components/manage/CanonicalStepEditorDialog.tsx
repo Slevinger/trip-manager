@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DestinationPlaceSearchInput } from "@/components/manage/DestinationPlaceSearchInput";
+import { DestinationsInput } from "@/components/manage/DestinationsInput";
 import { ActivityStepIntervalWizardPanel } from "@/components/manage/stepWizards/ActivityStepIntervalWizardPanel";
 import { StayStepIntervalWizardPanel } from "@/components/manage/stepWizards/StayStepIntervalWizardPanel";
 import { StayStepWizardPanel } from "@/components/manage/stepWizards/StayStepWizardPanel";
@@ -21,13 +21,16 @@ import {
   destinationFromTypedLocation,
   syncStepTimesFromIntervals,
 } from "@/lib/canonicalStepBuilders";
+import { newId } from "@/lib/canonicalIds";
 import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import { stepIntervalEmoji } from "@/lib/stepIntervalUi";
-import { collectTripPlacePicks } from "@/lib/tripLocationCatalog";
+import { collectStayGroupedTripPlacePicks } from "@/lib/tripLocationCatalog";
 import {
   collectReferencedDestinationIdsFromStep,
+  destinationFromList,
   mergeDestinationLists,
 } from "@/lib/tripDestinationRegistry";
+import { useI18n } from "@/lib/i18n/context";
 import { STEP_WIZARD_IDS, type WizardFrame } from "@/lib/wizardStack/types";
 import { useWizardStack } from "@/lib/wizardStack/useWizardStack";
 import type {
@@ -148,6 +151,8 @@ export function CanonicalStepEditorDialog({
   const wizard = useWizardStack(computeInitialWizardStack(isNew, typeWizardFirst));
   const [draft, setDraft] = useState<TripStep>(initial);
   const [destEdits, setDestEdits] = useState<Record<string, Destination>>({});
+  /** Typed text for optional stay area center before a row exists — avoids allocating a destination id on every keystroke. */
+  const [areaCenterDraftLocation, setAreaCenterDraftLocation] = useState("");
   const [flatEditingIntervalIndex, setFlatEditingIntervalIndex] = useState(0);
   const [intervalDeleteConfirmId, setIntervalDeleteConfirmId] = useState<string | null>(null);
   const prevOpen = useRef(false);
@@ -161,10 +166,11 @@ export function CanonicalStepEditorDialog({
     if (isNew && !base.some((s) => s.id === draft.id)) return [...base, draft];
     return base;
   }, [tripSteps, trip.steps, isNew, draft]);
-  const tripPlacePicks = useMemo(
-    () => collectTripPlacePicks(stepsForPicks, mergedDestinations),
+  const tripPlaceGrouped = useMemo(
+    () => collectStayGroupedTripPlacePicks(stepsForPicks, mergedDestinations),
     [stepsForPicks, mergedDestinations]
   );
+  const { t } = useI18n();
 
   useEffect(() => {
     const wasOpen = prevOpen.current;
@@ -181,6 +187,7 @@ export function CanonicalStepEditorDialog({
         nextEdits[id] = row ? { ...row } : { id, title: "", location: "", description: "" };
       }
       setDestEdits(nextEdits);
+      setAreaCenterDraftLocation("");
     }
   }, [open, initial, isNew, typeWizardFirst, wizard.reset, trip.destinations, initialDestinationSeeds]);
 
@@ -246,12 +253,31 @@ export function CanonicalStepEditorDialog({
     for (const d of rows) setRow(d.id, { ...d });
   }
 
+  function allocateStayAreaCenterId(): string {
+    const s = draft as StayStep;
+    if (s.areaCenterDestinationId) return s.areaCenterDestinationId;
+    const nid = newId();
+    appendDestinations([{ id: nid, title: "", location: "", description: "" }]);
+    setDraft({ ...s, areaCenterDestinationId: nid });
+    return nid;
+  }
+
+  function clearStayAreaCenter(): void {
+    const s = draft as StayStep;
+    setAreaCenterDraftLocation("");
+    setDraft({ ...s, areaCenterDestinationId: undefined });
+  }
+
   function commitSave() {
     const synced = syncStepTimesFromIntervals(draft);
     const ids = Array.from(collectReferencedDestinationIdsFromStep(synced));
     const upserts = ids
-      .map((id) => destEdits[id])
-      .filter((d): d is Destination => Boolean(d && d.id));
+      .map((id) => {
+        const edited = destEdits[id];
+        if (edited?.id) return edited;
+        return destinationFromList(mergedDestinations, id);
+      })
+      .filter((d): d is Destination => Boolean(d?.id));
     onSave({ step: synced, destinationUpserts: upserts });
     onClose();
   }
@@ -400,10 +426,10 @@ export function CanonicalStepEditorDialog({
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               Search address (autocomplete)
-              <DestinationPlaceSearchInput
+              <DestinationsInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 placeholder="Type at least 2 characters…"
-                localPicks={tripPlacePicks}
+                tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={(d) => appendDestinations([d])}
                 value={rowFor((draft as StayStep).targetDestinationId).location}
                 onChange={(location) => {
@@ -436,6 +462,53 @@ export function CanonicalStepEditorDialog({
                 }}
               />
             </label>
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                {t("manage.stayAreaCenterLabel")}
+                <DestinationsInput
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                  placeholder={t("manage.optional")}
+                  tripPlaceGrouped={tripPlaceGrouped}
+                  onRegisterNewDestination={(d) => appendDestinations([d])}
+                  value={
+                    (draft as StayStep).areaCenterDestinationId
+                      ? rowFor((draft as StayStep).areaCenterDestinationId!).location
+                      : areaCenterDraftLocation
+                  }
+                  onChange={(location) => {
+                    const s = draft as StayStep;
+                    if (s.areaCenterDestinationId) {
+                      const id = s.areaCenterDestinationId;
+                      setRow(id, destinationFromTypedLocation(rowFor(id), location));
+                    } else {
+                      setAreaCenterDraftLocation(location);
+                    }
+                  }}
+                  onPick={(pick) => {
+                    const d = draft as StayStep;
+                    const id = allocateStayAreaCenterId();
+                    const merged = destinationFromPlacePick(pick, { id });
+                    const cur = rowFor(id);
+                    const titleGuess = cur.title.trim() ? cur.title : merged.title;
+                    setRow(merged.id, { ...merged, title: titleGuess });
+                    setAreaCenterDraftLocation("");
+                    setDraft({ ...d, areaCenterDestinationId: merged.id });
+                  }}
+                />
+              </label>
+              <p className="mt-2 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+                {t("manage.stayAreaCenterHint")}
+              </p>
+              {(draft as StayStep).areaCenterDestinationId ? (
+                <button
+                  type="button"
+                  onClick={clearStayAreaCenter}
+                  className="mt-2 text-xs font-medium text-zinc-600 underline decoration-zinc-400 underline-offset-2 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  {t("manage.stayAreaCenterClear")}
+                </button>
+              ) : null}
+            </div>
           </>
         ) : null}
 
@@ -470,10 +543,10 @@ export function CanonicalStepEditorDialog({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 From (search address)
-                <DestinationPlaceSearchInput
+                <DestinationsInput
                   className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                   placeholder="From…"
-                  localPicks={tripPlacePicks}
+                  tripPlaceGrouped={tripPlaceGrouped}
                   onRegisterNewDestination={(d) => appendDestinations([d])}
                   value={rowFor((draft as TransitStep).fromStayId).location}
                   onChange={(location) => {
@@ -507,10 +580,10 @@ export function CanonicalStepEditorDialog({
               </label>
               <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 To (search address)
-                <DestinationPlaceSearchInput
+                <DestinationsInput
                   className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                   placeholder="To…"
-                  localPicks={tripPlacePicks}
+                  tripPlaceGrouped={tripPlaceGrouped}
                   onRegisterNewDestination={(d) => appendDestinations([d])}
                   value={rowFor((draft as TransitStep).toStayId).location}
                   onChange={(location) => {
@@ -543,6 +616,52 @@ export function CanonicalStepEditorDialog({
                 />
               </label>
             </div>
+            <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+              {t("manage.transitStepPlaceHint")}
+            </p>
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.transitStepPlaceName")}
+              <input
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={rowFor((draft as TransitStep).targetDestinationId).title}
+                onChange={(e) => {
+                  const d = draft as TransitStep;
+                  setRow(d.targetDestinationId, {
+                    ...rowFor(d.targetDestinationId),
+                    title: e.target.value,
+                  });
+                }}
+              />
+            </label>
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.transitStepPlaceAddress")}
+              <DestinationsInput
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                placeholder={t("manage.optional")}
+                tripPlaceGrouped={tripPlaceGrouped}
+                onRegisterNewDestination={(d) => appendDestinations([d])}
+                value={rowFor((draft as TransitStep).targetDestinationId).location}
+                onChange={(location) => {
+                  const d = draft as TransitStep;
+                  setRow(
+                    d.targetDestinationId,
+                    destinationFromTypedLocation(rowFor(d.targetDestinationId), location)
+                  );
+                }}
+                onPick={(pick) => {
+                  const d = draft as TransitStep;
+                  const merged = destinationFromPlacePick(pick, { id: d.targetDestinationId });
+                  const cur = rowFor(d.targetDestinationId);
+                  const titleGuess = cur.title.trim() ? cur.title : merged.title;
+                  const td = { ...merged, title: titleGuess };
+                  setRow(merged.id, td);
+                  setDraft({
+                    ...d,
+                    ...(merged.id !== d.targetDestinationId ? { targetDestinationId: merged.id } : {}),
+                  });
+                }}
+              />
+            </label>
           </>
         ) : null}
 
@@ -564,10 +683,10 @@ export function CanonicalStepEditorDialog({
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               Search address
-              <DestinationPlaceSearchInput
+              <DestinationsInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 placeholder="Where is this activity?"
-                localPicks={tripPlacePicks}
+                tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={(d) => appendDestinations([d])}
                 value={rowFor((draft as ActivityStep).destinationId).location}
                 onChange={(location) => {
@@ -799,10 +918,10 @@ export function CanonicalStepEditorDialog({
         {draft.stepType === "stay" && active.intervalType === "stay" ? (
           <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
             Location (this interval)
-            <DestinationPlaceSearchInput
+            <DestinationsInput
               className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
               placeholder="Type at least 2 characters…"
-              localPicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               onRegisterNewDestination={(d) => appendDestinations([d])}
               value={stayIntervalAddressLine}
               onChange={(location) =>
@@ -881,10 +1000,10 @@ export function CanonicalStepEditorDialog({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                     Leg from (address)
-                    <DestinationPlaceSearchInput
+                    <DestinationsInput
                       className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                       placeholder="Pick trip place or search…"
-                      localPicks={tripPlacePicks}
+                      tripPlaceGrouped={tripPlaceGrouped}
                       onRegisterNewDestination={(d) => appendDestinations([d])}
                       value={rowFor(legFromId).location}
                       onChange={(location) => {
@@ -907,10 +1026,10 @@ export function CanonicalStepEditorDialog({
                   </label>
                   <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                     Leg to (address)
-                    <DestinationPlaceSearchInput
+                    <DestinationsInput
                       className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                       placeholder="Pick trip place or search…"
-                      localPicks={tripPlacePicks}
+                      tripPlaceGrouped={tripPlaceGrouped}
                       onRegisterNewDestination={(d) => appendDestinations([d])}
                       value={rowFor(legToId).location}
                       onChange={(location) => {
@@ -1070,7 +1189,7 @@ export function CanonicalStepEditorDialog({
               draft={draft as StayStep}
               setDraft={setDraft as (next: StayStep | ((prev: StayStep) => StayStep)) => void}
               wizard={wizard}
-              tripPlacePicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               mainPlace={rowFor((draft as StayStep).targetDestinationId)}
               setMainPlace={(d) => {
                 setRow(d.id, d);
@@ -1079,6 +1198,14 @@ export function CanonicalStepEditorDialog({
                   setDraft({ ...s, targetDestinationId: d.id });
                 }
               }}
+              areaCenterPlace={
+                (draft as StayStep).areaCenterDestinationId
+                  ? rowFor((draft as StayStep).areaCenterDestinationId)
+                  : undefined
+              }
+              setAreaCenterPlace={(d) => setRow(d.id, d)}
+              allocateAreaCenterDestinationId={allocateStayAreaCenterId}
+              onClearAreaCenter={clearStayAreaCenter}
               onRegisterNewDestination={(d) => appendDestinations([d])}
             />
           ) : null}
@@ -1094,7 +1221,7 @@ export function CanonicalStepEditorDialog({
               wizard={wizard}
               tripStartIso={tripStartIso}
               tripCurrency={tripCurrency}
-              tripPlacePicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               trip={overlayTrip()}
               onAppendDestinations={appendDestinations}
             />
@@ -1105,9 +1232,10 @@ export function CanonicalStepEditorDialog({
               draft={draft as TransitStep}
               setDraft={setDraft as (next: TransitStep | ((prev: TransitStep) => TransitStep)) => void}
               wizard={wizard}
-              tripPlacePicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               fromPlace={rowFor((draft as TransitStep).fromStayId)}
               toPlace={rowFor((draft as TransitStep).toStayId)}
+              legPlace={rowFor((draft as TransitStep).targetDestinationId)}
               setFromPlace={(d) => {
                 setRow(d.id, d);
                 const t = draft as TransitStep;
@@ -1120,6 +1248,13 @@ export function CanonicalStepEditorDialog({
                 const t = draft as TransitStep;
                 if (d.id !== t.toStayId) {
                   setDraft({ ...t, toStayId: d.id });
+                }
+              }}
+              setLegPlace={(d) => {
+                setRow(d.id, d);
+                const t = draft as TransitStep;
+                if (d.id !== t.targetDestinationId) {
+                  setDraft({ ...t, targetDestinationId: d.id });
                 }
               }}
               onRegisterNewDestination={(d) => appendDestinations([d])}
@@ -1137,7 +1272,7 @@ export function CanonicalStepEditorDialog({
               wizard={wizard}
               tripStartIso={tripStartIso}
               trip={overlayTrip()}
-              tripPlacePicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               getRow={rowFor}
               setRow={setRow}
               onAppendDestinations={appendDestinations}

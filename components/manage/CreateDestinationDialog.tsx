@@ -53,6 +53,11 @@ type CreateDestinationDialogProps = {
   onOpenChange: (open: boolean) => void;
   /** Seed address / search text from the field (create flow only). */
   initialQuery?: string;
+  /**
+   * When opening “new destination” from an external search row, pre-fills title/address/map pin
+   * without re-querying (see `DestinationsInput`).
+   */
+  initialSearchHit?: PlaceSearchPickPayload | null;
   /** When set, edit this registry row (same id on save, map pre-filled when coords exist). */
   existingDestination?: Destination | null;
   onSave: (destination: Destination) => void | Promise<void>;
@@ -62,6 +67,7 @@ export function CreateDestinationDialog({
   open,
   onOpenChange,
   initialQuery = "",
+  initialSearchHit = null,
   existingDestination = null,
   onSave,
 }: CreateDestinationDialogProps) {
@@ -149,10 +155,39 @@ export function CreateDestinationDialog({
         setMapZoom(2);
         void geocodeSeedWithoutClearingFields(seed);
       }
+    } else if (initialSearchHit?.label?.trim()) {
+      const h = initialSearchHit;
+      const loc = h.label.trim();
+      setLocation(loc);
+      setTitle((h.title?.trim() || loc.split(",")[0]?.trim() || "").trim());
+      setDescription((h.description?.trim() || loc).trim());
+      if (
+        h.lat != null &&
+        h.lng != null &&
+        Number.isFinite(h.lat) &&
+        Number.isFinite(h.lng)
+      ) {
+        const pos: [number, number] = [h.lat, h.lng];
+        setPin(pos);
+        setMapCenter(pos);
+        setMapZoom(14);
+      } else {
+        setPin(null);
+        setMapCenter(DEFAULT_CENTER);
+        setMapZoom(2);
+        if (loc.length >= 2) void geocodeSeedWithoutClearingFields(loc);
+      }
     } else {
       void bootstrapNewDestination(initialQuery);
     }
-  }, [open, initialQuery, existingDestination, bootstrapNewDestination, geocodeSeedWithoutClearingFields]);
+  }, [
+    open,
+    initialQuery,
+    initialSearchHit,
+    existingDestination,
+    bootstrapNewDestination,
+    geocodeSeedWithoutClearingFields,
+  ]);
 
   function onAddressPick(p: PlaceSearchPickPayload) {
     setLocation(p.label);

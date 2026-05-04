@@ -1,10 +1,11 @@
 "use client";
 
-import { DestinationPlaceSearchInput } from "@/components/manage/DestinationPlaceSearchInput";
+import { DestinationsInput } from "@/components/manage/DestinationsInput";
+import { useI18n } from "@/lib/i18n/context";
 import { destinationFromPlacePick, destinationFromTypedLocation } from "@/lib/canonicalStepBuilders";
 import { STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
-import type { TripPlacePick } from "@/lib/tripLocationCatalog";
+import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
 import type { Destination, TransitStep } from "@/lib/types/trip";
 import { appendGeoPickComment, notesToText, textToNotes } from "@/components/manage/stepWizards/wizardShared";
 
@@ -14,23 +15,29 @@ export function TransitStepWizardPanel({
   draft,
   setDraft,
   wizard,
-  tripPlacePicks,
+  tripPlaceGrouped,
   fromPlace,
   toPlace,
+  legPlace,
   setFromPlace,
   setToPlace,
+  setLegPlace,
   onRegisterNewDestination,
 }: {
   draft: TransitStep;
   setDraft: (next: TransitStep | ((prev: TransitStep) => TransitStep)) => void;
   wizard: WizardStackControls;
-  tripPlacePicks?: TripPlacePick[];
+  tripPlaceGrouped: TripGroupedPlacePicks;
   fromPlace: Destination;
   toPlace: Destination;
+  /** Step-level / leg registry row (`TransitStep.targetDestinationId`). */
+  legPlace: Destination;
   setFromPlace: (d: Destination) => void;
   setToPlace: (d: Destination) => void;
+  setLegPlace: (d: Destination) => void;
   onRegisterNewDestination: (d: Destination) => void;
 }) {
+  const { t } = useI18n();
   const page = Math.min(
     Math.max(0, wizard.top?.step ?? 0),
     TRANSIT_STEP_WIZARD_PAGE_COUNT - 1
@@ -80,10 +87,10 @@ export function TransitStepWizardPanel({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               From (search address)
-              <DestinationPlaceSearchInput
+              <DestinationsInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 placeholder="From…"
-                localPicks={tripPlacePicks}
+                tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={onRegisterNewDestination}
                 value={fromPlace.location}
                 onChange={(location) => {
@@ -113,10 +120,10 @@ export function TransitStepWizardPanel({
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               To (search address)
-              <DestinationPlaceSearchInput
+              <DestinationsInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 placeholder="To…"
-                localPicks={tripPlacePicks}
+                tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={onRegisterNewDestination}
                 value={toPlace.location}
                 onChange={(location) => {
@@ -145,6 +152,40 @@ export function TransitStepWizardPanel({
               />
             </label>
           </div>
+          <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+            {t("manage.transitStepPlaceHint")}
+          </p>
+          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+            {t("manage.transitStepPlaceName")}
+            <input
+              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+              value={legPlace.title}
+              onChange={(e) => setLegPlace({ ...legPlace, title: e.target.value })}
+            />
+          </label>
+          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+            {t("manage.transitStepPlaceAddress")}
+            <DestinationsInput
+              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+              placeholder={t("manage.optional")}
+              tripPlaceGrouped={tripPlaceGrouped}
+              onRegisterNewDestination={onRegisterNewDestination}
+              value={legPlace.location}
+              onChange={(location) => {
+                setLegPlace(destinationFromTypedLocation(legPlace, location));
+              }}
+              onPick={(pick) => {
+                const merged = destinationFromPlacePick(pick, { id: legPlace.id });
+                const nameGuess = legPlace.title.trim() ? legPlace.title : merged.title;
+                const td = { ...merged, title: nameGuess };
+                setLegPlace(td);
+                setDraft({
+                  ...draft,
+                  ...(merged.id !== draft.targetDestinationId ? { targetDestinationId: merged.id } : {}),
+                });
+              }}
+            />
+          </label>
         </>
       ) : (
         <>

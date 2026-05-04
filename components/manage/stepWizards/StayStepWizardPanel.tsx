@@ -1,12 +1,14 @@
 "use client";
 
-import { DestinationPlaceSearchInput } from "@/components/manage/DestinationPlaceSearchInput";
+import { useEffect, useState } from "react";
+import { DestinationsInput } from "@/components/manage/DestinationsInput";
+import { appendGeoPickComment, notesToText, textToNotes } from "@/components/manage/stepWizards/wizardShared";
+import { useI18n } from "@/lib/i18n/context";
+import { destinationFromPlacePick, destinationFromTypedLocation } from "@/lib/canonicalStepBuilders";
+import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
 import { STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
-import type { TripPlacePick } from "@/lib/tripLocationCatalog";
-import { destinationFromPlacePick, destinationFromTypedLocation } from "@/lib/canonicalStepBuilders";
 import type { Destination, StayStep } from "@/lib/types/trip";
-import { appendGeoPickComment, notesToText, textToNotes } from "@/components/manage/stepWizards/wizardShared";
 
 const STAY_STEP_WIZARD_PAGE_COUNT = 2;
 
@@ -14,19 +16,34 @@ export function StayStepWizardPanel({
   draft,
   setDraft,
   wizard,
-  tripPlacePicks,
+  tripPlaceGrouped,
   mainPlace,
   setMainPlace,
+  areaCenterPlace,
+  setAreaCenterPlace,
+  allocateAreaCenterDestinationId,
+  onClearAreaCenter,
   onRegisterNewDestination,
 }: {
   draft: StayStep;
   setDraft: (next: StayStep | ((prev: StayStep) => StayStep)) => void;
   wizard: WizardStackControls;
-  tripPlacePicks?: TripPlacePick[];
+  tripPlaceGrouped: TripGroupedPlacePicks;
   mainPlace: Destination;
   setMainPlace: (next: Destination) => void;
+  /** Registry row for optional `areaCenterDestinationId`; omitted until the user edits area center. */
+  areaCenterPlace: Destination | undefined;
+  setAreaCenterPlace: (next: Destination) => void;
+  allocateAreaCenterDestinationId: () => string;
+  onClearAreaCenter: () => void;
   onRegisterNewDestination: (d: Destination) => void;
 }) {
+  const { t } = useI18n();
+  /** Area center field before `draft.areaCenterDestinationId` exists — no registry row until pick / create. */
+  const [areaCenterDraftLocation, setAreaCenterDraftLocation] = useState("");
+  useEffect(() => {
+    if (!draft.areaCenterDestinationId) setAreaCenterDraftLocation("");
+  }, [draft.areaCenterDestinationId]);
   const page = Math.min(
     Math.max(0, wizard.top?.step ?? 0),
     STAY_STEP_WIZARD_PAGE_COUNT - 1
@@ -72,10 +89,10 @@ export function StayStepWizardPanel({
           </label>
           <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
             Search address (autocomplete)
-            <DestinationPlaceSearchInput
+            <DestinationsInput
               className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
               placeholder="Type at least 2 characters…"
-              localPicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               onRegisterNewDestination={onRegisterNewDestination}
               value={mainPlace.location}
               onChange={(location) => {
@@ -106,6 +123,59 @@ export function StayStepWizardPanel({
               }}
             />
           </label>
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.stayAreaCenterLabel")}
+              <DestinationsInput
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                placeholder={t("manage.optional")}
+                tripPlaceGrouped={tripPlaceGrouped}
+                onRegisterNewDestination={onRegisterNewDestination}
+                value={
+                  draft.areaCenterDestinationId
+                    ? (areaCenterPlace?.location ?? "").trim()
+                    : areaCenterDraftLocation
+                }
+                onChange={(location) => {
+                  if (draft.areaCenterDestinationId && areaCenterPlace) {
+                    setAreaCenterPlace(destinationFromTypedLocation(areaCenterPlace, location));
+                  } else {
+                    setAreaCenterDraftLocation(location);
+                  }
+                }}
+                onPick={(pick) => {
+                  const id = allocateAreaCenterDestinationId();
+                  const merged = destinationFromPlacePick(pick, { id });
+                  const prevTitle =
+                    (areaCenterPlace?.title ?? "").trim() ||
+                    areaCenterDraftLocation.trim().split(",")[0]?.trim() ||
+                    merged.title;
+                  setAreaCenterPlace({ ...merged, title: prevTitle });
+                  setAreaCenterDraftLocation("");
+                  if (merged.id !== id) {
+                    setDraft((prev) => {
+                      const st = prev as StayStep;
+                      return st.areaCenterDestinationId === merged.id
+                        ? prev
+                        : { ...st, areaCenterDestinationId: merged.id };
+                    });
+                  }
+                }}
+              />
+            </label>
+            <p className="mt-2 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+              {t("manage.stayAreaCenterHint")}
+            </p>
+            {draft.areaCenterDestinationId ? (
+              <button
+                type="button"
+                onClick={onClearAreaCenter}
+                className="mt-2 text-xs font-medium text-zinc-600 underline decoration-zinc-400 underline-offset-2 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+              >
+                {t("manage.stayAreaCenterClear")}
+              </button>
+            ) : null}
+          </div>
         </>
       ) : (
         <>

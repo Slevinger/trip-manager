@@ -2,8 +2,9 @@
 
 import L from "leaflet";
 import type { Map as LeafletMap } from "leaflet";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  Circle,
   CircleMarker,
   MapContainer,
   Marker,
@@ -17,19 +18,21 @@ import { useI18n } from "@/lib/i18n/context";
 import type { CurrentStepFocus } from "@/lib/tripViewPhase";
 import {
   bearingDegreesNorth,
-  clusterStayPointsScreen,
   collectDestinationListPins,
-  collectStayMapPoints,
+  collectStayAreaCircles,
+  collectStaysByPinDestination,
   collectTransitMapEdges,
   focusStepLatLng,
   interpolateLatLng,
-  stayClusterPixelRadius,
+  TRANSIT_EDGE_LABEL_NEXT_LEG,
+  TRANSIT_EDGE_LABEL_PRIOR_LEG,
   type DestinationListPin,
   type LatLng,
-  type StayCluster,
+  type StayAreaCircle,
   type StayMapPoint,
   type TransitMapEdge,
 } from "@/lib/tripMapGeometry";
+import { intlLocaleForApp, type MessageKey } from "@/lib/i18n/messages";
 import type { Destination, TripStep } from "@/lib/types/trip";
 
 import "leaflet/dist/leaflet.css";
@@ -51,6 +54,15 @@ function useTouchPrimary(): boolean {
 
 const MAP_OVERLAY_PANEL_INNER =
   "rounded-lg border border-zinc-200 bg-white p-2 text-left text-zinc-600 shadow-md dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300";
+
+const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY?.trim() ?? "";
+const HAS_MAPTILER = MAPTILER_KEY.length > 0;
+const MAP_TILE_URL = HAS_MAPTILER
+  ? `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${MAPTILER_KEY}&language=en`
+  : "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
+const MAP_TILE_ATTRIBUTION = HAS_MAPTILER
+  ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a>'
+  : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
 function MapOverlay({
   touchPrimary,
@@ -110,7 +122,12 @@ function applyFitBounds(map: LeafletMap, points: LatLng[], focus: LatLng | null)
   map.fitBounds(b, { padding: [32, 32], maxZoom: 12, animate: false });
 }
 
-function formatStepWindow(isoStart: string, isoEnd: string | undefined, empty: string): string {
+function formatStepWindow(
+  isoStart: string,
+  isoEnd: string | undefined,
+  empty: string,
+  intlLocale: string
+): string {
   const a = new Date(isoStart);
   const b = isoEnd ? new Date(isoEnd) : null;
   if (Number.isNaN(a.getTime())) return empty;
@@ -120,42 +137,110 @@ function formatStepWindow(isoStart: string, isoEnd: string | undefined, empty: s
     hour: "numeric",
     minute: "2-digit",
   };
-  if (!b || Number.isNaN(b.getTime())) return a.toLocaleString(undefined, opt);
-  return `${a.toLocaleString(undefined, opt)} → ${b.toLocaleString(undefined, opt)}`;
+  if (!b || Number.isNaN(b.getTime())) return a.toLocaleString(intlLocale, opt);
+  return `${a.toLocaleString(intlLocale, opt)} → ${b.toLocaleString(intlLocale, opt)}`;
 }
 
-function StayClusterTooltipBody({ cluster }: { cluster: StayCluster }) {
-  const { t } = useI18n();
+type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
+
+function resolveTransitEndpointLabel(raw: string, t: Translate): string {
+  if (raw === TRANSIT_EDGE_LABEL_PRIOR_LEG) return t("map.transitEdgePriorLeg");
+  if (raw === TRANSIT_EDGE_LABEL_NEXT_LEG) return t("map.transitEdgeNextLeg");
+  return raw;
+}
+
+function transitLegDurationLabel(t: Translate, startIso: string, endIso: string): string | null {
+  const a = Date.parse(startIso);
+  const b = Date.parse(endIso);
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return null;
+  const totalMins = Math.round((b - a) / 60000);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  if (h === 0) return t("map.transitDurationMinutes", { minutes: m });
+  if (m === 0) return t("map.transitDurationHours", { hours: h });
+  return t("map.transitDurationHoursMinutes", { hours: h, minutes: m });
+}
+
+function TransitEdgeTooltipBody({ edge }: { edge: TransitMapEdge }) {
+  const { t, locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
   const dash = t("view.emDash");
-  const { stays } = cluster;
-  if (stays.length === 1) {
-    const s = stays[0];
+  const fromL = resolveTransitEndpointLabel(edge.fromPlaceLabel, t);
+  const toL = resolveTransitEndpointLabel(edge.toPlaceLabel, t);
+  const duration = transitLegDurationLabel(t, edge.startTime, edge.endTime);
+  return (
+    <div className="max-w-[min(280px,85vw)] space-y-1 text-left text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+      <p className="font-semibold text-zinc-700 dark:text-zinc-100">{edge.title}</p>
+      <p>
+        <span className="text-zinc-700 dark:text-zinc-200">{fromL}</span>
+        <span className="mx-1 text-zinc-400" aria-hidden>
+          →
+        </span>
+        <span className="text-zinc-700 dark:text-zinc-200">{toL}</span>
+      </p>
+      <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+        {formatStepWindow(edge.startTime, edge.endTime, dash, intlLocale)}
+      </p>
+      {duration ? (
+        <p className="text-[10px] font-medium text-zinc-600 dark:text-zinc-300">{duration}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function DestinationPinTooltipBody({
+  pin,
+  linkedStays,
+}: {
+  pin: DestinationListPin;
+  linkedStays: StayMapPoint[];
+}) {
+  const { t, locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
+  const dash = t("view.emDash");
+  const registryBlock = (
+    <>
+      <p className="font-semibold text-zinc-700 dark:text-zinc-100">{pin.title}</p>
+      {pin.placeLabel && pin.placeLabel !== "—" ? (
+        <p className="text-[10px] text-zinc-500 dark:text-zinc-400">{pin.placeLabel}</p>
+      ) : null}
+    </>
+  );
+
+  if (linkedStays.length === 0) {
+    return <div className="max-w-[220px] space-y-1 text-left">{registryBlock}</div>;
+  }
+
+  if (linkedStays.length === 1) {
+    const s = linkedStays[0]!;
     return (
       <div className="max-w-[240px] space-y-1 text-left text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
-        <p className="font-semibold text-zinc-700 dark:text-zinc-100">{s.title}</p>
-        <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-          {formatStepWindow(s.startTime, s.endTime, dash)}
-        </p>
-        {s.placeLabel && s.placeLabel !== "—" ? (
-          <p className="text-zinc-500 dark:text-zinc-400">{s.placeLabel}</p>
-        ) : null}
+        {registryBlock}
+        <div className="border-t border-zinc-200 pt-1.5 dark:border-zinc-600">
+          <p className="font-semibold text-zinc-700 dark:text-zinc-100">{s.title}</p>
+          <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+            {formatStepWindow(s.startTime, s.endTime, dash, intlLocale)}
+          </p>
+          {s.placeLabel && s.placeLabel !== "—" ? (
+            <p className="text-zinc-500 dark:text-zinc-400">{s.placeLabel}</p>
+          ) : null}
+        </div>
       </div>
     );
   }
+
   return (
     <div className="max-w-[260px] space-y-1.5 text-left text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
-      <p className="font-semibold text-zinc-700 dark:text-zinc-100">
-        {t("map.staysAtThisPin", { count: stays.length })}
-      </p>
+      {registryBlock}
       <ul className="max-h-48 space-y-1.5 overflow-y-auto border-t border-zinc-200 pt-1.5 dark:border-zinc-600">
-        {stays.map((s) => (
+        {linkedStays.map((s) => (
           <li
-            key={s.intervalId ?? s.stepId}
+            key={`${s.stepId}:${s.intervalId ?? ""}`}
             className="border-b border-zinc-100 pb-1.5 last:border-0 last:pb-0 dark:border-zinc-700"
           >
             <p className="font-semibold text-zinc-700 dark:text-zinc-100">{s.title}</p>
             <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
-              {formatStepWindow(s.startTime, s.endTime, dash)}
+              {formatStepWindow(s.startTime, s.endTime, dash, intlLocale)}
             </p>
             {s.placeLabel && s.placeLabel !== "—" ? (
               <p className="text-zinc-500 dark:text-zinc-400">{s.placeLabel}</p>
@@ -164,75 +249,6 @@ function StayClusterTooltipBody({ cluster }: { cluster: StayCluster }) {
         ))}
       </ul>
     </div>
-  );
-}
-
-function StayClustersLayer({
-  stayPoints,
-  focusStepId,
-  touchPrimary,
-}: {
-  stayPoints: StayMapPoint[];
-  focusStepId: string | null;
-  touchPrimary: boolean;
-}) {
-  const map = useMap();
-  const [clusters, setClusters] = useState<StayCluster[]>([]);
-
-  const recluster = useCallback(() => {
-    if (stayPoints.length === 0) {
-      setClusters([]);
-      return;
-    }
-    const px = stayClusterPixelRadius(map.getZoom());
-    setClusters(clusterStayPointsScreen(map, stayPoints, px));
-  }, [map, stayPoints]);
-
-  useEffect(() => {
-    const run = () => {
-      requestAnimationFrame(() => recluster());
-    };
-    run();
-    map.on("zoomend", run);
-    map.on("moveend", run);
-    return () => {
-      map.off("zoomend", run);
-      map.off("moveend", run);
-    };
-  }, [map, recluster]);
-
-  return (
-    <>
-      {clusters.map((c) => {
-        const clusterKey = c.stays
-          .map((s) => `${s.stepId}:${s.intervalId ?? ""}`)
-          .sort()
-          .join("|");
-        const isFocus = focusStepId != null && c.stays.some((s) => s.stepId === focusStepId);
-        const count = c.stays.length;
-        return (
-          <CircleMarker
-            key={clusterKey}
-            center={[c.centroid.lat, c.centroid.lng]}
-            radius={isFocus ? 13 : count > 1 ? 11 : 8}
-            pathOptions={{
-              color: isFocus ? "#5b21b6" : "#52525b",
-              weight: count > 1 ? 3 : 2,
-              fillColor: isFocus ? "#8b5cf6" : count > 1 ? "#c4b5fd" : "#a1a1aa",
-              fillOpacity: 0.92,
-            }}
-          >
-            <MapOverlay
-              touchPrimary={touchPrimary}
-              tooltipOpacity={0.98}
-              tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-zinc-600 !shadow-lg dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
-            >
-              <StayClusterTooltipBody cluster={c} />
-            </MapOverlay>
-          </CircleMarker>
-        );
-      })}
-    </>
   );
 }
 
@@ -249,16 +265,133 @@ function MapFitBoundsOnDataChange({ points, focus }: { points: LatLng[]; focus: 
   return null;
 }
 
+/** Skip drawing when projected radius exceeds this share of the shorter map edge (avoids blocking pins). */
+const STAY_AREA_MAX_SCREEN_RADIUS_FRACTION = 0.42;
+
+function stayCircleRadiusPixels(map: LeafletMap, center: LatLng, radiusMeters: number): number {
+  const centerLL = L.latLng(center.lat, center.lng);
+  const cos = Math.cos((center.lat * Math.PI) / 180);
+  const dLat = radiusMeters / 111320;
+  const dLng = cos > 1e-6 ? radiusMeters / (111320 * cos) : 0;
+  const edgeLL = L.latLng(center.lat + dLat, center.lng + dLng);
+  const pC = map.latLngToLayerPoint(centerLL);
+  const pE = map.latLngToLayerPoint(edgeLL);
+  return pC.distanceTo(pE);
+}
+
+function StayAreaCircleLayers({
+  circles,
+  touchPrimary,
+  focusStepId,
+}: {
+  circles: StayAreaCircle[];
+  touchPrimary: boolean;
+  focusStepId: string | null;
+}) {
+  const { t } = useI18n();
+  const map = useMap();
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setRevision((r) => r + 1);
+    map.on("zoomend", bump);
+    map.on("moveend", bump);
+    const el = map.getContainer();
+    const ro =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => bump()) : null;
+    ro?.observe(el);
+    return () => {
+      map.off("zoomend", bump);
+      map.off("moveend", bump);
+      ro?.disconnect();
+    };
+  }, [map]);
+
+  const visible = useMemo(() => {
+    const s = map.getSize();
+    if (s.x < 16 || s.y < 16) return circles;
+    const maxR = Math.min(s.x, s.y) * STAY_AREA_MAX_SCREEN_RADIUS_FRACTION;
+    return circles.filter(
+      (c) => stayCircleRadiusPixels(map, c.center, c.radiusMeters) <= maxR
+    );
+  }, [map, circles, revision]);
+
+  return (
+    <>
+      {visible.map((c) => {
+        const emphasized = focusStepId === c.stepId;
+        return (
+          <Circle
+            key={`stay-area-${c.stepId}`}
+            center={[c.center.lat, c.center.lng]}
+            radius={c.radiusMeters}
+            pathOptions={{
+              color: emphasized ? "#5b21b6" : "#6d28d9",
+              weight: emphasized ? 2 : 1,
+              fillColor: "#8b5cf6",
+              fillOpacity: emphasized ? 0.14 : 0.08,
+              opacity: emphasized ? 0.85 : 0.65,
+            }}
+          >
+            <MapOverlay
+              touchPrimary={touchPrimary}
+              tooltipOpacity={0.95}
+              tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
+            >
+              <div className="max-w-[min(280px,72vw)] space-y-1 text-left">
+                <p className="font-semibold text-zinc-700 dark:text-zinc-100">{c.title}</p>
+                <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                  {t("map.stayAreaCircle")}
+                </p>
+                {c.placeLabel && c.placeLabel !== "—" ? (
+                  <p className="text-zinc-500 dark:text-zinc-400">{c.placeLabel}</p>
+                ) : null}
+                <p className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
+                  {t("map.stayAreaCircleRadius", {
+                    km: (c.radiusMeters / 1000).toFixed(2),
+                  })}
+                </p>
+                {c.destinationsInArea.length > 0 ? (
+                  <div className="border-t border-zinc-200 pt-1.5 dark:border-zinc-600">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      {t("map.stayAreaDestinationsHeading")}
+                    </p>
+                    <ul className="mt-1 max-h-[min(200px,40vh)] list-disc space-y-1 overflow-y-auto pl-3.5 text-[10px] text-zinc-700 dark:text-zinc-200">
+                      {c.destinationsInArea.map((row, idx) => (
+                        <li key={`${c.stepId}-d-${idx}`} className="marker:text-zinc-400">
+                          <span className="font-medium">{row.title}</span>
+                          {row.placeLine ? (
+                            <span className="mt-0.5 block font-normal leading-snug text-zinc-500 dark:text-zinc-400">
+                              {row.placeLine}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </MapOverlay>
+          </Circle>
+        );
+      })}
+    </>
+  );
+}
+
 type TripLeafletMapInnerProps = {
   center: LatLng;
   allPoints: LatLng[];
   focusLatLng: LatLng | null;
   transitEdges: TransitMapEdge[];
   destinationPins: DestinationListPin[];
-  stayPoints: StayMapPoint[];
+  stayAreaCircles: StayAreaCircle[];
+  staysByPinDestination: Record<string, StayMapPoint[]>;
   focusStepId: string | null;
   focus: CurrentStepFocus;
   touchPrimary: boolean;
+  /** When set, double-clicking a destination pin (or the focused activity pin) opens edit. */
+  onDestinationDblClick?: (destinationId: string) => void;
 };
 
 /**
@@ -271,12 +404,15 @@ function TripLeafletMapInner({
   focusLatLng,
   transitEdges,
   destinationPins,
-  stayPoints,
+  stayAreaCircles,
+  staysByPinDestination,
   focusStepId,
   focus,
   touchPrimary,
+  onDestinationDblClick,
 }: TripLeafletMapInnerProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
   const [layersReady, setLayersReady] = useState(false);
   const layersArmCancelledRef = useRef(false);
   useEffect(() => {
@@ -292,6 +428,8 @@ function TripLeafletMapInner({
       zoom={11}
       className="h-full w-full [&_.leaflet-control-attribution]:text-[10px]"
       scrollWheelZoom
+      /** Otherwise the second click of a double-click becomes map zoom instead of opening the destination editor. */
+      doubleClickZoom={onDestinationDblClick ? false : true}
       whenReady={() => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -302,11 +440,13 @@ function TripLeafletMapInner({
     >
       {layersReady ? (
         <>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+          <TileLayer attribution={MAP_TILE_ATTRIBUTION} url={MAP_TILE_URL} />
           <MapFitBoundsOnDataChange points={allPoints} focus={focusLatLng} />
+          <StayAreaCircleLayers
+            circles={stayAreaCircles}
+            touchPrimary={touchPrimary}
+            focusStepId={focusStepId}
+          />
           {transitEdges.map((edge) => {
             const emphasized = focusStepId === edge.stepId;
             const bearing = bearingDegreesNorth(edge.from, edge.to);
@@ -343,55 +483,61 @@ function TripLeafletMapInner({
                   <MapOverlay
                     touchPrimary={touchPrimary}
                     tooltipOpacity={0.95}
-                    tooltipClassName="!max-w-[220px] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
+                    tooltipClassName="!max-w-[min(280px,85vw)] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                   >
-                    <span className="font-semibold text-zinc-700 dark:text-zinc-100">{edge.title}</span>
+                    <TransitEdgeTooltipBody edge={edge} />
                   </MapOverlay>
                 </Polyline>
                 <Marker position={[arrowPos.lat, arrowPos.lng]} icon={arrowDivIcon(bearing, color)}>
                   <MapOverlay
                     touchPrimary={touchPrimary}
                     tooltipOpacity={0.95}
-                    tooltipClassName="!border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-xs !font-semibold !text-zinc-700 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-100"
+                    tooltipClassName="!max-w-[min(280px,85vw)] !border !border-zinc-200 !bg-white !px-2 !py-1.5 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
                   >
-                    {edge.title}
+                    <TransitEdgeTooltipBody edge={edge} />
                   </MapOverlay>
                 </Marker>
               </Fragment>
             );
           })}
-          {destinationPins.map((r) => (
-            <CircleMarker
-              key={`destination-${r.destinationId}`}
-              center={[r.position.lat, r.position.lng]}
-              radius={7}
-              pathOptions={{
-                color: "#0f766e",
-                weight: 2,
-                fillColor: "#5eead4",
-                fillOpacity: 0.35,
-              }}
-            >
-              <MapOverlay
-                touchPrimary={touchPrimary}
-                tooltipOpacity={0.95}
-                tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
+          {destinationPins.map((r) => {
+            const linkedStays = staysByPinDestination[r.destinationId] ?? [];
+            return (
+              <CircleMarker
+                key={`destination-${r.destinationId}`}
+                center={[r.position.lat, r.position.lng]}
+                radius={7}
+                pathOptions={{
+                  color: "#0f766e",
+                  weight: 2,
+                  fillColor: "#5eead4",
+                  fillOpacity: 0.35,
+                }}
+                eventHandlers={
+                  onDestinationDblClick
+                    ? {
+                        dblclick: (e) => {
+                          const dom = e.originalEvent;
+                          if (dom) {
+                            L.DomEvent.stopPropagation(dom);
+                            L.DomEvent.preventDefault(dom);
+                          }
+                          onDestinationDblClick(r.destinationId);
+                        },
+                      }
+                    : undefined
+                }
               >
-                <div className="max-w-[220px] space-y-1 text-left">
-                  <p className="font-semibold text-zinc-700 dark:text-zinc-100">{r.title}</p>
-                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400">{t("map.destination")}</p>
-                  {r.placeLabel && r.placeLabel !== "—" ? (
-                    <p className="text-zinc-500 dark:text-zinc-400">{r.placeLabel}</p>
-                  ) : null}
-                </div>
-              </MapOverlay>
-            </CircleMarker>
-          ))}
-          <StayClustersLayer
-            stayPoints={stayPoints}
-            focusStepId={focusStepId}
-            touchPrimary={touchPrimary}
-          />
+                <MapOverlay
+                  touchPrimary={touchPrimary}
+                  tooltipOpacity={0.95}
+                  tooltipClassName="!rounded-lg !border !border-zinc-200 !bg-white !p-2 !text-[11px] !text-zinc-600 !shadow-md dark:!border-zinc-600 dark:!bg-zinc-900 dark:!text-zinc-300"
+                >
+                  <DestinationPinTooltipBody pin={r} linkedStays={linkedStays} />
+                </MapOverlay>
+              </CircleMarker>
+            );
+          })}
           {focusLatLng &&
           focusStepId &&
           focus.kind !== "none" &&
@@ -405,6 +551,22 @@ function TripLeafletMapInner({
                 fillColor: "#10b981",
                 fillOpacity: 0.85,
               }}
+              eventHandlers={
+                onDestinationDblClick
+                  ? {
+                      dblclick: (e) => {
+                        const dom = e.originalEvent;
+                        if (dom) {
+                          L.DomEvent.stopPropagation(dom);
+                          L.DomEvent.preventDefault(dom);
+                        }
+                        const st = focus.step;
+                        if (st.stepType !== "activity") return;
+                        onDestinationDblClick(st.destinationId);
+                      },
+                    }
+                  : undefined
+              }
             >
               <MapOverlay
                 touchPrimary={touchPrimary}
@@ -416,7 +578,12 @@ function TripLeafletMapInner({
                     {(focus.step.title || t("view.defaultActivityTitle")).trim()}
                   </p>
                   <p className="font-mono text-[10px] font-normal text-zinc-500 dark:text-zinc-400">
-                    {formatStepWindow(focus.step.startTime, focus.step.endTime, t("view.emDash"))}
+                    {formatStepWindow(
+                      focus.step.startTime,
+                      focus.step.endTime,
+                      t("view.emDash"),
+                      intlLocale
+                    )}
                   </p>
                 </div>
               </MapOverlay>
@@ -433,15 +600,21 @@ export function TripItineraryMap({
   sortedSteps,
   destinations,
   focus,
+  onDestinationDblClick,
 }: {
   tripId: string;
   sortedSteps: TripStep[];
   destinations: Destination[];
   focus: CurrentStepFocus;
+  onDestinationDblClick?: (destinationId: string) => void;
 }) {
   const { t } = useI18n();
-  const stayPoints = useMemo(
-    () => collectStayMapPoints(sortedSteps, destinations),
+  const staysByPinDestination = useMemo((): Record<string, StayMapPoint[]> => {
+    const m = collectStaysByPinDestination(sortedSteps, destinations);
+    return Object.fromEntries(m);
+  }, [sortedSteps, destinations]);
+  const stayAreaCircles = useMemo(
+    () => collectStayAreaCircles(sortedSteps, destinations),
     [sortedSteps, destinations]
   );
   const transitEdges = useMemo(
@@ -459,7 +632,7 @@ export function TripItineraryMap({
   const focusStepId = focus.kind !== "none" ? focus.step.id : null;
 
   const allPoints = useMemo(() => {
-    const pts: LatLng[] = stayPoints.map((s) => s.position);
+    const pts: LatLng[] = [];
     for (const e of transitEdges) {
       pts.push(e.from, e.to);
     }
@@ -467,7 +640,7 @@ export function TripItineraryMap({
       pts.push(r.position);
     }
     return pts;
-  }, [stayPoints, transitEdges, destinationPins]);
+  }, [transitEdges, destinationPins]);
 
   /** Avoid mounting Leaflet until layout exists (fixes TileLayer / pane appendChild races with React 19). */
   const [domReady, setDomReady] = useState(false);
@@ -498,9 +671,8 @@ export function TripItineraryMap({
 
   const center =
     focusLatLng ??
-    stayPoints[0]?.position ??
-    transitEdges[0]?.from ??
     destinationPins[0]?.position ??
+    transitEdges[0]?.from ??
     { lat: 0, lng: 0 };
 
   return (
@@ -510,6 +682,7 @@ export function TripItineraryMap({
       </h3>
       <p className="mb-2 text-[11px] text-zinc-500 dark:text-zinc-400">
         {touchPrimary ? t("map.pinsGuideTap") : t("map.pinsGuideHover")}
+        {onDestinationDblClick ? <> {t("map.destPinDblClickEdit")}</> : null}
       </p>
       <div className="relative z-0 min-h-[280px] h-[min(360px,55vh)] w-full overflow-hidden rounded-2xl border border-zinc-200 shadow-sm dark:border-zinc-700">
         {!domReady ? (
@@ -524,10 +697,12 @@ export function TripItineraryMap({
             focusLatLng={focusLatLng}
             transitEdges={transitEdges}
             destinationPins={destinationPins}
-            stayPoints={stayPoints}
+            stayAreaCircles={stayAreaCircles}
+            staysByPinDestination={staysByPinDestination}
             focusStepId={focusStepId}
             focus={focus}
             touchPrimary={touchPrimary}
+            onDestinationDblClick={onDestinationDblClick}
           />
         )}
       </div>

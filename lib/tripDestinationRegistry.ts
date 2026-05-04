@@ -29,6 +29,16 @@ export function mergeDestinationLists(base: Destination[], upsert: Destination[]
   return Array.from(m.values());
 }
 
+/** Replace or append a single registry row by id (normalized strings). */
+export function upsertDestinationRow(rows: Destination[], row: Destination): Destination[] {
+  const norm = normD(row);
+  const idx = rows.findIndex((r) => r.id === norm.id);
+  if (idx < 0) return [...rows, norm];
+  const next = [...rows];
+  next[idx] = norm;
+  return next;
+}
+
 function normD(d: Destination): Destination {
   return {
     ...d,
@@ -155,6 +165,9 @@ export function migrateTripToDestinationRegistry(data: unknown): Trip {
         stepIntervals: nextIntervals,
         manualEndStayTime:
           o.manualEndStayTime != null ? String(o.manualEndStayTime) : undefined,
+        ...(typeof o.areaCenterDestinationId === "string" && o.areaCenterDestinationId.trim()
+          ? { areaCenterDestinationId: o.areaCenterDestinationId.trim() }
+          : {}),
       } as StayStep;
     }
 
@@ -280,6 +293,14 @@ export function collectReferencesToDestinationId(
           label: "Stay — default place (targetDestinationId)",
         });
       }
+      if (s.areaCenterDestinationId === destinationId) {
+        out.push({
+          stepId: s.id,
+          stepTitle,
+          stepType: "stay",
+          label: "Stay — area center (areaCenterDestinationId)",
+        });
+      }
       for (const int of s.stepIntervals) {
         if (int.intervalType !== "stay") continue;
         const si = int as StayStepInterval;
@@ -384,6 +405,7 @@ export function collectReferencedDestinationIdsFromStep(step: TripStep): Set<str
   const ids = new Set<string>();
   if (step.stepType === "stay") {
     ids.add(step.targetDestinationId);
+    if (step.areaCenterDestinationId) ids.add(step.areaCenterDestinationId);
     for (const int of step.stepIntervals) {
       if (int.intervalType === "stay" && int.destinationId) ids.add(int.destinationId);
     }

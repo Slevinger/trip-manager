@@ -1,6 +1,6 @@
 "use client";
 
-import { DestinationPlaceSearchInput } from "@/components/manage/DestinationPlaceSearchInput";
+import { DestinationsInput } from "@/components/manage/DestinationsInput";
 import { appendGeoPickComment } from "@/components/manage/stepWizards/wizardShared";
 import { appendStepInterval, destinationFromPlacePick } from "@/lib/canonicalStepBuilders";
 import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
@@ -8,7 +8,7 @@ import { intervalIndexFromFrame, STEP_WIZARD_IDS } from "@/lib/wizardStack/types
 import type { WizardFrame } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
 import { destinationFromList } from "@/lib/tripDestinationRegistry";
-import type { TripPlacePick } from "@/lib/tripLocationCatalog";
+import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
 import type { CurrencyCode, Destination, StayStep, StayType, Trip } from "@/lib/types/trip";
 import { STAY_TYPES } from "@/components/manage/stepEditorConstants";
 
@@ -22,7 +22,7 @@ export function StayStepIntervalWizardPanel({
   wizard,
   tripStartIso,
   tripCurrency,
-  tripPlacePicks,
+  tripPlaceGrouped,
   trip,
   onAppendDestinations,
 }: {
@@ -33,7 +33,7 @@ export function StayStepIntervalWizardPanel({
   wizard: WizardStackControls;
   tripStartIso: string;
   tripCurrency: CurrencyCode;
-  tripPlacePicks?: TripPlacePick[];
+  tripPlaceGrouped: TripGroupedPlacePicks;
   trip: Trip;
   onAppendDestinations: (rows: Destination[]) => void;
 }) {
@@ -86,10 +86,10 @@ export function StayStepIntervalWizardPanel({
           </label>
           <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
             Location (this interval)
-            <DestinationPlaceSearchInput
+            <DestinationsInput
               className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
               placeholder="Type at least 2 characters…"
-              localPicks={tripPlacePicks}
+              tripPlaceGrouped={tripPlaceGrouped}
               onRegisterNewDestination={(d) => onAppendDestinations([d])}
               value={intervalLocationValue}
               onChange={(location) =>

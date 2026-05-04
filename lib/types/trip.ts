@@ -223,6 +223,12 @@ export interface StayStep extends BaseStep {
   stepType: "stay";
   /** Primary stay place — id in {@link Trip#destinations}. */
   targetDestinationId: string;
+  /**
+   * Optional geographic center of the stay area — id in {@link Trip#destinations}.
+   * With saved coordinates, the itinerary map can draw a circle: radius = farthest stay-interval
+   * pin from this center (see `collectStayAreaCircles` in trip map geometry).
+   */
+  areaCenterDestinationId?: string;
   stepIntervals: StayStepInterval[];
   manualEndStayTime?: ISODateString;
 }

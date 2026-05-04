@@ -20,6 +20,7 @@ import { TripDestinationsRoster } from "@/components/trip/TripDestinationsRoster
 import { TripViewSummary } from "@/components/trip/TripViewSummary";
 import { getClientAuth, getClientStorage, getDb, getMissingFirebasePublicEnv } from "@/lib/firebase";
 import { normalizeTripForPersist } from "@/lib/canonicalStepBuilders";
+import { upsertDestinationRow } from "@/lib/tripDestinationRegistry";
 import { destinationHasMapCoordinates } from "@/lib/tripDestinationGeo";
 import { getTrip, putTrip } from "@/lib/tripLocalStore";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
@@ -267,7 +268,17 @@ export function TripDetail({ tripId }: { tripId: string }) {
     if (!trip) return;
     const next: Trip = {
       ...trip,
-      destinations: trip.destinations.map((d) => (d.id === updated.id ? updated : d)),
+      destinations: upsertDestinationRow(trip.destinations, updated),
+      updatedAt: new Date().toISOString(),
+    };
+    await persistTrip(normalizeTripForPersist(next));
+  }
+
+  async function handleViewDestinationDelete(id: string) {
+    if (!trip) return;
+    const next: Trip = {
+      ...trip,
+      destinations: trip.destinations.filter((d) => d.id !== id),
       updatedAt: new Date().toISOString(),
     };
     await persistTrip(normalizeTripForPersist(next));
@@ -456,10 +467,17 @@ export function TripDetail({ tripId }: { tripId: string }) {
             sortedSteps={sortedSteps}
             destinations={trip.destinations}
             focus={viewStepFocus}
+            onDestinationDblClick={
+              canEditTripDestinations
+                ? (destinationId) => {
+                    const d = trip.destinations.find((x) => x.id === destinationId);
+                    if (!d) return;
+                    setDestinationLocationEditSnapshot({ ...d });
+                    setDestinationLocationDialogOpen(true);
+                  }
+                : undefined
+            }
           />
-          <div className="mt-6">
-            <TripDestinationsRoster destinations={trip.destinations} steps={sortedSteps} />
-          </div>
           <CreateDestinationDialog
             open={destinationLocationDialogOpen}
             onOpenChange={(open) => {
@@ -478,6 +496,16 @@ export function TripDetail({ tripId }: { tripId: string }) {
           {viewPhase === "after_end" ? (
             <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={viewNowMs} variant="ended" />
           ) : null}
+          <div className="mt-8">
+            <TripDestinationsRoster
+              destinations={trip.destinations}
+              steps={sortedSteps}
+              editable={canEditTripDestinations}
+              manageHint={false}
+              onSaveDestination={(d) => void handleViewDestinationLocationSave(d)}
+              onDeleteDestination={(id) => void handleViewDestinationDelete(id)}
+            />
+          </div>
         </>
       ) : manageDraft ? (
         <div className="mt-8 pb-40">

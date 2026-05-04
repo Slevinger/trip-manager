@@ -193,6 +193,12 @@ const en = {
   "manage.intervalCountLegs": "{count} legs",
   "manage.intervalCountSlots": "{count} slots",
   "manage.deleteStepAria": "Delete step: {title}",
+  "manage.editDestination": "Edit",
+  "manage.deleteDestination": "Delete",
+  "manage.deleteDestinationDisabledHint":
+    "This place is still referenced by a step. Change or remove those references before deleting.",
+  "manage.deleteDestinationConfirm":
+    "Remove this unused destination from the trip? This cannot be undone from here.",
 
   "view.placesTitle": "Places on this trip",
   "view.placesEmpty": "No destinations yet. Add a step in Manage to create places.",
@@ -211,6 +217,8 @@ const en = {
     "Missing coordinates? Use View alerts or Manage → Edit → address search / destination dialog.",
   "view.editStepHintReadonly":
     "Open Edit on the step named above to change which id is used or to edit the place fields.",
+  "view.destinationsEditableHint":
+    "Edit updates title, address, description, and map pin for this registry row. Delete only works when nothing on your itinerary references this destination.",
   "view.summaryEnded":
     "This trip has ended. Here is a quick recap — open Manage to change anything.",
   "view.summaryUpcoming":
@@ -260,15 +268,38 @@ const en = {
 
   "map.noPinsTitle": "No map pins yet",
   "map.noPinsBody":
-    "Each destination appears here once it has saved coordinates (pick a place in Manage). Stay intervals and transit legs can add extra geometry; transit without leg pins still draws a straight connector between surrounding steps when possible.",
+    "Each destination appears here once it has saved coordinates (pick a place in Manage). Itinerary uses of a place are listed on that destination’s pin. Connectors show legs between steps when coordinates allow.",
   "map.destination": "Destination",
   "map.routeMapTitle": "Route map",
   "map.pinsGuideTap":
-    "Tap pins for details. Teal markers are your saved destinations (one per list entry with coordinates). Purple/grey clusters are stay intervals; overlapping stay pins merge at this zoom — zoom in to split them.",
+    "Tap a pin for details. Each marker is one saved destination; any itinerary use of that place is listed on the same pin.",
   "map.pinsGuideHover":
-    "Hover pins for details. Teal markers are your saved destinations (one per list entry with coordinates). Purple/grey clusters are stay intervals; overlapping stay pins merge at this zoom — zoom in to split them.",
+    "Hover a pin for details. Each marker is one saved destination; any itinerary use of that place is listed on the same pin.",
+  "map.destPinDblClickEdit":
+    "Double-click any destination pin (or the highlighted activity pin) to open the place editor.",
   "map.preparingMap": "Preparing map…",
   "map.staysAtThisPin": "{count} stays at this map pin",
+  "map.stayAreaCircle": "Stay area",
+  "map.stayAreaCircleRadius": "Radius ≈ {km} km",
+  "map.stayAreaDestinationsHeading": "Destinations in this area",
+  "map.transitEdgePriorLeg": "Previous leg",
+  "map.transitEdgeNextLeg": "Next leg",
+  "map.transitDurationMinutes": "{minutes} min",
+  "map.transitDurationHours": "{hours} h",
+  "map.transitDurationHoursMinutes": "{hours} h {minutes} min",
+
+  "manage.stayAreaCenterLabel": "Stay area center (map)",
+  "manage.stayAreaCenterHint":
+    "Shaded circle center on the route map. Radius equals the farthest stay-interval pin from this point (minimum shown when all pins match the center).",
+  "manage.stayAreaCenterClear": "Clear area center",
+  "manage.transitStepPlaceHint":
+    "This row is the transit step’s own place in the registry (map + “Transit — step-level place”). Set it so it does not stay “Untitled”.",
+  "manage.transitStepPlaceName": "Step / leg place name",
+  "manage.transitStepPlaceAddress": "Step / leg address (autocomplete)",
+
+  "place.tripPlacesSection": "This trip",
+  "place.tripStaysSection": "Stays",
+  "place.tripOtherPlaces": "Transit & activities",
 
   "place.searching": "Searching…",
   "place.noResults": "No results",
@@ -470,6 +501,12 @@ const he: Record<MessageKey, string> = {
   "manage.intervalCountLegs": "{count} רגליים",
   "manage.intervalCountSlots": "{count} משבצות",
   "manage.deleteStepAria": "מחיקת שלב: {title}",
+  "manage.editDestination": "עריכה",
+  "manage.deleteDestination": "מחיקה",
+  "manage.deleteDestinationDisabledHint":
+    "המקום עדיין מקושר לשלב. שנה או הסר את ההפניות לפני המחיקה.",
+  "manage.deleteDestinationConfirm":
+    "להסיר את היעד הלא בשימוש מהטיול? לא ניתן לבטל כאן.",
 
   "view.placesTitle": "מקומות בטיול",
   "view.placesEmpty": "אין עדיין יעדים. הוסיפו שלב בניהול כדי ליצור מקומות.",
@@ -486,6 +523,8 @@ const he: Record<MessageKey, string> = {
     "חסרות קואורדינטות? השתמשו בהתראות בתצוגה או ניהול → עריכה → חיפוש כתובת / דו-שיח יעד.",
   "view.editStepHintReadonly":
     "פתחו עריכה בשלב הרלוונטי למעלה כדי לשנות id או לערוך שדות מקום.",
+  "view.destinationsEditableHint":
+    "עריכה מעדכנת כותרת, כתובת, תיאור ונקודה במפה. מחיקה אפשרית רק כשאף שלב לא מפנה ליעד הזה.",
   "view.summaryEnded": "הטיול הסתיים. סיכום קצר — פתחו ניהול לשינויים.",
   "view.summaryUpcoming":
     "הטיול עדיין לא התחיל. כאן יופיע השלב הנוכחי כלוח בקרה חי כשהטיול בתנועה.",
@@ -534,15 +573,38 @@ const he: Record<MessageKey, string> = {
 
   "map.noPinsTitle": "אין עדיין נקודות במפה",
   "map.noPinsBody":
-    "כל יעד מופיע כאן לאחר שנשמרו לו קואורדינטות (בחירת מקום בניהול). מרווחי שהייה ורגלי טרנזיט יכולים להוסיף גיאומטריה; טרנזיט בלי נקודות לרגל עדיין ישרטט מחבר ישר בין שלבים סמוכים כשאפשר.",
+    "כל יעד מופיע כאן לאחר שנשמרו לו קואורדינטות (בחירת מקום בניהול). שימושי המסלול באותו מקום מוצגים תחת סמן היעד. קווים מחברים רגליים כשיש קואורדינטות.",
   "map.destination": "יעד",
   "map.routeMapTitle": "מפת מסלול",
   "map.pinsGuideTap":
-    "הקישו על הנקודות לפרטים. סמנים בטורקיז — יעדים שמורים (אחד לכל רשומה עם קואורדינטות). אשכולות סגולים/אפורים הם מרווחי שהייה; נקודות חופפות מתמזגות בזום הזה — התקרבו כדי להפריד.",
+    "הקישו על סמן לפרטים. כל סמן הוא יעד שמור; כל שימוש במסלול באותו מקום מופיע באותו כרטיס.",
   "map.pinsGuideHover":
-    "רחפו מעל הנקודות לפרטים. סמנים בטורקיז — יעדים שמורים (אחד לכל רשומה עם קואורדינטות). אשכולות סגולים/אפורים הם מרווחי שהייה; נקודות חופפות מתמזגות בזום הזה — התקרבו כדי להפריד.",
+    "רחפו מעל סמן לפרטים. כל סמן הוא יעד שמור; כל שימוש במסלול באותו מקום מופיע באותו כרטיס.",
+  "map.destPinDblClickEdit":
+    "לחיצה כפולה על סמן יעד (או על סמן הפעילות המודגש) פותחת את עורך המקום.",
   "map.preparingMap": "מכין מפה…",
   "map.staysAtThisPin": "{count} שהיות בנקודה הזו במפה",
+  "map.stayAreaCircle": "אזור שהייה",
+  "map.stayAreaCircleRadius": "רדיוס ≈ {km} ק״מ",
+  "map.stayAreaDestinationsHeading": "יעדים באזור",
+  "map.transitEdgePriorLeg": "רגל קודמת",
+  "map.transitEdgeNextLeg": "רגל הבאה",
+  "map.transitDurationMinutes": "{minutes} דק׳",
+  "map.transitDurationHours": "{hours} שע׳",
+  "map.transitDurationHoursMinutes": "{hours} שע׳ {minutes} דק׳",
+
+  "manage.stayAreaCenterLabel": "מרכז אזור שהייה (מפה)",
+  "manage.stayAreaCenterHint":
+    "מרכז המעגל המוצג במפת המסלול. הרדיוס הוא המרחק הגדול ביותר מכאן לנקודת שהייה במרווחים (מינימום כשהכל באותה נקודה).",
+  "manage.stayAreaCenterClear": "הסרת מרכז האזור",
+  "manage.transitStepPlaceHint":
+    "שורה זו היא מקום השלב במערכת היעדים (מפה ו־«טרנזיט — מקום ברמת השלב»). מלאו כדי שלא יישאר «ללא כותרת».",
+  "manage.transitStepPlaceName": "שם מקום השלב / הרגל",
+  "manage.transitStepPlaceAddress": "כתובת השלב / הרגל (השלמה אוטומטית)",
+
+  "place.tripPlacesSection": "הטיול הזה",
+  "place.tripStaysSection": "שהיות",
+  "place.tripOtherPlaces": "מעברים ופעילויות",
 
   "place.searching": "מחפש…",
   "place.noResults": "אין תוצאות",
@@ -745,6 +807,12 @@ const ru: Record<MessageKey, string> = {
   "manage.intervalCountLegs": "{count} отрезков",
   "manage.intervalCountSlots": "{count} слотов",
   "manage.deleteStepAria": "Удалить шаг: {title}",
+  "manage.editDestination": "Изменить",
+  "manage.deleteDestination": "Удалить",
+  "manage.deleteDestinationDisabledHint":
+    "Это место ещё используется шагом. Сначала измените или удалите ссылки.",
+  "manage.deleteDestinationConfirm":
+    "Удалить неиспользуемый пункт из поездки? Отменить здесь нельзя.",
 
   "view.placesTitle": "Места в поездке",
   "view.placesEmpty": "Пока нет пунктов назначения. Добавьте шаг в «Управлении», чтобы создать места.",
@@ -763,6 +831,8 @@ const ru: Record<MessageKey, string> = {
     "Нет координат? Используйте предупреждения в «Просмотре» или Управление → Правка → поиск адреса / диалог пункта.",
   "view.editStepHintReadonly":
     "Откройте Правка на шаге выше, чтобы сменить id или поля места.",
+  "view.destinationsEditableHint":
+    "«Изменить» обновляет название, адрес, описание и метку на карте. «Удалить» доступно только если ни один шаг не ссылается на этот пункт.",
   "view.summaryEnded": "Поездка завершена. Краткий итог — откройте Управление для правок.",
   "view.summaryUpcoming":
     "Поездка ещё не началась. Здесь появится текущий шаг как живой дашборд во время поездки.",
@@ -811,15 +881,38 @@ const ru: Record<MessageKey, string> = {
 
   "map.noPinsTitle": "Пока нет меток на карте",
   "map.noPinsBody":
-    "Каждый пункт появится здесь после сохранения координат (выберите место в Управлении). Интервалы проживания и переездов добавляют геометрию; при отсутствии точек на отрезке переезда по возможности рисуется прямая между соседними шагами.",
+    "Каждый пункт появится здесь после сохранения координат (выберите место в Управлении). Использования в маршруте показаны на метке этого пункта. Линии соединяют отрезки, когда координаты позволяют.",
   "map.destination": "Пункт назначения",
   "map.routeMapTitle": "Карта маршрута",
   "map.pinsGuideTap":
-    "Нажимайте на метки для подробностей. Бирюзовые — сохранённые пункты (по одному на запись с координатами). Фиолетово-серые кластеры — интервалы проживания; перекрывающиеся метки сливаются на этом масштабе — приблизьте, чтобы разделить.",
+    "Нажимайте на метку для подробностей. Каждая метка — один сохранённый пункт; все использования в маршруте показаны в том же описании.",
   "map.pinsGuideHover":
-    "Наводите курсор на метки для подробностей. Бирюзовые — сохранённые пункты (по одному на запись с координатами). Фиолетово-серые кластеры — интервалы проживания; перекрывающиеся метки сливаются на этом масштабе — приблизьте, чтобы разделить.",
+    "Наводите курсор на метку для подробностей. Каждая метка — один сохранённый пункт; все использования в маршруте показаны в том же описании.",
+  "map.destPinDblClickEdit":
+    "Двойной щелчок по любой метке пункта назначения (или по выделенной метке активности) открывает редактор места.",
   "map.preparingMap": "Подготовка карты…",
   "map.staysAtThisPin": "{count} проживаний в этой точке карты",
+  "map.stayAreaCircle": "Зона проживания",
+  "map.stayAreaCircleRadius": "Радиус ≈ {km} км",
+  "map.stayAreaDestinationsHeading": "Пункты в этой зоне",
+  "map.transitEdgePriorLeg": "Предыдущий отрезок",
+  "map.transitEdgeNextLeg": "Следующий отрезок",
+  "map.transitDurationMinutes": "{minutes} мин",
+  "map.transitDurationHours": "{hours} ч",
+  "map.transitDurationHoursMinutes": "{hours} ч {minutes} мин",
+
+  "manage.stayAreaCenterLabel": "Центр зоны проживания (карта)",
+  "manage.stayAreaCenterHint":
+    "Центр полупрозрачного круга на карте маршрута. Радиус — максимальное расстояние до точки интервала проживания (минимум, если все точки совпадают с центром).",
+  "manage.stayAreaCenterClear": "Сбросить центр зоны",
+  "manage.transitStepPlaceHint":
+    "Эта строка — собственное место шага в реестре (карта и «Транзит — место на уровне шага»). Заполните, чтобы не оставалось «Без названия».",
+  "manage.transitStepPlaceName": "Название места шага / отрезка",
+  "manage.transitStepPlaceAddress": "Адрес шага / отрезка (подсказки)",
+
+  "place.tripPlacesSection": "Эта поездка",
+  "place.tripStaysSection": "Проживания",
+  "place.tripOtherPlaces": "Транзит и активности",
 
   "place.searching": "Поиск…",
   "place.noResults": "Нет результатов",
@@ -834,6 +927,13 @@ const ru: Record<MessageKey, string> = {
 export const translations = { en, he, ru } as const;
 
 export type SupportedLocale = keyof typeof translations;
+
+/** BCP-47 tag for `Intl` / `toLocaleString` so dates follow the app language, not the system default. */
+export function intlLocaleForApp(locale: SupportedLocale): string {
+  if (locale === "he") return "he-IL";
+  if (locale === "ru") return "ru-RU";
+  return "en-US";
+}
 
 export const DEFAULT_LOCALE: SupportedLocale = "en";
 

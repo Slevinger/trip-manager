@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -10,7 +11,7 @@ import {
   useState,
 } from "react";
 import { useI18n } from "@/lib/i18n/context";
-import type { TripPlacePick } from "@/lib/tripLocationCatalog";
+import type { TripGroupedPlacePicks, TripPlacePick } from "@/lib/tripLocationCatalog";
 import type { PlaceSearchHit, PlaceSearchPickPayload } from "@/lib/places/types";
 
 type PlaceSearchInputProps = {
@@ -28,12 +29,23 @@ type PlaceSearchInputProps = {
   lang?: string;
   /** Trip places shown first; tap or pick without typing. Merged with Photon when query is 2+ chars. */
   localPicks?: TripPlacePick[];
+  /**
+   * When set, replaces flat {@link localPicks}: grouped by stay step (center → related rows), then
+   * remaining trip destinations. Trip rows only appear when the typed query matches at least one
+   * trip row (or the field is empty). Otherwise only address search runs.
+   */
+  tripPlaceGrouped?: TripGroupedPlacePicks;
   /** When no trip row matches, show “Create new destination…” (needs {@link onRequestCreateDestination}). */
   allowCreateDestination?: boolean;
   /** Opens parent UI to add a new registry destination (e.g. map dialog). */
   onRequestCreateDestination?: (query: string) => void;
   /** Appended to the suggestions panel (e.g. `z-[90]` inside modals so the list isn’t clipped). */
   listboxClassName?: string;
+  /**
+   * When set, choosing an API search row (Google / Photon) does not apply the hit to the field;
+   * parent opens a create flow. Trip rows still use {@link onPick}.
+   */
+  onRemoteSearchPick?: (hit: PlaceSearchHit) => void;
 };
 
 const DEBOUNCE_MS = 280;
@@ -49,9 +61,11 @@ export function PlaceSearchInput({
   autoFocus,
   lang,
   localPicks,
+  tripPlaceGrouped,
   allowCreateDestination,
   onRequestCreateDestination,
   listboxClassName,
+  onRemoteSearchPick,
 }: PlaceSearchInputProps) {
   const { t, locale } = useI18n();
   const searchLang = (lang ?? locale).toLowerCase();
@@ -71,19 +85,80 @@ export function PlaceSearchInput({
   const [active, setActive] = useState(0);
   const [fetchErr, setFetchErr] = useState(false);
 
-  const localFiltered = useMemo(() => {
-    if (!localPicks?.length) return [];
+  const { localFiltered, groupedStayViews, groupedOtherPicks, otherFlatStart } = useMemo(() => {
+    function pickMatchesQuery(p: TripPlacePick, q: string) {
+      if (!q) return true;
+      const ql = q.toLowerCase();
+      return (
+        p.label.toLowerCase().includes(ql) ||
+        Boolean(p.headline?.toLowerCase().includes(ql)) ||
+        Boolean(p.subtitle?.toLowerCase().includes(ql))
+      );
+    }
+
+    if (tripPlaceGrouped) {
+      const q = value.trim().toLowerCase();
+      const filteredGroups = tripPlaceGrouped.stayGroups
+        .map((g) => {
+          const c = pickMatchesQuery(g.centerPick, q);
+          const anyM = g.memberPicks.some((m) => pickMatchesQuery(m, q));
+          if (q && !c && !anyM) return null;
+          return { ...g, visibleMembers: g.memberPicks };
+        })
+        .filter((g): g is NonNullable<typeof g> => g != null);
+
+      const filteredOther = q
+        ? tripPlaceGrouped.otherPicks.filter((p) => pickMatchesQuery(p, q)).slice(0, 32)
+        : tripPlaceGrouped.otherPicks.slice(0, 32);
+
+      const flat: TripPlacePick[] = [];
+      let cursor = 0;
+      const groupedWithOffsets = filteredGroups.map((g) => {
+        const flatStart = cursor;
+        flat.push(g.centerPick);
+        flat.push(...g.visibleMembers);
+        cursor += 1 + g.visibleMembers.length;
+        return { ...g, flatStart };
+      });
+      const otherStart = cursor;
+      flat.push(...filteredOther);
+      return {
+        localFiltered: flat,
+        groupedStayViews: groupedWithOffsets,
+        groupedOtherPicks: filteredOther,
+        otherFlatStart: otherStart,
+      };
+    }
+    if (!localPicks?.length) {
+      return {
+        localFiltered: [] as TripPlacePick[],
+        groupedStayViews: null,
+        groupedOtherPicks: null,
+        otherFlatStart: 0,
+      };
+    }
     const q = value.trim().toLowerCase();
-    if (!q) return localPicks.slice(0, 24);
-    return localPicks
-      .filter(
-        (p) =>
-          p.label.toLowerCase().includes(q) ||
-          (p.headline && p.headline.toLowerCase().includes(q)) ||
-          (p.subtitle && p.subtitle.toLowerCase().includes(q))
-      )
-      .slice(0, 24);
-  }, [localPicks, value]);
+    if (!q)
+      return {
+        localFiltered: localPicks.slice(0, 24),
+        groupedStayViews: null,
+        groupedOtherPicks: null,
+        otherFlatStart: 0,
+      };
+    return {
+      localFiltered: localPicks
+        .filter(
+          (p) =>
+            p.label.toLowerCase().includes(q) ||
+            (p.headline && p.headline.toLowerCase().includes(q)) ||
+            (p.subtitle && p.subtitle.toLowerCase().includes(q))
+        )
+        .slice(0, 24),
+      groupedStayViews: null,
+      groupedOtherPicks: null,
+      otherFlatStart: 0,
+    };
+  }, [tripPlaceGrouped, localPicks, value]);
 
   const hasRemoteQuery = value.trim().length >= 2;
   const tripRowCount = localFiltered.length;
@@ -214,7 +289,14 @@ export function PlaceSearchInput({
     }
     if (idx < baseRowCount) {
       const hit = hits[idx - tripRowCount];
-      if (hit) applyRemoteHit(hit);
+      if (!hit) return;
+      if (onRemoteSearchPick) {
+        onRemoteSearchPick(hit);
+        setOpen(false);
+        setHits([]);
+      } else {
+        applyRemoteHit(hit);
+      }
       return;
     }
     if (showCreateRow && idx === baseRowCount) {
@@ -299,51 +381,204 @@ export function PlaceSearchInput({
           {localFiltered.length > 0 ? (
             <>
               <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                This trip
+                {t("place.tripPlacesSection")}
               </div>
-              {localFiltered.map((p, i) => {
-                const idx = i;
-                const selected = active === idx;
-                const domId = `${listboxId}-opt-${idx}`;
-                return (
-                  <button
-                    key={p.id}
-                    id={domId}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    className={
-                      selected
-                        ? "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-900 bg-violet-50 dark:bg-violet-950/50 dark:text-zinc-50"
-                        : "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                    }
-                    onMouseEnter={() => setActive(idx)}
-                    onMouseDown={(ev) => ev.preventDefault()}
-                    onClick={() => applyRowIndex(idx)}
-                  >
-                    {p.headline ? (
-                      <>
-                        <span className="leading-snug font-medium text-zinc-900 dark:text-zinc-50">
-                          {p.headline}
-                        </span>
-                        <span className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
-                          {p.label}
-                        </span>
-                        {p.subtitle ? (
-                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <span className="leading-snug font-medium">{p.label}</span>
-                        {p.subtitle ? (
-                          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
-                        ) : null}
-                      </>
-                    )}
-                  </button>
-                );
-              })}
+              {groupedStayViews && groupedStayViews.length > 0 ? (
+                <>
+                  {groupedStayViews.map((g) => (
+                    <Fragment key={g.stepId}>
+                      <div
+                        role="presentation"
+                        className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-zinc-600 dark:text-zinc-300"
+                      >
+                        {g.stayLabel}
+                      </div>
+                      {(() => {
+                        const p = g.centerPick;
+                        const idx = g.flatStart;
+                        const selected = active === idx;
+                        const domId = `${listboxId}-opt-${idx}`;
+                        return (
+                          <button
+                            key={`${g.stepId}-center`}
+                            id={domId}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={
+                              selected
+                                ? "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-900 bg-violet-50 dark:bg-violet-950/50 dark:text-zinc-50"
+                                : "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            }
+                            onMouseEnter={() => setActive(idx)}
+                            onMouseDown={(ev) => ev.preventDefault()}
+                            onClick={() => applyRowIndex(idx)}
+                          >
+                            {p.headline ? (
+                              <>
+                                <span className="leading-snug font-medium text-zinc-900 dark:text-zinc-50">
+                                  {p.headline}
+                                </span>
+                                <span className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+                                  {p.label}
+                                </span>
+                                {p.subtitle ? (
+                                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <>
+                                <span className="leading-snug font-medium">{p.label}</span>
+                                {p.subtitle ? (
+                                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                                ) : null}
+                              </>
+                            )}
+                          </button>
+                        );
+                      })()}
+                      {g.visibleMembers.map((p, mi) => {
+                        const idx = g.flatStart + 1 + mi;
+                        const selected = active === idx;
+                        const domId = `${listboxId}-opt-${idx}`;
+                        return (
+                          <button
+                            key={p.id}
+                            id={domId}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={
+                              selected
+                                ? "flex w-full flex-col gap-0.5 px-3 py-2.5 ps-6 text-start text-zinc-900 bg-violet-50 dark:bg-violet-950/50 dark:text-zinc-50"
+                                : "flex w-full flex-col gap-0.5 px-3 py-2.5 ps-6 text-start text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            }
+                            onMouseEnter={() => setActive(idx)}
+                            onMouseDown={(ev) => ev.preventDefault()}
+                            onClick={() => applyRowIndex(idx)}
+                          >
+                            {p.headline ? (
+                              <>
+                                <span className="leading-snug font-medium text-zinc-900 dark:text-zinc-50">
+                                  {p.headline}
+                                </span>
+                                <span className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+                                  {p.label}
+                                </span>
+                                {p.subtitle ? (
+                                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <>
+                                <span className="leading-snug font-medium">{p.label}</span>
+                                {p.subtitle ? (
+                                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                                ) : null}
+                              </>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </>
+              ) : null}
+              {groupedOtherPicks && groupedOtherPicks.length > 0 ? (
+                <>
+                  {groupedStayViews && groupedStayViews.length > 0 ? (
+                    <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
+                  ) : null}
+                  {groupedOtherPicks.map((p, i) => {
+                    const idx = otherFlatStart + i;
+                    const selected = active === idx;
+                    const domId = `${listboxId}-opt-${idx}`;
+                    return (
+                      <button
+                        key={p.id}
+                        id={domId}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={
+                          selected
+                            ? "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-900 bg-violet-50 dark:bg-violet-950/50 dark:text-zinc-50"
+                            : "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                        }
+                        onMouseEnter={() => setActive(idx)}
+                        onMouseDown={(ev) => ev.preventDefault()}
+                        onClick={() => applyRowIndex(idx)}
+                      >
+                        {p.headline ? (
+                          <>
+                            <span className="leading-snug font-medium text-zinc-900 dark:text-zinc-50">
+                              {p.headline}
+                            </span>
+                            <span className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+                              {p.label}
+                            </span>
+                            {p.subtitle ? (
+                              <span className="text-[10px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <span className="leading-snug font-medium">{p.label}</span>
+                            {p.subtitle ? (
+                              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                            ) : null}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </>
+              ) : null}
+              {!tripPlaceGrouped
+                ? localFiltered.map((p, i) => {
+                    const idx = i;
+                    const selected = active === idx;
+                    const domId = `${listboxId}-opt-${idx}`;
+                    return (
+                      <button
+                        key={p.id}
+                        id={domId}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={
+                          selected
+                            ? "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-900 bg-violet-50 dark:bg-violet-950/50 dark:text-zinc-50"
+                            : "flex w-full flex-col gap-0.5 px-3 py-2.5 text-start text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                        }
+                        onMouseEnter={() => setActive(idx)}
+                        onMouseDown={(ev) => ev.preventDefault()}
+                        onClick={() => applyRowIndex(idx)}
+                      >
+                        {p.headline ? (
+                          <>
+                            <span className="leading-snug font-medium text-zinc-900 dark:text-zinc-50">
+                              {p.headline}
+                            </span>
+                            <span className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+                              {p.label}
+                            </span>
+                            {p.subtitle ? (
+                              <span className="text-[10px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <span className="leading-snug font-medium">{p.label}</span>
+                            {p.subtitle ? (
+                              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{p.subtitle}</span>
+                            ) : null}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })
+                : null}
             </>
           ) : null}
 

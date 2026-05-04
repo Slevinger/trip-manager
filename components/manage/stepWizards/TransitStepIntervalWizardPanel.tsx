@@ -1,8 +1,8 @@
 "use client";
 
-import { DestinationPlaceSearchInput } from "@/components/manage/DestinationPlaceSearchInput";
+import { DestinationsInput } from "@/components/manage/DestinationsInput";
 import { appendStepInterval, destinationFromPlacePick, destinationFromTypedLocation } from "@/lib/canonicalStepBuilders";
-import type { TripPlacePick } from "@/lib/tripLocationCatalog";
+import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
 import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import { intervalIndexFromFrame, STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardFrame } from "@/lib/wizardStack/types";
@@ -20,7 +20,7 @@ export function TransitStepIntervalWizardPanel({
   wizard,
   tripStartIso,
   trip,
-  tripPlacePicks,
+  tripPlaceGrouped,
   getRow,
   setRow,
   onAppendDestinations,
@@ -32,7 +32,7 @@ export function TransitStepIntervalWizardPanel({
   wizard: WizardStackControls;
   tripStartIso: string;
   trip: Trip;
-  tripPlacePicks?: TripPlacePick[];
+  tripPlaceGrouped: TripGroupedPlacePicks;
   getRow: (id: string | undefined) => Destination;
   setRow: (id: string, row: Destination) => void;
   onAppendDestinations: (rows: Destination[]) => void;
@@ -114,10 +114,10 @@ export function TransitStepIntervalWizardPanel({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               Leg from (address)
-              <DestinationPlaceSearchInput
+              <DestinationsInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 placeholder="Pick trip place or search…"
-                localPicks={tripPlacePicks}
+                tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={(d) => onAppendDestinations([d])}
                 value={getRow(legFromId).location}
                 onChange={(location) => {
@@ -139,10 +139,10 @@ export function TransitStepIntervalWizardPanel({
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               Leg to (address)
-              <DestinationPlaceSearchInput
+              <DestinationsInput
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 placeholder="Pick trip place or search…"
-                localPicks={tripPlacePicks}
+                tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={(d) => onAppendDestinations([d])}
                 value={getRow(legToId).location}
                 onChange={(location) => {
