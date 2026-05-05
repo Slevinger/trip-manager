@@ -54,12 +54,12 @@ const en = {
   "trip.notFoundBody": "It may have been deleted or you don't have access.",
   "trip.saveTargetFirestore": "Firestore collection canonicalTrips",
   "trip.saveTargetLocal": "localStorage",
-  "trip.destMissingOne": "One destination has no map coordinates yet.",
-  "trip.destMissingMany": "{count} destinations have no map coordinates yet.",
-  "trip.destMissingSuffix": "Set a pin so they appear on the route map.",
-  "trip.setLocation": "Set location",
+  "trip.destMissingOne": "One destination is not placed on the itinerary map yet.",
+  "trip.destMissingMany": "{count} destinations are not placed on the itinerary map yet.",
+  "trip.destMissingSuffix": "Open each destination and choose a place so the route map can connect them.",
+  "trip.setLocation": "Edit destination",
   "trip.destReadOnlyHint":
-    "Sign in with an account that can edit this trip to set locations from here, or ask the owner to add map pins in Manage.",
+    "Sign in with an account that can edit this trip to finish destinations from here, or ask the owner to complete them in Manage.",
   "trip.advancedJson": "Advanced JSON",
   "trip.advancedJsonIdHint": "id must stay",
   "trip.saveFromJson": "Save from JSON",
@@ -139,7 +139,7 @@ const en = {
   "trip.jsonIdMismatch": "JSON must be an object whose id matches this trip URL.",
 
   "manage.workspaceDestHelp":
-    "Where destinations live: the trip keeps one destinations list (title, description, coordinates); each step references those rows by id. Open Edit and use the search address fields — Google addresses plus OpenStreetMap (Photon) via /api/places/search when configured.",
+    "Destinations are the heart of the trip: one registry row per place you care about (title, notes, and an optional map placement). Itinerary steps reference those rows by id. In Edit, name each destination and use address search to attach a place — Google plus OpenStreetMap (Photon) via /api/places/search when configured.",
   "manage.steps": "Steps",
   "manage.addStep": "Add step",
   "manage.saveTrip": "Save trip",
@@ -226,8 +226,8 @@ const en = {
   "view.destinationsNoSteps": " — step references load with your itinerary.",
   "view.editPlaceHint":
     " To edit a place, open Manage → Edit on the step listed below.",
-  "view.onMap": "On map",
-  "view.noPin": "No pin",
+  "view.onMap": "Placement set",
+  "view.noPin": "Needs placement",
   "view.referencedIn": "Referenced in",
   "view.orphanDestination":
     "Not referenced by any current step (orphan). It will be removed on save if still unused, or attach it via Edit on a step.",
@@ -284,19 +284,19 @@ const en = {
   "view.intervalSlot": "Slot",
   "view.placeUnknown": "?",
 
-  "map.noPinsTitle": "No map pins yet",
+  "map.noPinsTitle": "No destinations on the map yet",
   "map.noPinsBody":
-    "Each destination appears here once it has saved coordinates (pick a place in Manage). Itinerary uses of a place are listed on that destination’s pin. Connectors show legs between steps when coordinates allow.",
+    "Your trip destinations live in the list below; open Manage to name each one and attach a place. When a destination has a saved place, it shows here and lists every itinerary stay or stop that uses it. Lines link legs between steps when placements allow.",
   "map.destination": "Destination",
   "map.routeMapTitle": "Route map",
   "map.pinsGuideTap":
-    "Tap a pin for details. Each marker is one saved destination; any itinerary use of that place is listed on the same pin.",
+    "Tap a marker for that destination’s details—every itinerary use of it appears together on the same card.",
   "map.pinsGuideHover":
-    "Hover a pin for details. Each marker is one saved destination; any itinerary use of that place is listed on the same pin.",
+    "Hover a marker for that destination’s details—every itinerary use of it appears together on the same card.",
   "map.destPinDblClickEdit":
-    "Double-click any destination pin (or the highlighted activity pin) to open the place editor.",
+    "Double-click a destination marker (or the highlighted activity marker) to edit that destination.",
   "map.preparingMap": "Preparing map…",
-  "map.staysAtThisPin": "{count} stays at this map pin",
+  "map.staysAtThisPin": "{count} stays at this destination",
   "map.stayAreaCircle": "Stay area",
   "map.stayAreaCircleRadius": "Radius ≈ {km} km",
   "map.stayAreaDestinationsHeading": "Destinations in this area",
@@ -383,12 +383,12 @@ const he: Record<MessageKey, string> = {
   "trip.notFoundBody": "ייתכן שנמחק או שאין לכם גישה.",
   "trip.saveTargetFirestore": "אוסף Firestore canonicalTrips",
   "trip.saveTargetLocal": "localStorage",
-  "trip.destMissingOne": "ליעד אחד אין עדיין קואורדינטות במפה.",
-  "trip.destMissingMany": "ל-{count} יעדים אין עדיין קואורדינטות במפה.",
-  "trip.destMissingSuffix": "קבעו נקודה כדי שיופיעו במפת המסלול.",
-  "trip.setLocation": "קביעת מיקום",
+  "trip.destMissingOne": "יעד אחד עדיין לא מוצג במפת המסלול.",
+  "trip.destMissingMany": "{count} יעדים עדיין לא מוצגים במפת המסלול.",
+  "trip.destMissingSuffix": "פתחו כל יעד ובחרו מקום כדי שניתן יהיה לחברם במפה.",
+  "trip.setLocation": "עריכת יעד",
   "trip.destReadOnlyHint":
-    "התחברו עם חשבון שיכול לערוך את הטיול כדי לקבוע מיקומים מכאן, או בקשו מהבעלים להוסיף סיכות במפה בניהול.",
+    "התחברו עם חשבון שיכול לערוך את הטיול כדי להשלים יעדים מכאן, או בקשו מהבעלים להשלים אותם בניהול.",
   "trip.advancedJson": "JSON מתקדם",
   "trip.advancedJsonIdHint": "שדה id חייב להישאר",
   "trip.saveFromJson": "שמירה מ-JSON",
@@ -464,7 +464,7 @@ const he: Record<MessageKey, string> = {
   "trip.jsonIdMismatch": "ה-JSON חייב להיות אובייקט שבו id תואם לכתובת הטיול.",
 
   "manage.workspaceDestHelp":
-    "איפה היעדים: לטיול יש רשימת destinations אחת (כותרת, תיאור, קואורדינטות); כל שלב מפנה לשורות לפי id. פתחו עריכה והשתמשו בשדות חיפוש כתובת — כתובות Google ו-OpenStreetMap (Photon) דרך /api/places/search כשמוגדר.",
+    "היעדים הם ליבת הטיול: שורת רישום לכל מקום חשוב (כותרת, הערות ומיקום אופציונלי במפה). שלבי המסלול מפנים לשורות האלה לפי id. בעריכה תנו שם לכל יעד והשתמשו בחיפוש כתובת כדי לצרף מקום — Google ו-OpenStreetMap (Photon) דרך /api/places/search כשמוגדר.",
   "manage.steps": "שלבים",
   "manage.addStep": "הוספת שלב",
   "manage.saveTrip": "שמירת טיול",
@@ -549,8 +549,8 @@ const he: Record<MessageKey, string> = {
   "view.destinationsWithSteps": " — כל id מציג איפה הוא מופיע במסלול (שמות שדות בסוגריים).",
   "view.destinationsNoSteps": " — הפניות מהשלבים נטענות עם המסלול.",
   "view.editPlaceHint": " לעריכת מקום, פתחו ניהול → עריכה בשלב המתאים למטה.",
-  "view.onMap": "במפה",
-  "view.noPin": "ללא נקודה",
+  "view.onMap": "מיקום הוגדר",
+  "view.noPin": "חסר מיקום",
   "view.referencedIn": "מופיע ב",
   "view.orphanDestination":
     "לא מקושר לשלב נוכחי (יתום). יימחק בשמירה אם עדיין לא בשימוש, או קשרו דרך עריכה בשלב.",
@@ -606,19 +606,19 @@ const he: Record<MessageKey, string> = {
   "view.intervalSlot": "משבצת",
   "view.placeUnknown": "?",
 
-  "map.noPinsTitle": "אין עדיין נקודות במפה",
+  "map.noPinsTitle": "אין עדיין יעדים במפה",
   "map.noPinsBody":
-    "כל יעד מופיע כאן לאחר שנשמרו לו קואורדינטות (בחירת מקום בניהול). שימושי המסלול באותו מקום מוצגים תחת סמן היעד. קווים מחברים רגליים כשיש קואורדינטות.",
+    "יעדי הטיול מופיעים ברשימה למטה; בניהול אפשר לתת לכל יעד שם ולצרף מקום. יעד עם מקום שמור יוצג כאן עם כל שהייה או עצירה במסלול שמשתמשים בו. קווים מקשרים רגליים כשיש מיקומים מתאימים.",
   "map.destination": "יעד",
   "map.routeMapTitle": "מפת מסלול",
   "map.pinsGuideTap":
-    "הקישו על סמן לפרטים. כל סמן הוא יעד שמור; כל שימוש במסלול באותו מקום מופיע באותו כרטיס.",
+    "הקישו על סמן לפרטי היעד—כל שימוש במסלול באותו יעד מופיע יחד באותו כרטיס.",
   "map.pinsGuideHover":
-    "רחפו מעל סמן לפרטים. כל סמן הוא יעד שמור; כל שימוש במסלול באותו מקום מופיע באותו כרטיס.",
+    "רחפו מעל סמן לפרטי היעד—כל שימוש במסלול באותו יעד מופיע יחד באותו כרטיס.",
   "map.destPinDblClickEdit":
-    "לחיצה כפולה על סמן יעד (או על סמן הפעילות המודגש) פותחת את עורך המקום.",
+    "לחיצה כפולה על סמן יעד (או על סמן פעילות מודגש) פותחת עריכת היעד.",
   "map.preparingMap": "מכין מפה…",
-  "map.staysAtThisPin": "{count} שהיות בנקודה הזו במפה",
+  "map.staysAtThisPin": "{count} שהיות ביעד הזה",
   "map.stayAreaCircle": "אזור שהייה",
   "map.stayAreaCircleRadius": "רדיוס ≈ {km} ק״מ",
   "map.stayAreaDestinationsHeading": "יעדים באזור",
@@ -704,12 +704,12 @@ const ru: Record<MessageKey, string> = {
   "trip.notFoundBody": "Возможно, она удалена или у вас нет доступа.",
   "trip.saveTargetFirestore": "Коллекция Firestore canonicalTrips",
   "trip.saveTargetLocal": "localStorage",
-  "trip.destMissingOne": "У одного пункта назначения пока нет координат на карте.",
-  "trip.destMissingMany": "У {count} пунктов назначения пока нет координат на карте.",
-  "trip.destMissingSuffix": "Установите метку, чтобы они отображались на карте маршрута.",
-  "trip.setLocation": "Задать местоположение",
+  "trip.destMissingOne": "Один пункт назначения ещё не размещён на карте маршрута.",
+  "trip.destMissingMany": "{count} пунктов назначения ещё не размещены на карте маршрута.",
+  "trip.destMissingSuffix": "Откройте каждый пункт и выберите место, чтобы карта могла связать их.",
+  "trip.setLocation": "Редактировать пункт",
   "trip.destReadOnlyHint":
-    "Войдите под аккаунтом с правом редактирования этой поездки, чтобы задать точки здесь, или попросите владельца добавить метки в разделе «Управление».",
+    "Войдите под аккаунтом с правом редактирования этой поездки, чтобы дополнить пункты здесь, или попросите владельца сделать это в разделе «Управление».",
   "trip.advancedJson": "Расширенный JSON",
   "trip.advancedJsonIdHint": "поле id не менять",
   "trip.saveFromJson": "Сохранить из JSON",
@@ -790,7 +790,7 @@ const ru: Record<MessageKey, string> = {
   "trip.jsonIdMismatch": "JSON должен быть объектом, у которого id совпадает с URL поездки.",
 
   "manage.workspaceDestHelp":
-    "Где живут пункты назначения: у поездки один список destinations (название, описание, координаты); шаги ссылаются на строки по id. Откройте Правка и поля поиска адреса — Google и OpenStreetMap (Photon) через /api/places/search при настройке.",
+    "Пункты назначения — основа поездки: одна строка реестра на каждое важное место (название, заметки и при желании положение на карте). Шаги маршрута ссылаются на эти строки по id. В Правке задайте название и через поиск адреса привяжите место — Google и OpenStreetMap (Photon) через /api/places/search при настройке.",
   "manage.steps": "Шаги",
   "manage.addStep": "Добавить шаг",
   "manage.saveTrip": "Сохранить поездку",
@@ -877,8 +877,8 @@ const ru: Record<MessageKey, string> = {
   "view.destinationsNoSteps": " — ссылки шагов подгружаются с маршрутом.",
   "view.editPlaceHint":
     " Чтобы править место, откройте Управление → Правка на шаге ниже.",
-  "view.onMap": "На карте",
-  "view.noPin": "Без метки",
+  "view.onMap": "Место задано",
+  "view.noPin": "Нужно место",
   "view.referencedIn": "Используется в",
   "view.orphanDestination":
     "Ни один текущий шаг не ссылается (осиротевший). Удалится при сохранении, если не используется, или привяжите через Правка на шаге.",
@@ -934,19 +934,19 @@ const ru: Record<MessageKey, string> = {
   "view.intervalSlot": "Слот",
   "view.placeUnknown": "?",
 
-  "map.noPinsTitle": "Пока нет меток на карте",
+  "map.noPinsTitle": "Пока нет пунктов на карте",
   "map.noPinsBody":
-    "Каждый пункт появится здесь после сохранения координат (выберите место в Управлении). Использования в маршруте показаны на метке этого пункта. Линии соединяют отрезки, когда координаты позволяют.",
+    "Пункты назначения поездки перечислены ниже; в Управлении задайте название и привяжите место к каждому. Сохранённое место показывается здесь вместе со всеми остановками маршрута, где используется этот пункт. Линии между отрезками появляются, когда заданы места.",
   "map.destination": "Пункт назначения",
   "map.routeMapTitle": "Карта маршрута",
   "map.pinsGuideTap":
-    "Нажимайте на метку для подробностей. Каждая метка — один сохранённый пункт; все использования в маршруте показаны в том же описании.",
+    "Нажимайте на маркер — откроются сведения о пункте назначения; все его использования в маршруте собраны на одной карточке.",
   "map.pinsGuideHover":
-    "Наводите курсор на метку для подробностей. Каждая метка — один сохранённый пункт; все использования в маршруте показаны в том же описании.",
+    "Наводите курсор на маркер — сведения о пункте назначения; все его использования в маршруте на одной карточке.",
   "map.destPinDblClickEdit":
-    "Двойной щелчок по любой метке пункта назначения (или по выделенной метке активности) открывает редактор места.",
+    "Двойной щелчок по маркеру пункта назначения (или по выделенному маркеру активности) открывает редактирование пункта.",
   "map.preparingMap": "Подготовка карты…",
-  "map.staysAtThisPin": "{count} проживаний в этой точке карты",
+  "map.staysAtThisPin": "{count} проживаний в этом пункте",
   "map.stayAreaCircle": "Зона проживания",
   "map.stayAreaCircleRadius": "Радиус ≈ {km} км",
   "map.stayAreaDestinationsHeading": "Пункты в этой зоне",

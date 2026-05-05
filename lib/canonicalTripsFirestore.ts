@@ -280,8 +280,16 @@ export async function saveCanonicalTrip(
   user: User
 ): Promise<void> {
   const ref = tripDocRef(db, trip.id);
-  const snap = await getDoc(ref);
-  const existing = snap.exists() ? snap.data() : null;
+  let existing: DocumentData | null = null;
+  try {
+    const snap = await getDoc(ref);
+    existing = snap.exists() ? snap.data() : null;
+  } catch (err) {
+    const code = firestoreErrCode(err);
+    if (!code.includes("permission-denied")) throw err;
+    // Some rulesets deny reading a non-existent doc path; allow create attempt to proceed.
+    existing = null;
+  }
   const ownerUid = existing ? String(existing[OWNER_UID] ?? "") : user.uid;
   if (existing && !userCanManageCanonicalTripDoc(user, existing)) {
     throw new Error("Only the trip owner or a listed traveler can save changes.");

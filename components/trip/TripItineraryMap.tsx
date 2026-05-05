@@ -181,15 +181,13 @@ function formatFirestoreInstantForLocale(raw: unknown, intlLocale: string): stri
   return new Date(ms).toLocaleString(intlLocale);
 }
 
-function applyFitBounds(map: LeafletMap, points: LatLng[], focus: LatLng | null) {
-  if (points.length === 0 && !focus) return;
-  const list = focus ? [...points, focus] : [...points];
-  if (list.length === 0) return;
-  if (list.length === 1) {
-    map.setView([list[0].lat, list[0].lng], 11, { animate: false });
+function applyFitBounds(map: LeafletMap, points: LatLng[]) {
+  if (points.length === 0) return;
+  if (points.length === 1) {
+    map.setView([points[0]!.lat, points[0]!.lng], 11, { animate: false });
     return;
   }
-  const b = L.latLngBounds(list.map((p) => [p.lat, p.lng] as L.LatLngTuple));
+  const b = L.latLngBounds(points.map((p) => [p.lat, p.lng] as L.LatLngTuple));
   map.fitBounds(b, { padding: [32, 32], maxZoom: 12, animate: false });
 }
 
@@ -335,16 +333,16 @@ function DestinationPinTooltipBody({
   );
 }
 
-/** Re-fit when trip data changes; defer one frame so tile panes exist (avoids appendChild errors). */
-function MapFitBoundsOnDataChange({ points, focus }: { points: LatLng[]; focus: LatLng | null }) {
+/** Re-fit when destination pins change; defer one frame so tile panes exist (avoids appendChild errors). */
+function MapFitBoundsOnDataChange({ points }: { points: LatLng[] }) {
   const map = useMap();
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       map.invalidateSize();
-      applyFitBounds(map, points, focus);
+      applyFitBounds(map, points);
     });
     return () => cancelAnimationFrame(id);
-  }, [map, points, focus]);
+  }, [map, points]);
   return null;
 }
 
@@ -467,7 +465,8 @@ function StayAreaCircleLayers({
 
 type TripLeafletMapInnerProps = {
   center: LatLng;
-  allPoints: LatLng[];
+  /** Bounds fitting uses destination pins only — not transit geometry or live location. */
+  fitBoundsPoints: LatLng[];
   focusLatLng: LatLng | null;
   transitEdges: TransitMapEdge[];
   destinationPins: DestinationListPin[];
@@ -495,7 +494,7 @@ type LiveMapPoint = {
  */
 function TripLeafletMapInner({
   center,
-  allPoints,
+  fitBoundsPoints,
   focusLatLng,
   transitEdges,
   destinationPins,
@@ -538,7 +537,7 @@ function TripLeafletMapInner({
       {layersReady ? (
         <>
           <TileLayer attribution={MAP_TILE_ATTRIBUTION} url={MAP_TILE_URL} />
-          <MapFitBoundsOnDataChange points={allPoints} focus={focusLatLng} />
+          <MapFitBoundsOnDataChange points={fitBoundsPoints} />
           <StayAreaCircleLayers
             circles={stayAreaCircles}
             touchPrimary={touchPrimary}
@@ -779,7 +778,12 @@ export function TripItineraryMap({
       .filter((row): row is LiveMapPoint => Boolean(row));
   }, [liveLocations, intlLocale]);
 
-  const allPoints = useMemo(() => {
+  const fitBoundsPoints = useMemo(
+    () => destinationPins.map((r) => r.position),
+    [destinationPins]
+  );
+
+  const hasRenderableMapContent = useMemo(() => {
     const pts: LatLng[] = [];
     for (const e of transitEdges) {
       pts.push(e.from, e.to);
@@ -790,8 +794,8 @@ export function TripItineraryMap({
     for (const m of liveMarkers) {
       pts.push(m.position);
     }
-    return pts;
-  }, [transitEdges, destinationPins, liveMarkers]);
+    return pts.length > 0 || focusLatLng != null;
+  }, [transitEdges, destinationPins, liveMarkers, focusLatLng]);
 
   /** Avoid mounting Leaflet until layout exists (fixes TileLayer / pane appendChild races with React 19). */
   const [domReady, setDomReady] = useState(false);
@@ -808,7 +812,7 @@ export function TripItineraryMap({
     };
   }, []);
 
-  const hasMap = allPoints.length > 0 || focusLatLng != null;
+  const hasMap = hasRenderableMapContent;
   const touchPrimary = useTouchPrimary();
 
   if (!hasMap) {
@@ -821,9 +825,9 @@ export function TripItineraryMap({
   }
 
   const center =
-    focusLatLng ??
     destinationPins[0]?.position ??
     transitEdges[0]?.from ??
+    focusLatLng ??
     liveMarkers[0]?.position ??
     { lat: 0, lng: 0 };
 
@@ -845,7 +849,7 @@ export function TripItineraryMap({
           <TripLeafletMapInner
             key={tripId}
             center={center}
-            allPoints={allPoints}
+            fitBoundsPoints={fitBoundsPoints}
             focusLatLng={focusLatLng}
             transitEdges={transitEdges}
             destinationPins={destinationPins}
