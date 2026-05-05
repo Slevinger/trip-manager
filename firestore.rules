@@ -303,9 +303,23 @@ service cloud.firestore {
      */
     /** Canonical trips: signed-in + owner / participant / traveler rules (app enforces Google in UI). */
     match /canonicalTrips/{tripId} {
+      /**
+       * The `array-contains` branch is INLINED (not delegated to a helper) and uses
+       * the literal token expression — Firestore's query rule validator can only
+       * statically prove `where(participantEmailsLower, "array-contains", X)` is safe
+       * when the rule contains the exact `participantEmailsLower.hasAny([X])` pattern
+       * with `X` matching the query argument. Helper-function indirection (e.g.
+       * `currentEmailLower()`) caused the analyzer to refuse the query, silently
+       * sending non-owner participants down the owner-only fallback in
+       * `subscribeMyCanonicalTrips` (i.e. they saw zero shared trips).
+       */
       allow read: if signedIn() && (
         resource.data.ownerUid == request.auth.uid ||
-        canonicalTripParticipantEmailRead() ||
+        (
+          request.auth.token.email is string &&
+          resource.data.participantEmailsLower is list &&
+          resource.data.participantEmailsLower.hasAny([request.auth.token.email.lower()])
+        ) ||
         canonicalTripNestedPartyEmailRead()
       );
       allow create: if signedIn() &&

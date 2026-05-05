@@ -1,14 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import { DestinationsInput } from "@/components/manage/DestinationsInput";
-import { appendGeoPickComment, notesToText, textToNotes } from "@/components/manage/stepWizards/wizardShared";
+import {
+  destinationFromPlacePick,
+  destinationFromTypedLocation,
+} from "@/lib/canonicalStepBuilders";
 import { useI18n } from "@/lib/i18n/context";
-import { destinationFromPlacePick, destinationFromTypedLocation } from "@/lib/canonicalStepBuilders";
 import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
+import type { Destination, StayStep } from "@/lib/types/trip";
 import { STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
-import type { Destination, StayStep } from "@/lib/types/trip";
+
+import {
+  appendGeoPickComment,
+  notesToText,
+  textToNotes,
+  useWizardDirection,
+  WIZARD_INPUT_CLASS,
+  WIZARD_INPUT_CLASS_LARGE,
+  WIZARD_TEXTAREA_CLASS,
+  WizardField,
+  WizardNavRow,
+  WizardPage,
+  WizardPageHeading,
+  WizardSection,
+} from "./wizardShared";
 
 const STAY_STEP_WIZARD_PAGE_COUNT = 2;
 
@@ -44,10 +62,12 @@ export function StayStepWizardPanel({
   useEffect(() => {
     if (!draft.areaCenterDestinationId) setAreaCenterDraftLocation("");
   }, [draft.areaCenterDestinationId]);
+
   const page = Math.min(
     Math.max(0, wizard.top?.step ?? 0),
     STAY_STEP_WIZARD_PAGE_COUNT - 1
   );
+  const direction = useWizardDirection(page);
 
   function goIntervalWizard() {
     const td = mainPlace;
@@ -65,69 +85,90 @@ export function StayStepWizardPanel({
   }
 
   return (
-    <div className="space-y-4">
-      {page === 0 ? (
-        <>
-          <p className="text-xs font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">
-            Stay step
-          </p>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            Step title
-            <input
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={draft.title}
-              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+    <div className="space-y-6">
+      <WizardPage pageKey={page} direction={direction}>
+        {page === 0 ? (
+          <div className="space-y-5">
+            <WizardPageHeading
+              eyebrow="Stay step"
+              title="Where will you be staying?"
+              subtitle="Give the step a name and pin the place — hotel, resort, or area you're sleeping in."
+              accent="violet"
             />
-          </label>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            Place name
-            <input
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={mainPlace.title}
-              onChange={(e) => setMainPlace({ ...mainPlace, title: e.target.value })}
-            />
-          </label>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            Search address (autocomplete)
-            <DestinationsInput
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              placeholder="Type at least 2 characters…"
-              tripPlaceGrouped={tripPlaceGrouped}
-              onRegisterNewDestination={onRegisterNewDestination}
-              value={mainPlace.location}
-              onChange={(location) => {
-                setMainPlace(destinationFromTypedLocation(mainPlace, location));
-              }}
-              onPick={(pick) => {
-                const merged = destinationFromPlacePick(pick, { id: mainPlace.id });
-                const titleGuess = mainPlace.title.trim() ? mainPlace.title : merged.title;
-                const td = { ...merged, title: titleGuess };
-                const int0 = draft.stepIntervals[0];
-                const nextComment =
-                  int0?.intervalType === "stay"
-                    ? appendGeoPickComment(int0.comment, td.location)
-                    : td.location;
-                setMainPlace(td);
-                setDraft({
-                  ...draft,
-                  ...(merged.id !== draft.targetDestinationId
-                    ? { targetDestinationId: merged.id }
-                    : {}),
-                  title: draft.title.trim() ? draft.title : titleGuess,
-                  stepIntervals: draft.stepIntervals.map((int, i) =>
-                    i === 0 && int.intervalType === "stay"
-                      ? { ...int, location: td.location, comment: nextComment }
-                      : int
-                  ),
-                });
-              }}
-            />
-          </label>
-          <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
-            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              {t("manage.stayAreaCenterLabel")}
+
+            <WizardField
+              htmlFor="stay-step-title"
+              label="Step title"
+              hint="Shows up in the itinerary list and on the map."
+            >
+              <input
+                id="stay-step-title"
+                className={WIZARD_INPUT_CLASS_LARGE}
+                placeholder="e.g., Phuket — Bangtao villa"
+                value={draft.title}
+                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              />
+            </WizardField>
+
+            <WizardField
+              htmlFor="stay-step-place-name"
+              label="Place name"
+              hint="A short label for the property — used as the map pin title."
+            >
+              <input
+                id="stay-step-place-name"
+                className={WIZARD_INPUT_CLASS}
+                placeholder="Hotel, villa or rental name"
+                value={mainPlace.title}
+                onChange={(e) => setMainPlace({ ...mainPlace, title: e.target.value })}
+              />
+            </WizardField>
+
+            <WizardField
+              label="Search address"
+              hint="Pick from your trip's saved places, or search Google + OpenStreetMap to drop a new pin."
+            >
               <DestinationsInput
-                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                className={WIZARD_INPUT_CLASS}
+                placeholder="Type at least 2 characters…"
+                tripPlaceGrouped={tripPlaceGrouped}
+                onRegisterNewDestination={onRegisterNewDestination}
+                value={mainPlace.location}
+                onChange={(location) => {
+                  setMainPlace(destinationFromTypedLocation(mainPlace, location));
+                }}
+                onPick={(pick) => {
+                  const merged = destinationFromPlacePick(pick, { id: mainPlace.id });
+                  const titleGuess = mainPlace.title.trim() ? mainPlace.title : merged.title;
+                  const td = { ...merged, title: titleGuess };
+                  const int0 = draft.stepIntervals[0];
+                  const nextComment =
+                    int0?.intervalType === "stay"
+                      ? appendGeoPickComment(int0.comment, td.location)
+                      : td.location;
+                  setMainPlace(td);
+                  setDraft({
+                    ...draft,
+                    ...(merged.id !== draft.targetDestinationId
+                      ? { targetDestinationId: merged.id }
+                      : {}),
+                    title: draft.title.trim() ? draft.title : titleGuess,
+                    stepIntervals: draft.stepIntervals.map((int, i) =>
+                      i === 0 && int.intervalType === "stay"
+                        ? { ...int, location: td.location, comment: nextComment }
+                        : int
+                    ),
+                  });
+                }}
+              />
+            </WizardField>
+
+            <WizardSection
+              title={t("manage.stayAreaCenterLabel")}
+              hint={t("manage.stayAreaCenterHint")}
+            >
+              <DestinationsInput
+                className={WIZARD_INPUT_CLASS}
                 placeholder={t("manage.optional")}
                 tripPlaceGrouped={tripPlaceGrouped}
                 onRegisterNewDestination={onRegisterNewDestination}
@@ -162,72 +203,58 @@ export function StayStepWizardPanel({
                   }
                 }}
               />
-            </label>
-            <p className="mt-2 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-              {t("manage.stayAreaCenterHint")}
-            </p>
-            {draft.areaCenterDestinationId ? (
-              <button
-                type="button"
-                onClick={onClearAreaCenter}
-                className="mt-2 text-xs font-medium text-zinc-600 underline decoration-zinc-400 underline-offset-2 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-              >
-                {t("manage.stayAreaCenterClear")}
-              </button>
-            ) : null}
+              {draft.areaCenterDestinationId ? (
+                <button
+                  type="button"
+                  onClick={onClearAreaCenter}
+                  className="self-start text-xs font-medium text-violet-600 underline decoration-violet-300 underline-offset-2 hover:text-violet-700 dark:text-violet-300 dark:hover:text-violet-200"
+                >
+                  {t("manage.stayAreaCenterClear")}
+                </button>
+              ) : null}
+            </WizardSection>
           </div>
-        </>
-      ) : (
-        <>
-          <p className="text-xs font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">
-            Stay step
-          </p>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            Step notes (one line each)
-            <textarea
-              rows={3}
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={notesToText(draft.notes)}
-              onChange={(e) => setDraft({ ...draft, notes: textToNotes(e.target.value) })}
-            />
-          </label>
-        </>
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-        <button
-          type="button"
-          disabled={page <= 0 && !wizard.canPop}
-          onClick={() =>
-            page <= 0 && wizard.canPop
-              ? wizard.pop()
-              : wizard.setTopStep(page - 1)
-          }
-          className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-100"
-        >
-          ← {page <= 0 && wizard.canPop ? "Step type" : "Previous"}
-        </button>
-        <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-          Stay step · {page + 1} / {STAY_STEP_WIZARD_PAGE_COUNT}
-        </p>
-        {page < STAY_STEP_WIZARD_PAGE_COUNT - 1 ? (
-          <button
-            type="button"
-            onClick={() => wizard.setTopStep(page + 1)}
-            className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-800 dark:border-zinc-700 dark:text-zinc-100"
-          >
-            Next →
-          </button>
         ) : (
-          <button
-            type="button"
-            onClick={goIntervalWizard}
-            className="rounded-xl border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100"
-          >
-            Stay interval →
-          </button>
+          <div className="space-y-5">
+            <WizardPageHeading
+              eyebrow="Stay step"
+              title="Anything to remember?"
+              subtitle="Notes appear with this step on the itinerary — booking refs, check-in tips, hosts."
+              accent="violet"
+            />
+
+            <WizardField
+              htmlFor="stay-step-notes"
+              label="Step notes"
+              optional
+              hint="One thought per line."
+            >
+              <textarea
+                id="stay-step-notes"
+                rows={5}
+                className={WIZARD_TEXTAREA_CLASS}
+                placeholder={"e.g.,\nCheck-in 3pm\nBooking ref #ABC123\nFront desk speaks English"}
+                value={notesToText(draft.notes)}
+                onChange={(e) => setDraft({ ...draft, notes: textToNotes(e.target.value) })}
+              />
+            </WizardField>
+          </div>
         )}
-      </div>
+      </WizardPage>
+
+      <WizardNavRow
+        page={page}
+        totalPages={STAY_STEP_WIZARD_PAGE_COUNT}
+        prevLabel={page <= 0 && wizard.canPop ? "Step type" : "Previous"}
+        nextLabel="Next"
+        accent="violet"
+        prevDisabled={page <= 0 && !wizard.canPop}
+        onPrev={() =>
+          page <= 0 && wizard.canPop ? wizard.pop() : wizard.setTopStep(page - 1)
+        }
+        onNext={() => wizard.setTopStep(page + 1)}
+        finalAction={{ label: "Stay interval", onClick: goIntervalWizard }}
+      />
     </div>
   );
 }

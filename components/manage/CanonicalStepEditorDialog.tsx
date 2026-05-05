@@ -22,7 +22,6 @@ import {
   syncStepTimesFromIntervals,
 } from "@/lib/canonicalStepBuilders";
 import { newId } from "@/lib/canonicalIds";
-import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import { stepIntervalEmoji } from "@/lib/stepIntervalUi";
 import { collectStayGroupedTripPlacePicks } from "@/lib/tripLocationCatalog";
 import {
@@ -31,6 +30,11 @@ import {
   mergeDestinationLists,
 } from "@/lib/tripDestinationRegistry";
 import { useI18n } from "@/lib/i18n/context";
+import { intlLocaleForApp } from "@/lib/i18n/messages";
+import {
+  DateTimeRangeCalendar,
+  StartTimeAndDuration,
+} from "@/components/dateRange/DateRangeCalendar";
 import { STEP_WIZARD_IDS, type WizardFrame } from "@/lib/wizardStack/types";
 import { useWizardStack } from "@/lib/wizardStack/useWizardStack";
 import type {
@@ -170,7 +174,8 @@ export function CanonicalStepEditorDialog({
     () => collectStayGroupedTripPlacePicks(stepsForPicks, mergedDestinations),
     [stepsForPicks, mergedDestinations]
   );
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
 
   useEffect(() => {
     const wasOpen = prevOpen.current;
@@ -386,8 +391,6 @@ export function CanonicalStepEditorDialog({
       patchIntervalAt(intervalIdx, patch);
     }
 
-    const intervalStart = isoToDatetimeLocalValue(active.startTime);
-    const intervalEnd = isoToDatetimeLocalValue(active.endTime);
     const startLabel = multiInterval ? "Interval start" : "Start (primary interval)";
     const endLabel = multiInterval ? "Interval end" : "End (primary interval)";
     const commentLabel = multiInterval ? "Interval comment" : "Primary interval comment";
@@ -890,29 +893,48 @@ export function CanonicalStepEditorDialog({
           />
         </label>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            {startLabel}
-            <input
-              type="datetime-local"
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={intervalStart}
-              onChange={(e) =>
-                patchActiveInterval({ startTime: datetimeLocalValueToIso(e.target.value) })
-              }
-            />
-          </label>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            {endLabel}
-            <input
-              type="datetime-local"
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={intervalEnd}
-              onChange={(e) =>
-                patchActiveInterval({ endTime: datetimeLocalValueToIso(e.target.value) })
-              }
-            />
-          </label>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          {draft.stepType === "transit" ? (
+            <>
+              <p className="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                {startLabel} · {endLabel}
+              </p>
+              <StartTimeAndDuration
+                startIso={active.startTime}
+                endIso={active.endTime}
+                onChange={(startIso, endIso) =>
+                  patchActiveInterval({
+                    startTime: startIso || active.startTime,
+                    endTime: endIso || active.endTime,
+                  })
+                }
+                intlLocale={intlLocale}
+                startLabel={startLabel}
+                durationLabel="Duration"
+              />
+            </>
+          ) : (
+            <>
+              <p className="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                {startLabel} → {endLabel}
+              </p>
+              <DateTimeRangeCalendar
+                startIso={active.startTime}
+                endIso={active.endTime}
+                onChange={(startIso, endIso) =>
+                  patchActiveInterval({
+                    startTime: startIso || active.startTime,
+                    endTime: endIso || active.endTime,
+                  })
+                }
+                intlLocale={intlLocale}
+                startLabel={startLabel}
+                endLabel={endLabel}
+                monthsToShow={1}
+                collapsible
+              />
+            </>
+          )}
         </div>
 
         {draft.stepType === "stay" && active.intervalType === "stay" ? (
@@ -1140,20 +1162,28 @@ export function CanonicalStepEditorDialog({
     wizard.stack.length > 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-zinc-900/70 backdrop-blur-sm wizard-overlay-in sm:items-center sm:p-6"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div
         role="dialog"
         aria-modal="true"
-        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white shadow-xl dark:bg-zinc-950 sm:max-h-[85vh] sm:rounded-3xl"
+        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl ring-1 ring-zinc-200/60 wizard-pop-in dark:bg-zinc-950 dark:ring-zinc-800/60 sm:my-auto sm:max-h-[88vh] sm:rounded-3xl"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
+        <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-4 border-b border-zinc-100 bg-white/85 px-6 py-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+              {isNew ? "New step" : "Edit step"}
+            </p>
+            <div className="mt-0.5 truncate text-base font-semibold text-zinc-900 dark:text-zinc-50">
               {headerLabel(wizard.top?.id, isNew)}
             </div>
             {wizard.stack.length > 1 ? (
               <p
-                className="mt-0.5 truncate font-mono text-[10px] leading-tight text-zinc-500"
+                className="mt-0.5 truncate font-mono text-[10px] leading-tight text-zinc-400 dark:text-zinc-500"
                 title="Nested wizards: outer → inner. Pop with Back to return."
               >
                 {wizard.stack.map((f) => f.id).join(" → ")}
@@ -1163,13 +1193,26 @@ export function CanonicalStepEditorDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            aria-label="Close"
+            className="shrink-0 rounded-full p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
           >
-            Close
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M6 6 18 18" />
+              <path d="M18 6 6 18" />
+            </svg>
           </button>
         </div>
 
-        <div className="space-y-4 px-4 py-4">
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
           {wizard.top?.id === STEP_WIZARD_IDS.stepWizard ? (
             <StepWizardPanel
               typeWizardFirst={typeWizardFirst}
@@ -1235,7 +1278,6 @@ export function CanonicalStepEditorDialog({
               tripPlaceGrouped={tripPlaceGrouped}
               fromPlace={rowFor((draft as TransitStep).fromStayId)}
               toPlace={rowFor((draft as TransitStep).toStayId)}
-              legPlace={rowFor((draft as TransitStep).targetDestinationId)}
               setFromPlace={(d) => {
                 setRow(d.id, d);
                 const t = draft as TransitStep;
@@ -1248,13 +1290,6 @@ export function CanonicalStepEditorDialog({
                 const t = draft as TransitStep;
                 if (d.id !== t.toStayId) {
                   setDraft({ ...t, toStayId: d.id });
-                }
-              }}
-              setLegPlace={(d) => {
-                setRow(d.id, d);
-                const t = draft as TransitStep;
-                if (d.id !== t.targetDestinationId) {
-                  setDraft({ ...t, targetDestinationId: d.id });
                 }
               }}
               onRegisterNewDestination={(d) => appendDestinations([d])}
@@ -1310,19 +1345,31 @@ export function CanonicalStepEditorDialog({
           ) : null}
 
           {showSaveRow ? (
-            <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+            <div className="sticky bottom-0 -mx-6 mt-2 flex flex-wrap items-center justify-end gap-3 border-t border-zinc-100 bg-white/90 px-6 py-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium dark:border-zinc-700"
+                className="rounded-2xl px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={commitSave}
-                className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-zinc-900"
+                className="inline-flex items-center gap-1.5 rounded-2xl bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-zinc-900/10 transition hover:bg-zinc-800 hover:shadow-xl active:scale-[0.99] dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
               >
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
                 Save step
               </button>
             </div>

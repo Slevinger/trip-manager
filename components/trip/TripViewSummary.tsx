@@ -64,7 +64,7 @@ export function TripViewSummary({
               {t("view.timeUntilTripStarts")}
             </p>
             <p className="mt-1 text-2xl font-bold tabular-nums text-violet-950 dark:text-violet-50">
-              {formatDurationMs(untilStart)}
+              {formatDurationMs(untilStart, t)}
             </p>
           </div>
           {totalMs != null ? (
@@ -73,7 +73,7 @@ export function TripViewSummary({
                 {t("view.totalTripTime")}
               </p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
-                {formatDurationMs(totalMs)}
+                {formatDurationMs(totalMs, t)}
               </p>
               <p className="mt-1 text-[11px] text-zinc-500">{t("view.fromStartToEndDate")}</p>
             </div>
@@ -87,7 +87,7 @@ export function TripViewSummary({
             {t("view.scheduledTripLength")}
           </p>
           <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
-            {formatDurationMs(totalMs)}
+            {formatDurationMs(totalMs, t)}
           </p>
         </div>
       ) : null}

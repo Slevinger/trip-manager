@@ -14,7 +14,6 @@ import {
 import { getClientAuth, getDb, getMissingFirebasePublicEnv } from "@/lib/firebase";
 import { signInWithGoogle } from "@/lib/googleSignIn";
 import {
-  createNewTrip,
   deleteTrip as deleteLocalTrip,
   ensureSeedTrip,
   listTrips as listLocalTrips,
@@ -24,6 +23,7 @@ import type { Trip } from "@/lib/types/trip";
 import { useI18n } from "@/lib/i18n/context";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { UserMenu } from "@/components/UserMenu";
+import { CreateTripWizard } from "@/components/CreateTripWizard";
 
 export default function HomePage() {
   const { t } = useI18n();
@@ -32,6 +32,7 @@ export default function HomePage() {
   const [authReady, setAuthReady] = useState(false);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const missingEnv = useMemo(() => getMissingFirebasePublicEnv(), []);
   const db = getDb();
@@ -89,21 +90,28 @@ export default function HomePage() {
     setTrips(listLocalTrips());
   }, [useFirestore, user, refreshLocal]);
 
-  async function handleNew() {
+  function openNewTripWizard() {
+    setError(null);
+    setWizardOpen(true);
+  }
+
+  async function handleCreateFromWizard(trip: Trip) {
     setError(null);
     try {
       if (useFirestore && user && db && (await sessionIsGoogleSignIn(user))) {
-        const t = createNewTrip();
-        await saveCanonicalTrip(db, t, user);
-        router.push(`/trip/${t.id}`);
+        await saveCanonicalTrip(db, trip, user);
+        setWizardOpen(false);
+        router.push(`/trip/${trip.id}`);
         return;
       }
-      const t = createNewTrip();
-      putLocalTrip(t);
+      putLocalTrip(trip);
       refreshLocal();
-      router.push(`/trip/${t.id}`);
+      setWizardOpen(false);
+      router.push(`/trip/${trip.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      throw e;
     }
   }
 
@@ -173,7 +181,7 @@ export default function HomePage() {
           {useFirestore && user ? <UserMenu user={user} /> : null}
           <button
             type="button"
-            onClick={() => void handleNew()}
+            onClick={openNewTripWizard}
             disabled={useFirestore && !user}
             className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-zinc-900"
           >
@@ -217,6 +225,12 @@ export default function HomePage() {
           {!useFirestore || user ? t("home.noTripsHintLocal") : t("home.noTripsHintSignIn")}
         </p>
       ) : null}
+
+      <CreateTripWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onCreate={handleCreateFromWizard}
+      />
     </main>
   );
 }

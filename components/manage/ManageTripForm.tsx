@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n/context";
+import { intlLocaleForApp } from "@/lib/i18n/messages";
 import { newId } from "@/lib/canonicalIds";
-import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import type { CurrencyCode, TaskStatus, Trip, TripTask, UserPreferences } from "@/lib/types/trip";
 import { MultiSelectDialog } from "@/components/manage/MultiSelectDialog";
+import { DateTimeRangeCalendar } from "@/components/dateRange/DateRangeCalendar";
 import {
   ACTIVITY_TYPES,
   HOBBY_OPTIONS,
@@ -42,7 +43,8 @@ export function ManageTripForm({
   /** Signed-in user defaults from `users/{emailLower}`; optional when offline / unsigned. */
   profilePreferences?: UserPreferences | null;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
   const budgetAmount = trip.budget?.totalBudget?.amount ?? "";
   const tasks = trip.tasks ?? [];
   const [prefsDlg, setPrefsDlg] = useState<{ travelerId: string; key: PrefsKey } | null>(null);
@@ -68,25 +70,21 @@ export function ManageTripForm({
         />
       </label>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-          {t("manage.tripStart")}
-          <input
-            type="datetime-local"
-            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-            value={isoToDatetimeLocalValue(trip.startDate)}
-            onChange={(e) => onChange({ ...trip, startDate: datetimeLocalValueToIso(e.target.value) })}
-          />
-        </label>
-        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
-          {t("manage.tripEnd")}
-          <input
-            type="datetime-local"
-            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-            value={isoToDatetimeLocalValue(trip.endDate)}
-            onChange={(e) => onChange({ ...trip, endDate: datetimeLocalValueToIso(e.target.value) })}
-          />
-        </label>
+      <div className="mt-4">
+        <p className="mb-2 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
+          {t("manage.tripStart")} → {t("manage.tripEnd")}
+        </p>
+        <DateTimeRangeCalendar
+          startIso={trip.startDate}
+          endIso={trip.endDate}
+          onChange={(startIso, endIso) =>
+            onChange({ ...trip, startDate: startIso, endDate: endIso })
+          }
+          intlLocale={intlLocale}
+          startLabel={t("manage.tripStart")}
+          endLabel={t("manage.tripEnd")}
+          collapsible
+        />
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">

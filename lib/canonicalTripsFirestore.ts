@@ -5,7 +5,6 @@ import {
   doc,
   getDoc,
   onSnapshot,
-  or,
   query,
   setDoc,
   where,
@@ -361,12 +360,19 @@ function firestoreErrCode(err: unknown): string {
 }
 
 /**
- * Lists trips the user may open: owned by uid, or listed by email on `participantEmailsLower`
- * (traveler / viewer row with matching Google account email).
+ * Lists trips the user may open: owned by uid, OR listed by email on
+ * `participantEmailsLower` (traveler / viewer row with matching Google email).
  *
- * Uses a single `or(...)` query so Firestore evaluates one list read (two parallel listeners can
- * surface `permission-denied` for the shared branch under some rule setups). Falls back to
- * owner-only if the combined query is denied or hits a missing-index precondition.
+ * Uses TWO parallel listeners (owner + participant) instead of `or(...)`. Each is a
+ * single-field query that Firestore's rule analyzer can validate independently
+ * against the inlined `hasAny([request.auth.token.email.lower()])` clause in
+ * `firestore.rules`. Rationale: `or(...)` couples both branches into one
+ * permission check; if either side gets statically refused, the entire query is
+ * rejected and non-owner participants silently see nothing. Two listeners means
+ * a failure on one branch only hides that branch (and surfaces it via `onError`).
+ *
+ * Results from both listeners are merged by id (a trip the user owns is also in
+ * `participantEmailsLower`, so de-dup by `Trip.id`).
  */
 export function subscribeMyCanonicalTrips(
   db: Firestore,
@@ -377,46 +383,68 @@ export function subscribeMyCanonicalTrips(
   const col = collection(db, CANONICAL_TRIPS_COLLECTION);
   const em = emailLower(user);
 
-  let unsub: Unsubscribe | undefined;
-  let mode: "combined" | "owner" = em.length > 0 ? "combined" : "owner";
+  const ownerByTripId = new Map<string, Trip>();
+  const sharedByTripId = new Map<string, Trip>();
 
-  function emitFromSnap(snap: QuerySnapshot) {
-    const trips = snap.docs.map((d) => stripMeta(d.data()));
+  function emit() {
+    const merged = new Map<string, Trip>();
+    for (const [id, t] of ownerByTripId) merged.set(id, t);
+    for (const [id, t] of sharedByTripId) {
+      if (!merged.has(id)) merged.set(id, t);
+    }
+    const trips = Array.from(merged.values());
     sortTripsByUpdatedDesc(trips);
     onTrips(trips);
   }
 
-  function attach() {
-    unsub?.();
-    const q =
-      mode === "owner" || !em.length
-        ? query(col, where(OWNER_UID, "==", user.uid))
-        : query(
-            col,
-            or(where(OWNER_UID, "==", user.uid), where(PARTICIPANT_EMAILS_LOWER, "array-contains", em))
-          );
-    unsub = onSnapshot(
-      q,
-      emitFromSnap,
+  function indexFromSnap(target: Map<string, Trip>) {
+    return (snap: QuerySnapshot) => {
+      target.clear();
+      for (const d of snap.docs) {
+        const trip = stripMeta(d.data());
+        target.set(trip.id, trip);
+      }
+      emit();
+    };
+  }
+
+  const unsubOwner = onSnapshot(
+    query(col, where(OWNER_UID, "==", user.uid)),
+    indexFromSnap(ownerByTripId),
+    (err) => {
+      // eslint-disable-next-line no-console
+      console.warn("[canonicalTrips] owner listener failed.", {
+        code: firestoreErrCode(err),
+        message: err instanceof Error ? err.message : String(err),
+      });
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  );
+
+  let unsubShared: Unsubscribe | undefined;
+  if (em.length > 0) {
+    unsubShared = onSnapshot(
+      query(col, where(PARTICIPANT_EMAILS_LOWER, "array-contains", em)),
+      indexFromSnap(sharedByTripId),
       (err) => {
-        const code = firestoreErrCode(err);
-        const retryAsOwnerOnly =
-          mode === "combined" &&
-          (code.includes("permission-denied") || code.includes("failed-precondition"));
-        if (retryAsOwnerOnly) {
-          mode = "owner";
-          attach();
-          return;
-        }
+        /**
+         * If this branch is refused (permission-denied / failed-precondition),
+         * non-owner participants will be missing from the list — surface it
+         * loudly. Owner trips still render via the other listener.
+         */
+        // eslint-disable-next-line no-console
+        console.warn("[canonicalTrips] shared-participant listener failed.", {
+          code: firestoreErrCode(err),
+          message: err instanceof Error ? err.message : String(err),
+        });
         onError?.(err instanceof Error ? err : new Error(String(err)));
       }
     );
   }
 
-  attach();
-
   return () => {
-    unsub?.();
+    unsubOwner();
+    unsubShared?.();
   };
 }
 

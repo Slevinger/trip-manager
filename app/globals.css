@@ -89,3 +89,86 @@ html[dir="rtl"] .leaflet-popup-content-wrapper {
     color: #d4d4d8;
   }
 }
+
+/* Create-trip wizard animations: keyed remounts trigger a slide-in on each step change. */
+@keyframes wizard-slide-in-forward {
+  from {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes wizard-slide-in-back {
+  from {
+    opacity: 0;
+    transform: translate3d(-28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes wizard-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes wizard-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wizard-progress-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(139 92 246 / 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(139 92 246 / 0);
+  }
+}
+
+.wizard-slide-in-forward {
+  animation: wizard-slide-in-forward 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-slide-in-back {
+  animation: wizard-slide-in-back 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-pop-in {
+  animation: wizard-pop-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-overlay-in {
+  animation: wizard-overlay-in 200ms ease-out both;
+}
+
+.wizard-progress-pulse {
+  animation: wizard-progress-pulse 2s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wizard-slide-in-forward,
+  .wizard-slide-in-back,
+  .wizard-pop-in,
+  .wizard-overlay-in,
+  .wizard-progress-pulse {
+    animation: none;
+  }
+}

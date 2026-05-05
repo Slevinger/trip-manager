@@ -1,7 +1,20 @@
 "use client";
 
 import { appendStepInterval } from "@/lib/canonicalStepBuilders";
-import { datetimeLocalValueToIso, isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
+import {
+  useWizardDirection,
+  WIZARD_INPUT_CLASS_LARGE,
+  WIZARD_SELECT_CLASS,
+  WIZARD_TEXTAREA_CLASS,
+  WizardField,
+  WizardNavRow,
+  WizardPage,
+  WizardPageHeading,
+  WizardSection,
+} from "@/components/manage/stepWizards/wizardShared";
+import { DateTimeRangeCalendar } from "@/components/dateRange/DateRangeCalendar";
+import { useI18n } from "@/lib/i18n/context";
+import { intlLocaleForApp } from "@/lib/i18n/messages";
 import { intervalIndexFromFrame, STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardFrame } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
@@ -29,19 +42,23 @@ export function ActivityStepIntervalWizardPanel({
   trip: Trip;
   onAppendDestinations: (rows: Destination[]) => void;
 }) {
+  const { locale } = useI18n();
+  const intlLocale = intlLocaleForApp(locale);
   const intervalIndex = Math.min(intervalIndexFromFrame(frame), draft.stepIntervals.length - 1);
   const interval = draft.stepIntervals[intervalIndex];
   const page = Math.min(
     Math.max(0, wizard.top?.step ?? 0),
     ACTIVITY_INTERVAL_WIZARD_PAGE_COUNT - 1
   );
+  const direction = useWizardDirection(page);
 
   if (!interval || interval.intervalType !== "activity") {
-    return <p className="text-sm text-red-600">Invalid activity interval.</p>;
+    return (
+      <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+        Invalid activity interval.
+      </p>
+    );
   }
-
-  const intervalStart = isoToDatetimeLocalValue(interval.startTime);
-  const intervalEnd = isoToDatetimeLocalValue(interval.endTime);
 
   function addAnotherActivitySlot() {
     const { step: next, newDestinations } = appendStepInterval(draft, tripStartIso, trip);
@@ -56,111 +73,114 @@ export function ActivityStepIntervalWizardPanel({
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-        Activity slot #{intervalIndex + 1}
-      </p>
-
-      {page === 0 ? (
-        <>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            Slot title
-            <input
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={interval.title}
-              onChange={(e) => patchIntervalAt(intervalIndex, { title: e.target.value })}
+    <div className="space-y-6">
+      <WizardPage pageKey={page} direction={direction}>
+        {page === 0 ? (
+          <div className="space-y-5">
+            <WizardPageHeading
+              eyebrow={`Activity slot #${intervalIndex + 1}`}
+              title="What's happening here?"
+              subtitle="A single thing on the schedule — meal, tour, free time slot."
+              accent="emerald"
             />
-          </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Start
-              <input
-                type="datetime-local"
-                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                value={intervalStart}
-                onChange={(e) =>
-                  patchIntervalAt(intervalIndex, {
-                    startTime: datetimeLocalValueToIso(e.target.value),
-                  })
-                }
-              />
-            </label>
-            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              End
-              <input
-                type="datetime-local"
-                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                value={intervalEnd}
-                onChange={(e) =>
-                  patchIntervalAt(intervalIndex, {
-                    endTime: datetimeLocalValueToIso(e.target.value),
-                  })
-                }
-              />
-            </label>
-          </div>
-          <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-            Activity type
-            <select
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              value={interval.activityType}
-              onChange={(e) =>
-                patchIntervalAt(intervalIndex, { activityType: e.target.value as ActivityType })
-              }
-            >
-              {ACTIVITY_TYPES.map((at) => (
-                <option key={at} value={at}>
-                  {at}
-                </option>
-              ))}
-            </select>
-          </label>
-        </>
-      ) : (
-        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-          Slot comment
-          <textarea
-            rows={3}
-            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-            value={interval.comment ?? ""}
-            onChange={(e) =>
-              patchIntervalAt(intervalIndex, {
-                comment: e.target.value.trim() ? e.target.value : undefined,
-              })
-            }
-          />
-        </label>
-      )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-        <button
-          type="button"
-          onClick={() => (page <= 0 ? wizard.pop() : wizard.setTopStep(page - 1))}
-          className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-800 dark:border-zinc-700 dark:text-zinc-100"
-        >
-          ← {page <= 0 ? "Activity step" : "Previous"}
-        </button>
-        <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-          Slot · {page + 1} / {ACTIVITY_INTERVAL_WIZARD_PAGE_COUNT}
-        </p>
-        {page < ACTIVITY_INTERVAL_WIZARD_PAGE_COUNT - 1 ? (
-          <button
-            type="button"
-            onClick={() => wizard.setTopStep(page + 1)}
-            className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-800 dark:border-zinc-700 dark:text-zinc-100"
-          >
-            Next →
-          </button>
+            <WizardField
+              htmlFor="activity-interval-title"
+              label="Slot title"
+              hint="Shown on the timeline. Pick something specific you'll recognize."
+            >
+              <input
+                id="activity-interval-title"
+                className={WIZARD_INPUT_CLASS_LARGE}
+                placeholder="e.g., Sunset dinner at Patong"
+                value={interval.title}
+                onChange={(e) => patchIntervalAt(intervalIndex, { title: e.target.value })}
+              />
+            </WizardField>
+
+            <WizardSection title="When is it?" hint="Tap the dates to expand the calendar — fine-tune start and end time below.">
+              <DateTimeRangeCalendar
+                startIso={interval.startTime}
+                endIso={interval.endTime}
+                onChange={(startIso, endIso) =>
+                  patchIntervalAt(intervalIndex, {
+                    startTime: startIso || interval.startTime,
+                    endTime: endIso || interval.endTime,
+                  })
+                }
+                intlLocale={intlLocale}
+                startLabel="Starts"
+                endLabel="Ends"
+                defaultStartTime="10:00"
+                defaultEndTime="12:00"
+                collapsible
+              />
+            </WizardSection>
+
+            <WizardField
+              htmlFor="activity-interval-type"
+              label="Activity type"
+              hint="Drives the icon and color in the itinerary."
+            >
+              <select
+                id="activity-interval-type"
+                className={WIZARD_SELECT_CLASS}
+                value={interval.activityType}
+                onChange={(e) =>
+                  patchIntervalAt(intervalIndex, {
+                    activityType: e.target.value as ActivityType,
+                  })
+                }
+              >
+                {ACTIVITY_TYPES.map((at) => (
+                  <option key={at} value={at}>
+                    {at.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </WizardField>
+          </div>
         ) : (
-          <button
-            type="button"
-            onClick={addAnotherActivitySlot}
-            className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-100"
-          >
-            Add another slot
-          </button>
+          <div className="space-y-5">
+            <WizardPageHeading
+              eyebrow={`Activity slot #${intervalIndex + 1}`}
+              title="Notes"
+              subtitle="Reservation refs, dress code, tips for the rest of the group."
+              accent="emerald"
+            />
+            <WizardField
+              htmlFor="activity-interval-comment"
+              label="Slot notes"
+              optional
+              hint="Picked addresses get appended here automatically."
+            >
+              <textarea
+                id="activity-interval-comment"
+                rows={6}
+                className={WIZARD_TEXTAREA_CLASS}
+                placeholder="e.g., Reservation under Slevinger. Smart casual."
+                value={interval.comment ?? ""}
+                onChange={(e) =>
+                  patchIntervalAt(intervalIndex, {
+                    comment: e.target.value.trim() ? e.target.value : undefined,
+                  })
+                }
+              />
+            </WizardField>
+          </div>
         )}
-      </div>
+      </WizardPage>
+
+      <WizardNavRow
+        page={page}
+        totalPages={ACTIVITY_INTERVAL_WIZARD_PAGE_COUNT}
+        prevLabel={page <= 0 ? "Activity step" : "Previous"}
+        nextLabel="Next"
+        accent="emerald"
+        onPrev={() => (page <= 0 ? wizard.pop() : wizard.setTopStep(page - 1))}
+        onNext={() => wizard.setTopStep(page + 1)}
+        finalAction={{ label: "Add another slot", onClick: addAnotherActivitySlot }}
+      />
     </div>
   );
 }

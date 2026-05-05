@@ -1,5 +1,9 @@
+import type { MessageKey } from "@/lib/i18n/messages";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import type { Trip, TripStep } from "@/lib/types/trip";
+
+/** Translator function compatible with the one returned by `useI18n()`. */
+type Translator = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
 export function tripInstantMs(iso: string | undefined): number | null {
   if (!iso) return null;
@@ -73,9 +77,16 @@ export function msUntilTripEnd(trip: Trip, nowMs: number): number | null {
   return b - nowMs;
 }
 
-/** Readable duration for countdowns and totals (non-negative input). */
-export function formatDurationMs(deltaMs: number): string {
-  if (deltaMs <= 0) return "Less than a minute";
+/**
+ * Localized "Xd Yh Zm" string for countdowns/totals.
+ *
+ * Pass the `t` function from `useI18n()`. Singular keys (`duration.day`, etc.)
+ * are used when the unit's count is exactly 1 — translations may hardcode the
+ * unit word (e.g. `"יום אחד"`) and ignore `{count}`. Plural keys carry the
+ * `{count}` placeholder.
+ */
+export function formatDurationMs(deltaMs: number, t: Translator): string {
+  if (deltaMs <= 0) return t("duration.lessThanMinute");
   let sec = Math.floor(deltaMs / 1000);
   const days = Math.floor(sec / 86400);
   sec %= 86400;
@@ -83,8 +94,14 @@ export function formatDurationMs(deltaMs: number): string {
   sec %= 3600;
   const minutes = Math.floor(sec / 60);
   const parts: string[] = [];
-  if (days > 0) parts.push(`${days} day${days === 1 ? "" : "s"}`);
-  if (hours > 0) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
-  if (minutes > 0 || parts.length === 0) parts.push(`${minutes} minute${minutes === 1 ? "" : "s"}`);
-  return parts.join(", ");
+  if (days > 0) {
+    parts.push(t(days === 1 ? "duration.day" : "duration.days", { count: days }));
+  }
+  if (hours > 0) {
+    parts.push(t(hours === 1 ? "duration.hour" : "duration.hours", { count: hours }));
+  }
+  if (minutes > 0 || parts.length === 0) {
+    parts.push(t(minutes === 1 ? "duration.minute" : "duration.minutes", { count: minutes }));
+  }
+  return parts.join(t("duration.separator"));
 }

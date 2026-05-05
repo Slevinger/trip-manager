@@ -196,7 +196,7 @@ export function TripCurrentStepDashboard({
             {t("view.timeLeftInTrip")}
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
-            {formatDurationMs(untilTripEnd)}
+            {formatDurationMs(untilTripEnd, t)}
           </p>
           <p className="mt-1 text-[11px] text-zinc-500">{t("view.untilTripEnd")}</p>
         </div>
