@@ -4,8 +4,10 @@ const ANTHROPIC_VERSION = "2023-06-01";
 /** Max continuation POSTs after `pause_turn` (server tools — long-running turn). */
 const PAUSE_TURN_MAX_STEPS = 8;
 
+export type AnthropicUsageTotals = { inputTokens: number; outputTokens: number };
+
 export type AnthropicCompleteResult =
-  | { ok: true; text: string }
+  | { ok: true; text: string; usage: AnthropicUsageTotals }
   | { ok: false; status: number; body: string };
 
 function isRecord(x: unknown): x is Record<string, unknown> {
@@ -65,6 +67,9 @@ export async function completeTripAssistantAnthropic(opts: {
     content: t.content,
   }));
 
+  let usageInputTokens = 0;
+  let usageOutputTokens = 0;
+
   for (let step = 0; step < PAUSE_TURN_MAX_STEPS; step++) {
     const body: Record<string, unknown> = {
       model: opts.model,
@@ -99,11 +104,21 @@ export async function completeTripAssistantAnthropic(opts: {
       return { ok: false, status: res.status, body: raw };
     }
 
-    let data: { content?: unknown; stop_reason?: string };
+    let data: {
+      content?: unknown;
+      stop_reason?: string;
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
     try {
       data = JSON.parse(raw) as typeof data;
     } catch {
       return { ok: false, status: 502, body: "Invalid Anthropic JSON response" };
+    }
+
+    const u = data.usage;
+    if (u && typeof u === "object") {
+      usageInputTokens += Number(u.input_tokens) || 0;
+      usageOutputTokens += Number(u.output_tokens) || 0;
     }
 
     const content = Array.isArray(data.content) ? data.content : [];
@@ -113,7 +128,11 @@ export async function completeTripAssistantAnthropic(opts: {
       continue;
     }
 
-    return { ok: true, text: extractTextBlocks(content) };
+    return {
+      ok: true,
+      text: extractTextBlocks(content),
+      usage: { inputTokens: usageInputTokens, outputTokens: usageOutputTokens },
+    };
   }
 
   return {

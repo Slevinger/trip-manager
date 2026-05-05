@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
-import { TRIP_MEMORY_EVOLVE_SYSTEM } from "@/lib/tripMemoryEvolvePrompt";
+import {
+  refuseRedundantTripMemoryEvolveFromTurns,
+  type TripMemoryEvolveTurn,
+} from "@/lib/tripChatEvolveGate";
+import { capEvolveSummaryChars, TRIP_MEMORY_EVOLVE_SYSTEM } from "@/lib/tripMemoryEvolvePrompt";
+import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -36,23 +41,26 @@ function resolveTripAssistantProvider(): TripAssistantProvider {
   return "openai";
 }
 
-const EVOLVE_MAX_WORDS = 400;
-
-function capReplyWords(text: string, maxWords: number): string {
-  const t = text.trim();
-  if (!t) return t;
-  const words = t.split(/\s+/);
-  if (words.length <= maxWords) return t;
-  return `${words.slice(0, maxWords).join(" ")}…`;
-}
-
 function isRecord(x: unknown): x is Record<string, unknown> {
   return x != null && typeof x === "object" && !Array.isArray(x);
 }
 
-function formatTranscriptForEvolve(
-  lines: { role: "user" | "assistant"; content: string }[]
-): string {
+function detectLanguageOverrideFromLatestUser(turns: TripMemoryEvolveTurn[]): string {
+  // Heuristic: use script presence from the latest user message.
+  // This avoids relying on “dominant language” when we label turns with English prefixes.
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t.role !== "user") continue;
+    const s = t.content ?? "";
+    if (/[\u0590-\u05FF]/.test(s)) return "Hebrew";
+    if (/[\u0600-\u06FF\u0750-\u077F]/.test(s)) return "Arabic";
+    if (/[\u0400-\u04FF]/.test(s)) return "Russian";
+    return "English";
+  }
+  return "English";
+}
+
+function formatTranscriptForEvolve(lines: TripMemoryEvolveTurn[]): string {
   const parts: string[] = [];
   for (const m of lines) {
     const label = m.role === "assistant" ? "Assistant" : "User";
@@ -64,6 +72,7 @@ function formatTranscriptForEvolve(
 /**
  * POST JSON: `{ "messages": [ { "role": "user"|"assistant", "content": "..." }, ... ] }`
  * Returns `{ "summary": "..." }` — one compressed note (not a live reply).
+ * Itinerary context is not injected here; the live trip payload is sent separately on assistant turns.
  */
 export async function POST(req: NextRequest) {
   const provider = resolveTripAssistantProvider();
@@ -122,29 +131,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "messages[] is required" }, { status: 400 });
   }
 
-  const turnMessages: { role: "user" | "assistant"; content: string }[] = [];
+  const turnMessages: TripMemoryEvolveTurn[] = [];
   for (const m of rawMessages) {
     if (!isRecord(m)) continue;
     const role = m.role === "user" || m.role === "assistant" ? m.role : null;
     const content = typeof m.content === "string" ? m.content : "";
     if (!role || !content.trim()) continue;
-    turnMessages.push({ role, content: content.slice(0, 12000) });
+    const row: TripMemoryEvolveTurn = { role, content: content.slice(0, 12000) };
+    if (m.memoryCompressed === true && role === "assistant") {
+      row.memoryCompressed = true;
+    }
+    turnMessages.push(row);
   }
 
   if (turnMessages.length === 0) {
     return NextResponse.json({ error: "No valid user/assistant messages" }, { status: 400 });
   }
 
-  const userBlock = formatTranscriptForEvolve(turnMessages);
+  if (refuseRedundantTripMemoryEvolveFromTurns(turnMessages)) {
+    return NextResponse.json(
+      {
+        error:
+          "Chat is already a single compressed note. Add more messages, or compress again once you have 40+ lines (model history window).",
+        code: "evolve_redundant",
+      },
+      { status: 409 }
+    );
+  }
+
+  const budgetGate = await assertMonthlyBudgetAllowsNewSpend();
+  if (!budgetGate.ok) {
+    return NextResponse.json({ error: budgetGate.message }, { status: 429 });
+  }
+
+  const userBlock = formatTranscriptForEvolve(turnMessages).slice(0, 200_000);
+  const languageOverride = detectLanguageOverrideFromLatestUser(turnMessages);
+  const systemWithLanguageOverride =
+    TRIP_MEMORY_EVOLVE_SYSTEM +
+    `\n\n### Language override (server-detected)\nLatest user message appears to be in: ${languageOverride}.\nWrite ALL section prose in ${languageOverride}.\nKeep the section headers exactly as shown (LEGEND:, FROM_WEB_OR_VERIFIED:, CHAT_ONLY_MEMORY:, OPEN_LOOSE_ENDS:). URLs and proper nouns must remain unchanged.`;
 
   if (provider === "anthropic") {
     const key = anthropicKey()!;
     const result = await completeTripAssistantAnthropic({
       apiKey: key,
       model: anthropicModel(),
-      system: TRIP_MEMORY_EVOLVE_SYSTEM,
-      turns: [{ role: "user", content: userBlock.slice(0, 200_000) }],
-      maxOutputTokens: 2048,
+      system: systemWithLanguageOverride,
+      turns: [{ role: "user", content: userBlock }],
+      maxOutputTokens: 4096,
       temperature: 0.35,
     });
 
@@ -161,7 +194,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const text = capReplyWords(result.text, EVOLVE_MAX_WORDS);
+    try {
+      await recordLlmUsageUsd({
+        provider: "anthropic",
+        model: anthropicModel(),
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      });
+    } catch (e) {
+      console.warn("[llmMonthlyBudget] record failed after memory evolve", e);
+    }
+
+    const text = capEvolveSummaryChars(result.text);
     return NextResponse.json({
       summary: text,
       provider: "anthropic" as const,
@@ -178,11 +222,11 @@ export async function POST(req: NextRequest) {
     body: JSON.stringify({
       model: openaiModel(),
       messages: [
-        { role: "system", content: TRIP_MEMORY_EVOLVE_SYSTEM },
-        { role: "user", content: userBlock.slice(0, 200_000) },
+        { role: "system", content: systemWithLanguageOverride },
+        { role: "user", content: userBlock },
       ],
       temperature: 0.35,
-      max_completion_tokens: 2048,
+      max_completion_tokens: 4096,
     }),
   });
 
@@ -200,14 +244,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let parsed: { choices?: { message?: { content?: string } }[] };
+  let parsed: {
+    choices?: { message?: { content?: string } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch {
     return NextResponse.json({ error: "Invalid OpenAI response", provider: "openai" }, { status: 502 });
   }
 
-  const text = capReplyWords(parsed.choices?.[0]?.message?.content?.trim() ?? "", EVOLVE_MAX_WORDS);
+  const oUsage = parsed.usage;
+  if (oUsage && typeof oUsage === "object") {
+    try {
+      await recordLlmUsageUsd({
+        provider: "openai",
+        model: openaiModel(),
+        inputTokens: Number(oUsage.prompt_tokens) || 0,
+        outputTokens: Number(oUsage.completion_tokens) || 0,
+      });
+    } catch (e) {
+      console.warn("[llmMonthlyBudget] record failed after OpenAI memory evolve", e);
+    }
+  }
+
+  const text = capEvolveSummaryChars(parsed.choices?.[0]?.message?.content?.trim() ?? "");
   return NextResponse.json({
     summary: text,
     provider: "openai" as const,

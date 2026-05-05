@@ -221,15 +221,46 @@ service cloud.firestore {
      * request.auth.token.email is still correct — matching the path id is sufficient here.
      */
     match /users/{userEmail} {
-      allow read, write: if signedIn() &&
+      // User profile doc: allow read/create/update, but never delete.
+      allow read: if signedIn() &&
         request.auth.token.email is string &&
         request.auth.token.email.lower() == userEmail;
+      allow create: if signedIn() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() == userEmail;
+      allow update: if signedIn() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() == userEmail;
+      allow delete: if false;
 
       /** Per-trip assistant transcript (Forget = delete this doc). */
       match /tripAssistantChats/{tripId} {
-        allow read, write: if signedIn() &&
+        allow read: if signedIn() &&
           request.auth.token.email is string &&
           request.auth.token.email.lower() == userEmail;
+        allow create: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+        allow update: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+        allow delete: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+      }
+
+      /** Central immutable history (never deletable; compaction only marks inactive). */
+      match /immutableMemoryQueueEntries/{entryId} {
+        allow read: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+        allow create: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+        allow update: if signedIn() &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == userEmail;
+        allow delete: if false;
       }
     }
 

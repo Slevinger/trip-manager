@@ -121,6 +121,8 @@ const en = {
   "assistant.evolving": "Compressing…",
   "assistant.evolveNeedsMemory": "Save chat to the cloud (sign in with Firestore) to compress history.",
   "assistant.evolveNeedsHistory": "Need at least two saved lines for this trip before compressing.",
+  "assistant.evolveRedundant":
+    "History is already a single compressed note. Chat more first — or compress again once you have 40+ saved lines (the assistant history limit).",
   "assistant.forget": "Forget chat",
   "assistant.forgetTitle":
     "Delete only your saved assistant chat for this trip (your account). Other travelers and your other trips are unchanged.",
@@ -446,6 +448,8 @@ const he: Record<MessageKey, string> = {
   "assistant.evolving": "דוחס…",
   "assistant.evolveNeedsMemory": "יש לשמור צ'אט לענן (התחברות עם Firestore) כדי לדחוס היסטוריה.",
   "assistant.evolveNeedsHistory": "נדרשות לפחות שתי שורות שמורות לטיול הזה לפני דחיסה.",
+  "assistant.evolveRedundant":
+    "ההיסטוריה כבר הערה דחוסה אחת. המשיכו לשוחח — או דחסו שוב כשיש 40+ שורות שמורות (מגבלת ההקשר של העוזר).",
   "assistant.forget": "שכחת צ'אט",
   "assistant.forgetTitle":
     "מחיקת הצ'אט השמור שלכם לטיול הזה בלבד (החשבון שלכם). לא נוגע במטיילים אחרים או בטיולים אחרים.",
@@ -772,6 +776,8 @@ const ru: Record<MessageKey, string> = {
   "assistant.evolving": "Сжатие…",
   "assistant.evolveNeedsMemory": "Чтобы сжать историю, сохраняйте чат в облаке (вход с Firestore).",
   "assistant.evolveNeedsHistory": "Нужны минимум две сохранённые строки по этой поездке перед сжатием.",
+  "assistant.evolveRedundant":
+    "История уже одна сжатая заметка. Продолжите переписку — или снова сожмите, когда будет 40+ сохранённых строк (лимит контекста помощника).",
   "assistant.forget": "Забыть чат",
   "assistant.forgetTitle":
     "Удалить только ваш сохранённый чат помощника по этой поездке (ваш аккаунт). Другие участники и другие поездки не затрагиваются.",

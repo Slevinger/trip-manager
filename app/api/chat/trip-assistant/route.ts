@@ -17,6 +17,8 @@ import {
 } from "@/lib/tripAssistantWebIntent";
 import type { Trip, UserPreferences } from "@/lib/types/trip";
 import { formatAssistantReplyForMarkdown } from "@/lib/formatAssistantReplyMarkdown";
+import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
+import { TRIP_ASSISTANT_OPENAI_MESSAGE_HISTORY_CAP } from "@/lib/tripChatEvolveGate";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -46,8 +48,8 @@ function anthropicModel(): string {
 }
 
 /**
- * Max web searches per triggered message (`#web`, `[web]`, phrases…).
- * Unset env → 3 so `#web` works without extra config; set `ANTHROPIC_WEB_SEARCH_MAX_USES=0` to hard-disable.
+ * Max web searches per triggered message (markers or phrases).
+ * Unset env -> 3 so marker syntax works without extra config; set `ANTHROPIC_WEB_SEARCH_MAX_USES=0` to hard-disable.
  */
 function anthropicTripAssistantWebSearchMaxUses(): number {
   const raw = process.env.ANTHROPIC_WEB_SEARCH_MAX_USES?.trim();
@@ -331,6 +333,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No valid user/assistant messages" }, { status: 400 });
   }
 
+  const budgetGate = await assertMonthlyBudgetAllowsNewSpend();
+  if (!budgetGate.ok) {
+    return NextResponse.json({ error: budgetGate.message }, { status: 429 });
+  }
+
   const lastUserText = lastTripAssistantUserContent(turnMessages);
   const webCap = anthropicTripAssistantWebSearchMaxUses();
 
@@ -339,7 +346,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "`#web` / `[web]` live search requires Claude. Set TRIP_ASSISTANT_PROVIDER=anthropic and ANTHROPIC_API_KEY.",
+            "Live web search markers (`=>`, `>=`, `<=`, `=<`) require Claude. Set TRIP_ASSISTANT_PROVIDER=anthropic and ANTHROPIC_API_KEY.",
           provider,
         },
         { status: 503 }
@@ -349,7 +356,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Web search is disabled (ANTHROPIC_WEB_SEARCH_MAX_USES=0). Remove it or set a positive cap (e.g. 3) to use `#web`.",
+            "Web search is disabled (ANTHROPIC_WEB_SEARCH_MAX_USES=0). Remove marker syntax or set a positive cap (e.g. 3) to use `=>`, `>=`, `<=`, or `=<`.",
           provider: "anthropic" as const,
         },
         { status: 503 }
@@ -391,13 +398,24 @@ export async function POST(req: NextRequest) {
         const parsed = parseAnthropicError(refined.status, refined.body, anthropicModel());
         return NextResponse.json(
           {
-            error: parsed.message || "Could not normalize #web query.",
+            error: parsed.message || "Could not normalize web-search marker query.",
             ...(parsed.omitDetail ? {} : { detail: refined.body.slice(0, 600) }),
             status: refined.status,
             provider: "anthropic" as const,
           },
           { status: refined.status >= 400 && refined.status < 600 ? refined.status : 502 }
         );
+      }
+
+      try {
+        await recordLlmUsageUsd({
+          provider: "anthropic",
+          model: anthropicModel(),
+          inputTokens: refined.usage.inputTokens,
+          outputTokens: refined.usage.outputTokens,
+        });
+      } catch (e) {
+        console.warn("[llmMonthlyBudget] record failed after refine hop", e);
       }
 
       const line = refined.text.trim();
@@ -453,6 +471,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    try {
+      await recordLlmUsageUsd({
+        provider: "anthropic",
+        model: anthropicModel(),
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      });
+    } catch (e) {
+      console.warn("[llmMonthlyBudget] record failed after trip assistant", e);
+    }
+
     const text = formatAssistantReplyForMarkdown(result.text);
     return NextResponse.json({
       reply: text,
@@ -463,7 +492,7 @@ export async function POST(req: NextRequest) {
 
   const outMessages: ChatMessage[] = [
     { role: "system", content: systemContent.slice(0, 100_000) },
-    ...turnMessages.slice(-40),
+    ...turnMessages.slice(-TRIP_ASSISTANT_OPENAI_MESSAGE_HISTORY_CAP),
   ];
 
   const res = await fetch(OPENAI_URL, {
@@ -495,11 +524,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let parsed: { choices?: { message?: { content?: string } }[] };
+  let parsed: {
+    choices?: { message?: { content?: string } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch {
     return NextResponse.json({ error: "Invalid OpenAI response", provider: "openai" }, { status: 502 });
+  }
+
+  const usage = parsed.usage;
+  if (usage && typeof usage === "object") {
+    try {
+      await recordLlmUsageUsd({
+        provider: "openai",
+        model: openaiModel(),
+        inputTokens: Number(usage.prompt_tokens) || 0,
+        outputTokens: Number(usage.completion_tokens) || 0,
+      });
+    } catch (e) {
+      console.warn("[llmMonthlyBudget] record failed after OpenAI trip assistant", e);
+    }
   }
 
   const text = formatAssistantReplyForMarkdown(parsed.choices?.[0]?.message?.content?.trim() ?? "");

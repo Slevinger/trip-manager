@@ -17,6 +17,34 @@ export interface TripChatMessage {
   timeStamp: string;
   /** Optional itinerary snapshot when the user sent the message (prompt continuity). */
   contextSummary?: string;
+  /** True when this agent line is the output of Compress (#evolve); avoids double compression. */
+  memoryCompressed?: boolean;
+}
+
+export type ImmutableMemoryEntryKind = "message" | "summary";
+
+/** One immutable entry in the centralized per-user history queue. */
+export interface ImmutableMemoryQueueEntry {
+  seq: number;
+  tripId: string;
+  role: "user" | "assistant";
+  from: "agent" | Email;
+  content: string;
+  kind: ImmutableMemoryEntryKind;
+  active: boolean;
+  memoryCompressed?: boolean;
+  /** For `kind === "summary"`: how many compaction passes produced this entry. */
+  evolveCount?: number;
+  /**
+   * Source trip id for entries stored under a virtual `tripId` (e.g. `__global__`).
+   * Equal to `tripId` for real trip entries; useful for filtering global rows by origin.
+   */
+  originTripId?: string;
+  /** One-line trip context snapshot at the time the turn happened (assistant scope). */
+  tripContext?: string;
+  /** Assistant self-classification of this turn ("general" → personal/cross-trip; "specific" → trip detail). */
+  requestKind?: "general" | "specific";
+  createdAtMs: number;
 }
 
 /** Where on the trip the user was when a chat turn happened (legacy rows + parsing). */

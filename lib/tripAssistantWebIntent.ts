@@ -1,59 +1,53 @@
 /**
- * Trip assistant: live web search is opt-in via `#web` suffix, `[web]`, or explicit phrases.
+ * Trip assistant: live web search is opt-in via marker syntax or explicit phrases.
+ * Marker syntax: `=>`, `>=`, `<=`, `=<`
  */
+const TRIP_WEB_MARKER_RE = /(=>|>=|<=|=<)/g;
+const TRIP_WEB_MARKER_TEST_RE = /(=>|>=|<=|=<)/;
+const TRIP_WEB_MARKER_END_RE = /\s*(=>|>=|<=|=<)\s*$/;
 
-/** Normalize Unicode hash look-alikes (e.g. U+FF03) to `#` for `#web` detection. */
-export function normalizeTripAssistantHashChars(text: string): string {
-  return text.replace(/\uFF03/g, "#");
-}
-
-/** User typed `#web` / `[web]` — fail fast if web search cannot run (wrong provider / cap 0). */
+/** User typed explicit marker syntax — fail fast if web search cannot run (wrong provider / cap 0). */
 export function tripExplicitWebSyntaxRequested(text: string): boolean {
-  const n = normalizeTripAssistantHashChars(text).trim();
-  return /(?:^|\s)#web\b/i.test(n) || /\[web\]/i.test(n);
+  const n = text.trim();
+  return TRIP_WEB_MARKER_TEST_RE.test(n);
 }
 
-/** `#web` appears as a token (not `#website`). */
+/** Any configured marker appears in the message. */
 export function tripUserMessageContainsHashWeb(text: string): boolean {
-  const t = normalizeTripAssistantHashChars(text).trim();
-  return /(?:^|\s)#web\b/i.test(t);
+  const t = text.trim();
+  return TRIP_WEB_MARKER_TEST_RE.test(t);
 }
 
-/** Message ends with `#web` (optional spaces) — server strips this and enables web_search. */
+/** Message ends with a marker (optional spaces) — server strips it and enables web_search. */
 export function tripUserMessageEndsWithHashWeb(text: string): boolean {
-  const t = normalizeTripAssistantHashChars(text).trimEnd();
-  return /\s*#web\b\s*$/i.test(t);
+  const t = text.trimEnd();
+  return TRIP_WEB_MARKER_END_RE.test(t);
 }
 
-/** `#web` present but not at end → server runs a refinement hop, then web_search. */
+/** Marker present but not at end -> server runs a refinement hop, then web_search. */
 export function tripUserMessageInlineHashWeb(text: string): boolean {
   return tripUserMessageContainsHashWeb(text) && !tripUserMessageEndsWithHashWeb(text);
 }
 
-/** Remove trailing `#web` only (preserve `#website`, mid-text). */
+/** Remove trailing marker only (preserve mid-text content). */
 export function stripTrailingHashWebMarker(content: string): string {
-  return normalizeTripAssistantHashChars(content)
-    .replace(/\s*#web\b\s*$/i, "")
-    .trim();
+  return content.replace(TRIP_WEB_MARKER_END_RE, "").trim();
 }
 
-/** Strip `#web` / `[web]` everywhere (used when normalizing phrase-triggered turns). */
+/** Strip all marker syntax everywhere (used when normalizing phrase-triggered turns). */
 export function stripTripWebSearchMarkers(content: string): string {
-  return normalizeTripAssistantHashChars(content)
-    .replace(/\s*\[web\]\s*/gi, " ")
-    .replace(/\s*#web\b\s*/gi, " ")
+  return content
+    .replace(TRIP_WEB_MARKER_RE, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
 
 /**
- * `[web]` or natural-language web request (does not depend on `#web` — that uses suffix/refine rules).
+ * Natural-language web request (separate from marker suffix/refine rules).
  */
 export function tripBracketOrPhraseRequestsWeb(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
-  if (/\[web\]/i.test(t)) return true;
-
   const lower = t.toLowerCase();
   const phrases = [
     /\bsearch\s+the\s+(web|internet)\b/,
@@ -72,7 +66,7 @@ export function tripBracketOrPhraseRequestsWeb(text: string): boolean {
   return phrases.some((re) => re.test(lower));
 }
 
-/** Any trigger that can enable Anthropic `web_search` (suffix `#web`, inline `#web`, `[web]`, or phrases). */
+/** Any trigger that can enable Anthropic `web_search` (marker syntax or phrases). */
 export function tripUserMessageRequestsWebSearch(text: string): boolean {
   return (
     tripUserMessageContainsHashWeb(text) ||
@@ -99,7 +93,7 @@ export function replaceLastUserContent(
   return turns.map((m, i) => (i === lastUser ? { ...m, content } : m));
 }
 
-/** Last user message with trailing `#web` removed for the search query. */
+/** Last user message with trailing marker removed for the search query. */
 export function replaceLastUserStripTrailingHashWeb(
   turns: { role: "user" | "assistant"; content: string }[]
 ): { role: "user" | "assistant"; content: string }[] {

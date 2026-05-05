@@ -29,8 +29,12 @@ import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
 import type { Destination, Trip, UserPreferences } from "@/lib/types/trip";
 import { messagesForTrip } from "@/lib/tripChatMessages";
-import type { TripChatMessage } from "@/lib/types/user";
-import { subscribeTripAssistantChat, subscribeUser } from "@/lib/usersFirestore";
+import type { ImmutableMemoryQueueEntry, TripChatMessage } from "@/lib/types/user";
+import {
+  subscribeImmutableMemoryQueueEntries,
+  subscribeTripAssistantChat,
+  subscribeUser,
+} from "@/lib/usersFirestore";
 
 function toLocalDateTimeInputValue(epochMs: number): string {
   const d = new Date(epochMs);
@@ -90,6 +94,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
     useState<Destination | null>(null);
   const [profilePreferences, setProfilePreferences] = useState<UserPreferences | null>(null);
   const [chatMemory, setChatMemory] = useState<TripChatMessage[]>([]);
+  const [immutableQueue, setImmutableQueue] = useState<{
+    loaded: boolean;
+    entries: ImmutableMemoryQueueEntry[];
+  }>({ loaded: false, entries: [] });
   /** Canonical transcript doc `users/.../tripAssistantChats/{tripId}` when present. */
   const [assistantChatDoc, setAssistantChatDoc] = useState<{
     exists: boolean;
@@ -144,6 +152,19 @@ export function TripDetail({ tripId }: { tripId: string }) {
     const email = user.email!.trim();
     return subscribeTripAssistantChat(email, tid, email, setAssistantChatDoc);
   }, [useFirestore, user?.email, tripId]);
+
+  useEffect(() => {
+    if (!useFirestore || !user?.email?.trim()) {
+      setImmutableQueue({ loaded: false, entries: [] });
+      return () => {};
+    }
+    const email = user.email!.trim();
+    return subscribeImmutableMemoryQueueEntries(
+      email,
+      (rows) => setImmutableQueue({ loaded: true, entries: rows }),
+      () => setImmutableQueue({ loaded: true, entries: [] })
+    );
+  }, [useFirestore, user?.email]);
 
   useEffect(() => {
     setLoadState("loading");
@@ -426,11 +447,52 @@ export function TripDetail({ tripId }: { tripId: string }) {
   }
 
   const dockTrip = !trip ? null : tab === "manage" && manageDraft ? manageDraft : trip;
+  /** Trip-only history shown in the dock UI and used for the LLM call by default. */
   const tripChatMessages = useMemo(() => {
     if (!dockTrip?.id) return [];
+    if (immutableQueue.loaded) {
+      const forTrip = immutableQueue.entries
+        .filter((e) => e.active && e.tripId === dockTrip.id)
+        .slice(-40)
+        .map((e) => ({
+          tripId: e.tripId,
+          from: e.from,
+          content: e.content,
+          timeStamp: new Date(e.createdAtMs).toISOString(),
+          ...(e.memoryCompressed === true ? { memoryCompressed: true as const } : {}),
+        }));
+      if (forTrip.length > 0) return forTrip;
+    }
     if (assistantChatDoc.exists) return assistantChatDoc.messages;
     return messagesForTrip(chatMemory, dockTrip.id);
-  }, [assistantChatDoc.exists, assistantChatDoc.messages, chatMemory, dockTrip?.id]);
+  }, [
+    assistantChatDoc.exists,
+    assistantChatDoc.messages,
+    chatMemory,
+    dockTrip?.id,
+    immutableQueue.loaded,
+    immutableQueue.entries,
+  ]);
+
+  /**
+   * Cross-trip `__global__` entries (trip-agnostic). The dock attaches these to the
+   * LLM call ONLY when the current request is classified as general (preferences /
+   * cross-trip). Stays separate from `tripChatMessages` so the per-trip UI thread
+   * isn't polluted with other trips' content.
+   */
+  const globalChatMessages = useMemo(() => {
+    if (!immutableQueue.loaded) return [];
+    return immutableQueue.entries
+      .filter((e) => e.active && e.tripId === "__global__")
+      .slice(-10)
+      .map((e) => ({
+        tripId: e.tripId,
+        from: e.from,
+        content: e.content,
+        timeStamp: new Date(e.createdAtMs).toISOString(),
+        ...(e.memoryCompressed === true ? { memoryCompressed: true as const } : {}),
+      }));
+  }, [immutableQueue.loaded, immutableQueue.entries]);
 
   if (loadState === "loading") {
     return (
@@ -745,6 +807,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
           trip={dockTrip ?? trip}
           profilePreferences={profilePreferences}
           tripChatMessages={tripChatMessages}
+          globalChatMessages={globalChatMessages}
           userEmail={user?.email?.trim() ?? null}
           canPersistMemory={Boolean(useFirestore && user?.email?.trim())}
         />

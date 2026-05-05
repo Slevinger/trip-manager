@@ -1,11 +1,13 @@
+import { refuseRedundantTripMemoryEvolve, type TripMemoryEvolveTurn } from "@/lib/tripChatEvolveGate";
 import { messagesForTrip } from "@/lib/tripChatMessages";
 import type { TripChatMessage } from "@/lib/types/user";
 import { replaceTripChatMemoryForTrip } from "@/lib/usersFirestore";
 
-function tripMessagesToApiTurns(messages: TripChatMessage[]): { role: "user" | "assistant"; content: string }[] {
+function tripMessagesToApiTurns(messages: TripChatMessage[]): TripMemoryEvolveTurn[] {
   return messages.map((m) => ({
     role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
     content: m.content,
+    ...(m.memoryCompressed === true ? { memoryCompressed: true as const } : {}),
   }));
 }
 
@@ -25,6 +27,10 @@ export async function agentEvolve(opts: {
   const forTrip = messagesForTrip(opts.tripChatMessages, tid);
   if (forTrip.length === 0) return;
 
+  if (refuseRedundantTripMemoryEvolve(opts.tripChatMessages, tid)) {
+    throw new Error("EVOLVE_REDUNDANT");
+  }
+
   const apiMessages = tripMessagesToApiTurns(forTrip);
   const res = await fetch("/api/chat/trip-memory-evolve", {
     method: "POST",
@@ -32,8 +38,16 @@ export async function agentEvolve(opts: {
     body: JSON.stringify({ messages: apiMessages }),
   });
 
-  const data = (await res.json().catch(() => ({}))) as { summary?: string; error?: string; detail?: string };
+  const data = (await res.json().catch(() => ({}))) as {
+    summary?: string;
+    error?: string;
+    detail?: string;
+    code?: string;
+  };
   if (!res.ok) {
+    if (res.status === 409 && data.code === "evolve_redundant") {
+      throw new Error("EVOLVE_REDUNDANT");
+    }
     const head = data.error?.trim() || `Request failed (${res.status})`;
     const tail = data.detail?.trim();
     throw new Error(tail ? `${head}\n${tail.slice(0, 400)}` : head);

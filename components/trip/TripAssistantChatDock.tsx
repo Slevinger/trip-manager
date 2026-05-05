@@ -5,9 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TripAssistantMessageBody } from "@/components/trip/TripAssistantMessageBody";
 import { agentEvolve } from "@/lib/agentEvolve";
 import { buildChatMemoryTripWhere } from "@/lib/chatMemoryTripContext";
+import { getClientAuth } from "@/lib/firebase";
 import { useI18n } from "@/lib/i18n/context";
+import { refuseRedundantTripMemoryEvolve } from "@/lib/tripChatEvolveGate";
 import { messagesForTrip } from "@/lib/tripChatMessages";
-import { appendTripChatTurn, clearTripChatMemoryForTrip } from "@/lib/usersFirestore";
+import {
+  parseTripAssistantRequestKind,
+  tripAssistantNeedsGlobalContext,
+} from "@/lib/tripAssistantRequestKind";
+import {
+  appendImmutableMemoryQueueTurn,
+  appendTripChatTurn,
+  clearTripChatMemoryForTrip,
+} from "@/lib/usersFirestore";
 import type { Trip, UserPreferences } from "@/lib/types/trip";
 import type { TripChatMessage } from "@/lib/types/user";
 
@@ -60,6 +70,8 @@ export function TripAssistantChatDock(props: {
   profilePreferences: UserPreferences | null;
   /** Stored transcript for this trip (`users/{email}.memory` filtered by `tripId`). */
   tripChatMessages: TripChatMessage[];
+  /** Cross-trip `__global__` slice; only attached to the LLM call when the user's request is general. */
+  globalChatMessages?: TripChatMessage[];
   userEmail: string | null;
   /** When true, append each exchange to Firestore after a successful reply. */
   canPersistMemory: boolean;
@@ -101,6 +113,11 @@ export function TripAssistantChatDock(props: {
 
   const persistedTripMessageCount = useMemo(
     () => messagesForTrip(props.tripChatMessages ?? [], props.trip.id).length,
+    [props.trip.id, props.tripChatMessages]
+  );
+
+  const evolveRedundantBlocked = useMemo(
+    () => refuseRedundantTripMemoryEvolve(props.tripChatMessages ?? [], props.trip.id),
     [props.trip.id, props.tripChatMessages]
   );
 
@@ -212,7 +229,7 @@ export function TripAssistantChatDock(props: {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("assistant.genericError");
-      setError(msg);
+      setError(msg === "EVOLVE_REDUNDANT" ? t("assistant.evolveRedundant") : msg);
     } finally {
       setEvolving(false);
     }
@@ -263,6 +280,10 @@ export function TripAssistantChatDock(props: {
         setError(t("assistant.evolveNeedsHistory"));
         return;
       }
+      if (refuseRedundantTripMemoryEvolve(props.tripChatMessages ?? [], props.trip.id)) {
+        setError(t("assistant.evolveRedundant"));
+        return;
+      }
       await handleEvolve();
       return;
     }
@@ -274,7 +295,36 @@ export function TripAssistantChatDock(props: {
     setLoading(true);
     const contextAtMs = Date.now();
     try {
-      const apiMessages = nextLines.map((l) => ({
+      // Decide whether to attach `__global__` cross-trip memory to this LLM call.
+      // First-class signal: tiny LLM router. Falls back to the regex heuristic on failure.
+      const lastAssistantReply = [...lines].reverse().find((l) => l.role === "assistant")?.content ?? null;
+      let attachGlobal: boolean;
+      try {
+        const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            latestUserText: text,
+            tripTitle: props.trip.title ?? "",
+            recentTurns: nextLines.slice(-6).map((l) => ({ role: l.role, content: l.content })),
+          }),
+        });
+        if (classifyRes.ok) {
+          const j = (await classifyRes.json().catch(() => ({}))) as { kind?: "general" | "specific" };
+          attachGlobal = j.kind === "general";
+        } else {
+          attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
+        }
+      } catch {
+        attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
+      }
+      const globalAsLines: Line[] = attachGlobal
+        ? (props.globalChatMessages ?? []).map((m) => ({
+            role: m.from === "agent" ? "assistant" : "user",
+            content: m.content,
+          }))
+        : [];
+      const apiMessages = [...globalAsLines, ...nextLines].map((l) => ({
         role: l.role as "user" | "assistant",
         content: l.content,
       }));
@@ -319,6 +369,8 @@ export function TripAssistantChatDock(props: {
 
       if (props.canPersistMemory && props.userEmail?.trim()) {
         const where = buildChatMemoryTripWhere(props.trip, contextAtMs);
+        // Assistant self-classification (`##general##` / `##specific##`) trailing the reply.
+        const requestKind = parseTripAssistantRequestKind(reply) ?? undefined;
         void appendTripChatTurn(props.userEmail.trim().toLowerCase(), {
           tripId: props.trip.id,
           userFromEmail: props.userEmail.trim(),
@@ -327,6 +379,43 @@ export function TripAssistantChatDock(props: {
           contextSummary: where.summary,
           sentAtMs: contextAtMs,
         }).catch(() => {});
+
+        void appendImmutableMemoryQueueTurn(props.userEmail.trim().toLowerCase(), {
+          tripId: props.trip.id,
+          userFromEmail: props.userEmail.trim(),
+          userContent: text,
+          agentContent: reply,
+          sentAtMs: contextAtMs,
+          ...(requestKind ? { requestKind } : {}),
+        }).catch(() => {});
+
+        // Global (trip-agnostic) user memory stream: same turns, tagged under a reserved id.
+        // Attach the current trip context so the global memory keeps trip provenance.
+        void appendImmutableMemoryQueueTurn(props.userEmail.trim().toLowerCase(), {
+          tripId: "__global__",
+          userFromEmail: props.userEmail.trim(),
+          userContent: text,
+          agentContent: reply,
+          sentAtMs: contextAtMs + 2,
+          tripContextNote: where.summary,
+          originTripId: props.trip.id,
+          ...(requestKind ? { requestKind } : {}),
+        }).catch(() => {});
+
+        // Best-effort centralized compaction (server verifies Firebase ID token).
+        void (async () => {
+          try {
+            const auth = getClientAuth();
+            const token = await auth?.currentUser?.getIdToken();
+            if (!token) return;
+            await fetch("/api/chat/immutable-memory-compact", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          } catch {
+            /* ignore */
+          }
+        })();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("assistant.genericError");
@@ -347,6 +436,7 @@ export function TripAssistantChatDock(props: {
     props.canPersistMemory,
     props.profilePreferences,
     props.trip,
+    props.tripChatMessages,
     props.userEmail,
     t,
   ]);
@@ -463,7 +553,11 @@ export function TripAssistantChatDock(props: {
                     type="button"
                     title={t("assistant.evolveTitle")}
                     disabled={
-                      loading || evolving || forgetting || persistedTripMessageCount < 2
+                      loading ||
+                      evolving ||
+                      forgetting ||
+                      persistedTripMessageCount < 2 ||
+                      evolveRedundantBlocked
                     }
                     onClick={() => void handleEvolve()}
                     className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800/80 dark:text-zinc-200 dark:hover:bg-zinc-800"

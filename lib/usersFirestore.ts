@@ -1,9 +1,12 @@
 import {
+  collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
   onSnapshot,
+  orderBy,
+  query,
   runTransaction,
   setDoc,
   type Firestore,
@@ -13,12 +16,15 @@ import type { User } from "firebase/auth";
 import { getDb } from "@/lib/firebase";
 import type { UserPreferences } from "@/lib/types/trip";
 import { parseMemoryArrayFromUserDoc } from "@/lib/tripChatMessages";
-import type { AppUser, Email, TripChatMessage } from "@/lib/types/user";
+import type { AppUser, Email, ImmutableMemoryQueueEntry, TripChatMessage } from "@/lib/types/user";
 
 export const USERS_COLLECTION = "users";
 
 /** Per-trip assistant transcript: `users/{emailLower}/tripAssistantChats/{tripId}`. */
 export const TRIP_ASSISTANT_CHATS_SUBCOLLECTION = "tripAssistantChats";
+
+/** Central immutable user history: `users/{emailLower}/immutableMemoryQueueEntries/{entryId}`. */
+export const IMMUTABLE_MEMORY_QUEUE_ENTRIES_COLLECTION = "immutableMemoryQueueEntries";
 
 export function tripAssistantChatDocRef(db: Firestore, emailLower: string, tripId: string) {
   const tid = tripId.trim();
@@ -39,6 +45,15 @@ const EMPTY_PREFS: UserPreferences = { hobbies: [], activities: [], lifestyle: [
 
 export function userDocRef(db: Firestore, emailLower: string) {
   return doc(db, USERS_COLLECTION, emailLower);
+}
+
+function immutableQueueEntryCollectionRef(db: Firestore, emailLower: string) {
+  return collection(
+    db,
+    USERS_COLLECTION,
+    normalizeUserEmailKey(emailLower),
+    IMMUTABLE_MEMORY_QUEUE_ENTRIES_COLLECTION
+  );
 }
 
 function isoNow(): string {
@@ -230,6 +245,157 @@ export async function updateUserPreferences(emailLower: string, prefs: UserPrefe
 const MAX_CHAT_MESSAGES = 200;
 
 /**
+ * Appends one user + agent turn to the immutable per-user queue (never deleted).
+ * Uses a monotonic seq stored on `users/{emailLower}.immutableQueueSeq` to order entries.
+ *
+ * Pass `tripContextNote` to attach a one-line trip-context snapshot to the saved
+ * pair (used for entries stored under a virtual scope like `__global__`, so the
+ * compaction LLM keeps trip provenance even though the row's `tripId` is the
+ * virtual scope). When provided it is also prefixed onto the saved user content
+ * so the model sees the context inline. `originTripId` records the real trip id.
+ */
+export async function appendImmutableMemoryQueueTurn(
+  emailLower: string,
+  opts: {
+    tripId: string;
+    userFromEmail: string;
+    userContent: string;
+    agentContent: string;
+    sentAtMs: number;
+    tripContextNote?: string;
+    originTripId?: string;
+    requestKind?: "general" | "specific";
+  }
+): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+
+  const key = normalizeUserEmailKey(emailLower);
+  const tid = opts.tripId.trim();
+  if (!tid) return;
+
+  const userFrom = normalizeUserEmailKey(opts.userFromEmail) as Email;
+  const createdAtMs = Math.floor(opts.sentAtMs);
+
+  const ctxNote = (opts.tripContextNote ?? "").trim().slice(0, 500);
+  const origin = (opts.originTripId ?? "").trim();
+  const requestKind = opts.requestKind === "general" || opts.requestKind === "specific" ? opts.requestKind : undefined;
+  const ctxPrefix = ctxNote ? `[trip-context] ${ctxNote}\n` : "";
+  const userContentSaved = (ctxPrefix + opts.userContent).slice(0, 8000);
+
+  const userRef = userDocRef(db, key);
+  const entriesCol = immutableQueueEntryCollectionRef(db, key);
+
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(userRef);
+    const data = (snap.data() as Record<string, unknown> | undefined) ?? {};
+    const prevSeqRaw = data.immutableQueueSeq;
+    const prevSeq =
+      typeof prevSeqRaw === "number" && Number.isFinite(prevSeqRaw) ? Math.max(0, Math.floor(prevSeqRaw)) : 0;
+
+    const seqUser = prevSeq + 1;
+    const seqAgent = prevSeq + 2;
+
+    const userDoc = doc(entriesCol);
+    const agentDoc = doc(entriesCol);
+
+    const userEntry: ImmutableMemoryQueueEntry = {
+      seq: seqUser,
+      tripId: tid,
+      role: "user",
+      from: userFrom,
+      content: userContentSaved,
+      kind: "message",
+      active: true,
+      createdAtMs,
+      ...(ctxNote ? { tripContext: ctxNote } : {}),
+      ...(origin ? { originTripId: origin } : {}),
+      ...(requestKind ? { requestKind } : {}),
+    };
+
+    const agentEntry: ImmutableMemoryQueueEntry = {
+      seq: seqAgent,
+      tripId: tid,
+      role: "assistant",
+      from: "agent",
+      content: opts.agentContent.slice(0, 8000),
+      kind: "message",
+      active: true,
+      createdAtMs: createdAtMs + 1,
+      ...(ctxNote ? { tripContext: ctxNote } : {}),
+      ...(origin ? { originTripId: origin } : {}),
+      ...(requestKind ? { requestKind } : {}),
+    };
+
+    tx.set(userDoc, userEntry);
+    tx.set(agentDoc, agentEntry);
+    tx.set(userRef, { immutableQueueSeq: seqAgent, updatedAt: isoNow() }, { merge: true });
+  });
+}
+
+export function subscribeImmutableMemoryQueueEntries(
+  emailLower: string,
+  onNext: (rows: ImmutableMemoryQueueEntry[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const db = getDb();
+  if (!db) {
+    onNext([]);
+    return () => {};
+  }
+  const q = query(immutableQueueEntryCollectionRef(db, emailLower), orderBy("seq", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const out: ImmutableMemoryQueueEntry[] = [];
+      for (const d of snap.docs) {
+        const raw = d.data() as Record<string, unknown>;
+        // Minimal shape validation; treat unknown rows as absent.
+        const seq = typeof raw.seq === "number" ? raw.seq : NaN;
+        const tripId = typeof raw.tripId === "string" ? raw.tripId : "";
+        const role = raw.role === "user" || raw.role === "assistant" ? raw.role : null;
+        const from = typeof raw.from === "string" ? (raw.from as "agent" | Email) : null;
+        const content = typeof raw.content === "string" ? raw.content : "";
+        const kind = raw.kind === "message" || raw.kind === "summary" ? raw.kind : null;
+        const active = raw.active === true;
+        const createdAtMs = typeof raw.createdAtMs === "number" ? raw.createdAtMs : NaN;
+        if (!Number.isFinite(seq) || !tripId || !role || !from || !kind || !Number.isFinite(createdAtMs)) continue;
+        const evolveCountRaw = raw.evolveCount;
+        const tripContextRaw = typeof raw.tripContext === "string" ? raw.tripContext.trim() : "";
+        const originTripIdRaw = typeof raw.originTripId === "string" ? raw.originTripId.trim() : "";
+        const requestKindRaw =
+          raw.requestKind === "general" || raw.requestKind === "specific"
+            ? (raw.requestKind as "general" | "specific")
+            : undefined;
+        const row: ImmutableMemoryQueueEntry = {
+          seq,
+          tripId,
+          role,
+          from,
+          content: content.slice(0, 8000),
+          kind,
+          active,
+          createdAtMs,
+          ...(raw.memoryCompressed === true ? { memoryCompressed: true } : {}),
+          ...(typeof evolveCountRaw === "number" && Number.isFinite(evolveCountRaw)
+            ? { evolveCount: Math.max(0, Math.floor(evolveCountRaw)) }
+            : {}),
+          ...(tripContextRaw ? { tripContext: tripContextRaw } : {}),
+          ...(originTripIdRaw ? { originTripId: originTripIdRaw } : {}),
+          ...(requestKindRaw ? { requestKind: requestKindRaw } : {}),
+        };
+        out.push(row);
+      }
+      onNext(out);
+    },
+    (err) => {
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+      onNext([]);
+    }
+  );
+}
+
+/**
  * Appends one user + agent turn to `users/{email}/tripAssistantChats/{tripId}` (canonical)
  * and mirrors into `users/{email}.memory` for backwards compatibility.
  */
@@ -326,6 +492,7 @@ export async function replaceTripChatMemoryForTrip(
     from: "agent",
     content: agentSummaryContent.slice(0, 8000),
     timeStamp: new Date(sentAtMs).toISOString(),
+    memoryCompressed: true,
   };
 
   await setDoc(subRef, {

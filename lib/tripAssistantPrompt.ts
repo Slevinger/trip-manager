@@ -1,10 +1,11 @@
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
+import { TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION } from "@/lib/tripAssistantRequestKind";
 import type { Trip, TripStep, UserPreferences } from "@/lib/types/trip";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
 
-/** Minimal internal hop: normalize inline `#web` → one search line (no tools). */
+/** Minimal internal hop: normalize inline web markers -> one search line (no tools). */
 export const TRIP_ASSISTANT_WEB_REFINE_APPENDIX =
-  "\n\nINTERNAL: Latest user turn has `#web` but not at EOL. Output **only** one English search-query line (trip JSON + chat facts; keywords/places/dates; no pleasantries). Must end with ` #web`.";
+  "\n\nINTERNAL: Latest user turn has one of these markers not at EOL: `=>`, `>=`, `<=`, `=<`. Output **only** one English search-query line (trip JSON + chat facts; keywords/places/dates; no pleasantries). Must end with ` =>`.";
 
 function stepHeadline(step: TripStep): string {
   const t = step.title?.trim() || "Untitled step";
@@ -89,7 +90,8 @@ export function buildTripAssistantSystemPrompt(
     "**Formatting:** Use normal Markdown when helpful: put **each list item on its own line** starting with `- ` (blank line before a list if it follows a paragraph). Never cram multiple `-` items into one run-on line.",
     "Finish every reply with proper sentence endings (period / question mark); do not stop mid‑sentence.",
     "Be accurate to the trip data below; if something is unknown, say so briefly and suggest a next step.",
-    "`#web`: suffix → server searches text before it (Anthropic). Inline `#web` → server emits one query line ending `#web` then searches.",
+    "**Thread vs trip JSON:** Older messages may have been merged into one long assistant note. Use that note for prior web facts and chat-only context. For itinerary layout, steps, and dates, treat the trip JSON below as source of truth (the note must not be relied on for current schedule state).",
+    "Web marker syntax (`=>`, `>=`, `<=`, `=<`): suffix marker -> server searches text before it (Anthropic). Inline marker -> server emits one query line ending `=>` then searches.",
     ...webContextLines,
     "You do not book tickets or hotels. Facts: trip JSON + chat + (if web) search blocks — quote links only from results.",
     opts.anthropicWebSearchEnabled
@@ -109,5 +111,6 @@ export function buildTripAssistantSystemPrompt(
     tripJson,
     "```",
     prefsBlock,
+    TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION,
   ].join("\n");
 }

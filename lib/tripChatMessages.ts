@@ -42,6 +42,9 @@ export function parseStoredMemoryRow(
       content: content.slice(0, 8000),
       timeStamp: parseMessageTimeStamp(raw.timeStamp),
     };
+    if (raw.memoryCompressed === true && msg.from === "agent") {
+      msg.memoryCompressed = true;
+    }
     const cs = typeof raw.contextSummary === "string" ? raw.contextSummary.trim() : "";
     if (cs && msg.from !== "agent") msg.contextSummary = cs.slice(0, 500);
     return [msg];
