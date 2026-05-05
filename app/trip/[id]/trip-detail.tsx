@@ -481,17 +481,23 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const tripChatMessages = useMemo(() => {
     if (!dockTrip?.id) return [];
     if (sharedThread.loaded) {
-      const fromShared = sharedThread.entries
-        .filter((e) => e.active && e.tripId === dockTrip.id)
-        .slice(-40)
-        .map((e) => ({
-          tripId: e.tripId,
-          from: e.from,
-          content: e.content,
-          timeStamp: new Date(e.createdAtMs).toISOString(),
-          ...(e.memoryCompressed === true ? { memoryCompressed: true as const } : {}),
-        }));
-      if (fromShared.length > 0) return fromShared;
+      const allForTrip = sharedThread.entries.filter((e) => e.tripId === dockTrip.id);
+      // Once a trip has ANY shared-thread entry (even if everyone was just cleared via
+      // Forget), treat the shared thread as authoritative. Otherwise an Owner who clears
+      // the chat would silently re-surface the legacy `assistantChatDoc.messages` (which
+      // still holds the old `LEGEND:` / `CHAT_ONLY_MEMORY:` evolve summary).
+      if (allForTrip.length > 0) {
+        return allForTrip
+          .filter((e) => e.active)
+          .slice(-40)
+          .map((e) => ({
+            tripId: e.tripId,
+            from: e.from,
+            content: e.content,
+            timeStamp: new Date(e.createdAtMs).toISOString(),
+            ...(e.memoryCompressed === true ? { memoryCompressed: true as const } : {}),
+          }));
+      }
     }
     if (assistantChatDoc.exists) return assistantChatDoc.messages;
     return messagesForTrip(chatMemory, dockTrip.id);

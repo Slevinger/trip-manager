@@ -72,11 +72,13 @@ export async function POST(req: NextRequest) {
 
   const db = getFirestore();
   const tripRef = db.collection("trips").doc(tripId);
-  const tripSnap = await tripRef.get();
-  if (!tripSnap.exists) {
+  // NOTE: trip auth metadata (`ownerUid`) lives on `canonicalTrips/{tripId}`, not
+  // `trips/{tripId}`. Read ownership from there.
+  const canonicalSnap = await db.collection("canonicalTrips").doc(tripId).get();
+  if (!canonicalSnap.exists) {
     return NextResponse.json({ error: "Trip not found" }, { status: 404 });
   }
-  const tripData = tripSnap.data() as Record<string, unknown>;
+  const tripData = canonicalSnap.data() as Record<string, unknown>;
   const ownerUid = typeof tripData.ownerUid === "string" ? tripData.ownerUid : "";
   if (!ownerUid || ownerUid !== uid) {
     return NextResponse.json({ error: "Only the trip owner can clear the shared thread" }, { status: 403 });

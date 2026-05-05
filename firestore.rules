@@ -91,13 +91,32 @@ service cloud.firestore {
     }
 
     /**
-     * Shared per-trip assistant thread — every member of the trip can read and append
-     * messages. Updates and deletes are forbidden from clients (only server routes
-     * with the Admin SDK touch `active` for compaction or owner-clear).
+     * Shared per-trip assistant thread — every participant of the trip can read and
+     * append messages. Updates and deletes are forbidden from clients (only server
+     * routes with the Admin SDK touch `active` for compaction or owner-clear).
+     *
+     * NOTE: trip auth metadata (`ownerUid`, `participantEmailsLower`) lives on the
+     * `canonicalTrips/{tripId}` doc, not `trips/{tripId}` (which is mostly an empty
+     * shell used as a parent for subcollections like `assistantThread`). Mirror the
+     * canonical trip read rule below: owner uid match, or email listed on the trip.
      */
     match /trips/{tripId}/assistantThread/{entryId} {
-      allow read: if isMember(tripId);
-      allow create: if isMember(tripId);
+      allow read: if signedIn() && (
+        get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.ownerUid == request.auth.uid ||
+        (
+          currentEmailLower() != "" &&
+          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower is list &&
+          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower.hasAny([currentEmailLower()])
+        )
+      );
+      allow create: if signedIn() && (
+        get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.ownerUid == request.auth.uid ||
+        (
+          currentEmailLower() != "" &&
+          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower is list &&
+          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower.hasAny([currentEmailLower()])
+        )
+      );
       allow update: if false;
       allow delete: if false;
     }

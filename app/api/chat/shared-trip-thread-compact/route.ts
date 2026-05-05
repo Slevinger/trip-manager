@@ -212,9 +212,30 @@ export async function POST(req: NextRequest) {
 
   const db = getFirestore();
   const tripRef = db.collection("trips").doc(tripId);
-  const memberSnap = await tripRef.collection("members").doc(uid).get();
-  if (!memberSnap.exists) {
-    return NextResponse.json({ error: "Caller is not a member of this trip" }, { status: 403 });
+  // NOTE: trip auth metadata (`ownerUid`, `participantEmailsLower`) lives on
+  // `canonicalTrips/{tripId}`, not `trips/{tripId}`. Read from there.
+  const canonicalSnap = await db.collection("canonicalTrips").doc(tripId).get();
+  if (!canonicalSnap.exists) {
+    return NextResponse.json({ error: "Trip not found" }, { status: 404 });
+  }
+  const tripData = canonicalSnap.data() as Record<string, unknown>;
+  const ownerUid = typeof tripData.ownerUid === "string" ? tripData.ownerUid : "";
+  const participantEmailsRaw = Array.isArray(tripData.participantEmailsLower)
+    ? (tripData.participantEmailsLower as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  let callerEmail = "";
+  try {
+    const u = await auth.getUser(uid);
+    callerEmail = (u.email ?? "").toString().trim().toLowerCase();
+  } catch {
+    callerEmail = "";
+  }
+  const isOwner = ownerUid === uid;
+  const isParticipant =
+    callerEmail.length > 0 &&
+    participantEmailsRaw.map((s) => s.trim().toLowerCase()).includes(callerEmail);
+  if (!isOwner && !isParticipant) {
+    return NextResponse.json({ error: "Caller is not a participant of this trip" }, { status: 403 });
   }
 
   const budgetGate = await assertMonthlyBudgetAllowsNewSpend();

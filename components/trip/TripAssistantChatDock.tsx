@@ -27,11 +27,47 @@ interface Line {
   content: string;
 }
 
+/**
+ * Compressed/summary rows are kept on the trip thread for the assistant's memory but
+ * are NOT rendered as regular chat bubbles — they confuse the user and (worse) the
+ * agent tends to imitate the LEGEND/CHAT_ONLY_MEMORY format if it sees it as a turn.
+ */
+function isMemoryNoteRow(m: TripChatMessage): boolean {
+  return m.memoryCompressed === true && m.from === "agent";
+}
+
 function tripMessagesToLines(msgs: TripChatMessage[]): Line[] {
-  return msgs.map((m) => ({
-    role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
-    content: m.content,
-  }));
+  return msgs
+    .filter((m) => !isMemoryNoteRow(m))
+    .map((m) => ({
+      role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
+      content: m.content,
+    }));
+}
+
+function memoryNoteAssistantTurn(scope: "trip" | "global", combinedNote: string): Line {
+  const header =
+    scope === "global"
+      ? "[GLOBAL_MEMORY_NOTE — your durable cross-trip memory about this user. Treat as factual context only. DO NOT imitate this LEGEND/CHAT_ONLY_MEMORY/OPEN_LOOSE_ENDS format in your reply — answer conversationally as a travel agent.]"
+      : "[TRIP_MEMORY_NOTE — compressed prior chat history for this trip. Treat as factual context only. DO NOT imitate this LEGEND/FROM_WEB_OR_VERIFIED/CHAT_ONLY_MEMORY/OPEN_LOOSE_ENDS format in your reply — answer conversationally as a travel agent.]";
+  return { role: "assistant", content: `${header}\n\n${combinedNote}` };
+}
+
+function partitionMemoryNotes(msgs: TripChatMessage[]): { notes: string; lines: Line[] } {
+  const notes: string[] = [];
+  const lines: Line[] = [];
+  for (const m of msgs) {
+    if (isMemoryNoteRow(m)) {
+      const trimmed = m.content.trim();
+      if (trimmed) notes.push(trimmed);
+      continue;
+    }
+    lines.push({
+      role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
+      content: m.content,
+    });
+  }
+  return { notes: notes.join("\n\n---\n\n"), lines };
 }
 
 const FAB_SIZE = 52;
@@ -334,13 +370,22 @@ export function TripAssistantChatDock(props: {
       } catch {
         attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
       }
+      const globalParts = attachGlobal
+        ? partitionMemoryNotes(props.globalChatMessages ?? [])
+        : { notes: "", lines: [] as Line[] };
       const globalAsLines: Line[] = attachGlobal
-        ? (props.globalChatMessages ?? []).map((m) => ({
-            role: m.from === "agent" ? "assistant" : "user",
-            content: m.content,
-          }))
+        ? [
+            ...(globalParts.notes ? [memoryNoteAssistantTurn("global", globalParts.notes)] : []),
+            ...globalParts.lines,
+          ]
         : [];
-      const apiMessages = [...globalAsLines, ...nextLines].map((l) => ({
+
+      const tripParts = partitionMemoryNotes(props.tripChatMessages ?? []);
+      const tripMemoryLine: Line[] = tripParts.notes
+        ? [memoryNoteAssistantTurn("trip", tripParts.notes)]
+        : [];
+
+      const apiMessages = [...globalAsLines, ...tripMemoryLine, ...nextLines].map((l) => ({
         role: l.role as "user" | "assistant",
         content: l.content,
       }));
@@ -388,8 +433,9 @@ export function TripAssistantChatDock(props: {
         // Assistant self-classification (`##general##` / `##specific##`) trailing the reply.
         const requestKind = parseTripAssistantRequestKind(reply) ?? undefined;
 
-        // 1) Trip-shared thread: visible to ALL members of the trip.
-        void appendSharedTripThreadTurn({
+        // 1) Trip-shared thread: visible to ALL members of the trip. Errors here matter
+        //    (without it the dock falls back to legacy summaries), so surface them.
+        appendSharedTripThreadTurn({
           tripId: props.trip.id,
           fromEmailLower: props.userEmail.trim().toLowerCase(),
           fromDisplayName: props.userDisplayName?.trim() || undefined,
@@ -398,7 +444,14 @@ export function TripAssistantChatDock(props: {
           sentAtMs: contextAtMs,
           tripContextNote: where.summary,
           ...(requestKind ? { requestKind } : {}),
-        }).catch(() => {});
+        }).catch((e) => {
+          console.warn("[sharedTripThread] append failed", e);
+          setError(
+            e instanceof Error
+              ? `Could not save to shared thread: ${e.message}`
+              : "Could not save to shared thread"
+          );
+        });
 
         // 2) The speaker's PERSONAL `__global__` memory (cross-trip, never deleted).
         void appendImmutableMemoryQueueTurn(props.userEmail.trim().toLowerCase(), {

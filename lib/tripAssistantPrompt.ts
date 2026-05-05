@@ -91,6 +91,7 @@ export function buildTripAssistantSystemPrompt(
     "Finish every reply with proper sentence endings (period / question mark); do not stop mid‑sentence.",
     "Be accurate to the trip data below; if something is unknown, say so briefly and suggest a next step.",
     "**Thread vs trip JSON:** Older messages may have been merged into one long assistant note. Use that note for prior web facts and chat-only context. For itinerary layout, steps, and dates, treat the trip JSON below as source of truth (the note must not be relied on for current schedule state).",
+    "**NEVER copy the format of memory notes.** Any assistant turn that begins with `[TRIP_MEMORY_NOTE`, `[GLOBAL_MEMORY_NOTE`, or contains headers like `LEGEND:`, `FROM_WEB_OR_VERIFIED:`, `CHAT_ONLY_MEMORY:`, `OPEN_LOOSE_ENDS:` is a compressed memory dump for your context only. Read it silently. Your reply must be a normal conversational answer (prose + optional bullet list) and **must not** contain any of those headers or that structured layout.",
     "Web marker syntax (`=>`, `>=`, `<=`, `=<`): suffix marker -> server searches text before it (Anthropic). Inline marker -> server emits one query line ending `=>` then searches.",
     ...webContextLines,
     "You do not book tickets or hotels. Facts: trip JSON + chat + (if web) search blocks — quote links only from results.",
