@@ -125,9 +125,10 @@ const en = {
     "History is already a single compressed note. Chat more first — or compress again once you have 40+ saved lines (the assistant history limit).",
   "assistant.forget": "Forget chat",
   "assistant.forgetTitle":
-    "Delete only your saved assistant chat for this trip (your account). Other travelers and your other trips are unchanged.",
+    "Owner only: clear the shared assistant chat for this trip. Every traveler will see an empty thread. Cross-trip personal memory is not affected.",
   "assistant.forgetConfirm":
-    "Delete your saved assistant chat for this trip only? Other trips and other people on this trip are not affected. This cannot be undone.",
+    "Clear the shared assistant chat for this trip for everyone? Cross-trip personal memory is not affected. This cannot be undone.",
+  "assistant.forgetOwnerOnly": "Only the trip owner can clear the shared chat.",
   "assistant.forgetting": "Clearing…",
 
   "common.remove": "Remove",
@@ -452,9 +453,10 @@ const he: Record<MessageKey, string> = {
     "ההיסטוריה כבר הערה דחוסה אחת. המשיכו לשוחח — או דחסו שוב כשיש 40+ שורות שמורות (מגבלת ההקשר של העוזר).",
   "assistant.forget": "שכחת צ'אט",
   "assistant.forgetTitle":
-    "מחיקת הצ'אט השמור שלכם לטיול הזה בלבד (החשבון שלכם). לא נוגע במטיילים אחרים או בטיולים אחרים.",
+    "רק לבעל/ת הטיול: ניקוי הצ'אט המשותף לטיול. כל המטיילים יראו שיחה ריקה. הזיכרון האישי בין הטיולים לא מושפע.",
   "assistant.forgetConfirm":
-    "למחוק את הצ'אט השמור שלכם לטיול הזה בלבד? טיולים אחרים ומשתמשים אחרים לא מושפעים. לא ניתן לבטל.",
+    "לנקות את הצ'אט המשותף לטיול הזה לכולם? הזיכרון האישי בין הטיולים לא מושפע. לא ניתן לבטל.",
+  "assistant.forgetOwnerOnly": "רק בעל/ת הטיול יכול/ה לנקות את הצ'אט המשותף.",
   "assistant.forgetting": "מוחק…",
 
   "common.remove": "הסרה",
@@ -780,9 +782,10 @@ const ru: Record<MessageKey, string> = {
     "История уже одна сжатая заметка. Продолжите переписку — или снова сожмите, когда будет 40+ сохранённых строк (лимит контекста помощника).",
   "assistant.forget": "Забыть чат",
   "assistant.forgetTitle":
-    "Удалить только ваш сохранённый чат помощника по этой поездке (ваш аккаунт). Другие участники и другие поездки не затрагиваются.",
+    "Только для владельца: очистить общий чат помощника по этой поездке. Все участники увидят пустую переписку. Личная память между поездками не затрагивается.",
   "assistant.forgetConfirm":
-    "Удалить сохранённый чат по этой поездке только для вас? Другие поездки и другие люди не затрагиваются. Отменить нельзя.",
+    "Очистить общий чат по этой поездке для всех? Личная память между поездками не затрагивается. Отменить нельзя.",
+  "assistant.forgetOwnerOnly": "Только владелец поездки может очистить общий чат.",
   "assistant.forgetting": "Удаление…",
 
   "common.remove": "Удалить",

@@ -244,6 +244,8 @@ export function userCanManageCanonicalTripDoc(user: User, data: DocumentData): b
 export type CanonicalTripSubscribeAccess = {
   /** May save in Manage (owner or listed traveler); delete trip remains owner-only in app + rules. */
   canManageFirestore: boolean;
+  /** True only when the signed-in user is the trip's `ownerUid`. */
+  isOwner: boolean;
 };
 
 export function subscribeCanonicalTrip(
@@ -266,8 +268,11 @@ export function subscribeCanonicalTrip(
         onTrip(null);
         return;
       }
+      const ownerUidRaw = (data as Record<string, unknown>)[OWNER_UID];
+      const isOwner = typeof ownerUidRaw === "string" && ownerUidRaw.length > 0 && ownerUidRaw === user.uid;
       onTrip(stripMeta(data), {
         canManageFirestore: userCanManageCanonicalTripDoc(user, data),
+        isOwner,
       });
     },
     (err) => onError?.(err)

@@ -15,9 +15,8 @@ import {
 } from "@/lib/tripAssistantRequestKind";
 import {
   appendImmutableMemoryQueueTurn,
-  appendTripChatTurn,
-  clearTripChatMemoryForTrip,
 } from "@/lib/usersFirestore";
+import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
 import type { Trip, UserPreferences } from "@/lib/types/trip";
 import type { TripChatMessage } from "@/lib/types/user";
 
@@ -68,11 +67,14 @@ type DragSession =
 export function TripAssistantChatDock(props: {
   trip: Trip;
   profilePreferences: UserPreferences | null;
-  /** Stored transcript for this trip (`users/{email}.memory` filtered by `tripId`). */
+  /** Trip-shared transcript (`trips/{id}/assistantThread`) — visible to all members. */
   tripChatMessages: TripChatMessage[];
-  /** Cross-trip `__global__` slice; only attached to the LLM call when the user's request is general. */
+  /** Cross-trip `__global__` slice for the speaker; only attached when the request is general. */
   globalChatMessages?: TripChatMessage[];
   userEmail: string | null;
+  userDisplayName?: string | null;
+  /** Owner-only controls (Forget, Compress) only render when true. */
+  isTripOwner?: boolean;
   /** When true, append each exchange to Firestore after a successful reply. */
   canPersistMemory: boolean;
 }) {
@@ -245,11 +247,24 @@ export function TripAssistantChatDock(props: {
   const handleForgetChat = useCallback(async () => {
     const em = props.userEmail?.trim();
     if (!props.canPersistMemory || !em || persistedTripMessageCount < 1) return;
+    if (!props.isTripOwner) {
+      setError(t("assistant.forgetOwnerOnly"));
+      return;
+    }
     if (!window.confirm(t("assistant.forgetConfirm"))) return;
     setForgetting(true);
     setError(null);
     try {
-      await clearTripChatMemoryForTrip(em.toLowerCase(), props.trip.id);
+      const auth = getClientAuth();
+      const token = await auth?.currentUser?.getIdToken();
+      if (!token) throw new Error(t("assistant.genericError"));
+      const res = await fetch("/api/chat/shared-trip-thread-clear", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tripId: props.trip.id }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(j.error || t("assistant.genericError"));
       setLines([]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("assistant.genericError");
@@ -260,6 +275,7 @@ export function TripAssistantChatDock(props: {
   }, [
     persistedTripMessageCount,
     props.canPersistMemory,
+    props.isTripOwner,
     props.trip.id,
     props.userEmail,
     t,
@@ -371,26 +387,20 @@ export function TripAssistantChatDock(props: {
         const where = buildChatMemoryTripWhere(props.trip, contextAtMs);
         // Assistant self-classification (`##general##` / `##specific##`) trailing the reply.
         const requestKind = parseTripAssistantRequestKind(reply) ?? undefined;
-        void appendTripChatTurn(props.userEmail.trim().toLowerCase(), {
-          tripId: props.trip.id,
-          userFromEmail: props.userEmail.trim(),
-          userContent: text,
-          agentContent: reply,
-          contextSummary: where.summary,
-          sentAtMs: contextAtMs,
-        }).catch(() => {});
 
-        void appendImmutableMemoryQueueTurn(props.userEmail.trim().toLowerCase(), {
+        // 1) Trip-shared thread: visible to ALL members of the trip.
+        void appendSharedTripThreadTurn({
           tripId: props.trip.id,
-          userFromEmail: props.userEmail.trim(),
+          fromEmailLower: props.userEmail.trim().toLowerCase(),
+          fromDisplayName: props.userDisplayName?.trim() || undefined,
           userContent: text,
           agentContent: reply,
           sentAtMs: contextAtMs,
+          tripContextNote: where.summary,
           ...(requestKind ? { requestKind } : {}),
         }).catch(() => {});
 
-        // Global (trip-agnostic) user memory stream: same turns, tagged under a reserved id.
-        // Attach the current trip context so the global memory keeps trip provenance.
+        // 2) The speaker's PERSONAL `__global__` memory (cross-trip, never deleted).
         void appendImmutableMemoryQueueTurn(props.userEmail.trim().toLowerCase(), {
           tripId: "__global__",
           userFromEmail: props.userEmail.trim(),
@@ -402,16 +412,25 @@ export function TripAssistantChatDock(props: {
           ...(requestKind ? { requestKind } : {}),
         }).catch(() => {});
 
-        // Best-effort centralized compaction (server verifies Firebase ID token).
+        // Best-effort compaction:
+        //  - shared trip thread (any member can trigger; server verifies membership).
+        //  - the speaker's per-user immutable queue (still hosts `__global__`).
         void (async () => {
           try {
             const auth = getClientAuth();
             const token = await auth?.currentUser?.getIdToken();
             if (!token) return;
-            await fetch("/api/chat/immutable-memory-compact", {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-            });
+            await Promise.all([
+              fetch("/api/chat/shared-trip-thread-compact", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ tripId: props.trip.id }),
+              }).catch(() => {}),
+              fetch("/api/chat/immutable-memory-compact", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+              }).catch(() => {}),
+            ]);
           } catch {
             /* ignore */
           }
@@ -547,7 +566,7 @@ export function TripAssistantChatDock(props: {
                   {t("assistant.send")}
                 </button>
               </div>
-              {props.canPersistMemory && props.userEmail?.trim() && persistedTripMessageCount >= 1 ? (
+              {props.canPersistMemory && props.userEmail?.trim() && persistedTripMessageCount >= 1 && props.isTripOwner ? (
                 <div className="mb-1 flex gap-2">
                   <button
                     type="button"

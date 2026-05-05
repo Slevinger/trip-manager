@@ -29,12 +29,17 @@ import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
 import type { Destination, Trip, UserPreferences } from "@/lib/types/trip";
 import { messagesForTrip } from "@/lib/tripChatMessages";
-import type { ImmutableMemoryQueueEntry, TripChatMessage } from "@/lib/types/user";
+import type {
+  ImmutableMemoryQueueEntry,
+  SharedTripThreadEntry,
+  TripChatMessage,
+} from "@/lib/types/user";
 import {
   subscribeImmutableMemoryQueueEntries,
   subscribeTripAssistantChat,
   subscribeUser,
 } from "@/lib/usersFirestore";
+import { subscribeSharedTripThread } from "@/lib/sharedTripThread";
 
 function toLocalDateTimeInputValue(epochMs: number): string {
   const d = new Date(epochMs);
@@ -81,6 +86,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [canManageFirestore, setCanManageFirestore] = useState(false);
+  const [isTripOwner, setIsTripOwner] = useState(false);
   const [advancedJson, setAdvancedJson] = useState("");
   const [viewNowMs, setViewNowMs] = useState(() => Date.now());
   const [simulateLocalDateTimeEnabled, setSimulateLocalDateTimeEnabled] = useState(false);
@@ -97,6 +103,10 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const [immutableQueue, setImmutableQueue] = useState<{
     loaded: boolean;
     entries: ImmutableMemoryQueueEntry[];
+  }>({ loaded: false, entries: [] });
+  const [sharedThread, setSharedThread] = useState<{
+    loaded: boolean;
+    entries: SharedTripThreadEntry[];
   }>({ loaded: false, entries: [] });
   /** Canonical transcript doc `users/.../tripAssistantChats/{tripId}` when present. */
   const [assistantChatDoc, setAssistantChatDoc] = useState<{
@@ -167,6 +177,18 @@ export function TripDetail({ tripId }: { tripId: string }) {
   }, [useFirestore, user?.email]);
 
   useEffect(() => {
+    if (!useFirestore || !tripId) {
+      setSharedThread({ loaded: false, entries: [] });
+      return () => {};
+    }
+    return subscribeSharedTripThread(
+      tripId,
+      (rows) => setSharedThread({ loaded: true, entries: rows }),
+      () => setSharedThread({ loaded: true, entries: [] })
+    );
+  }, [useFirestore, tripId]);
+
+  useEffect(() => {
     setLoadState("loading");
     setSaveError(null);
     const db = getDb();
@@ -214,11 +236,13 @@ export function TripDetail({ tripId }: { tripId: string }) {
             if (!t) {
               setTrip(null);
               setCanManageFirestore(false);
+              setIsTripOwner(false);
               setLoadState("missing");
               return;
             }
             setTrip(t);
             setCanManageFirestore(access?.canManageFirestore ?? false);
+            setIsTripOwner(access?.isOwner ?? false);
             setLoadState("ok");
           },
           (err) => {
@@ -229,6 +253,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
             if (code.includes("permission-denied")) {
               setTrip(null);
               setCanManageFirestore(false);
+              setIsTripOwner(false);
               setLoadState("access_denied");
               return;
             }
@@ -447,11 +472,16 @@ export function TripDetail({ tripId }: { tripId: string }) {
   }
 
   const dockTrip = !trip ? null : tab === "manage" && manageDraft ? manageDraft : trip;
-  /** Trip-only history shown in the dock UI and used for the LLM call by default. */
+  /**
+   * Trip-shared history for the dock UI and the LLM call. Sourced from the shared
+   * `trips/{id}/assistantThread` so all members of the trip see the same conversation.
+   * Falls back to the legacy per-user trip transcript when the shared thread is empty
+   * (so old trips that never used the shared thread still render their history).
+   */
   const tripChatMessages = useMemo(() => {
     if (!dockTrip?.id) return [];
-    if (immutableQueue.loaded) {
-      const forTrip = immutableQueue.entries
+    if (sharedThread.loaded) {
+      const fromShared = sharedThread.entries
         .filter((e) => e.active && e.tripId === dockTrip.id)
         .slice(-40)
         .map((e) => ({
@@ -461,7 +491,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
           timeStamp: new Date(e.createdAtMs).toISOString(),
           ...(e.memoryCompressed === true ? { memoryCompressed: true as const } : {}),
         }));
-      if (forTrip.length > 0) return forTrip;
+      if (fromShared.length > 0) return fromShared;
     }
     if (assistantChatDoc.exists) return assistantChatDoc.messages;
     return messagesForTrip(chatMemory, dockTrip.id);
@@ -470,8 +500,8 @@ export function TripDetail({ tripId }: { tripId: string }) {
     assistantChatDoc.messages,
     chatMemory,
     dockTrip?.id,
-    immutableQueue.loaded,
-    immutableQueue.entries,
+    sharedThread.loaded,
+    sharedThread.entries,
   ]);
 
   /**
@@ -809,6 +839,8 @@ export function TripDetail({ tripId }: { tripId: string }) {
           tripChatMessages={tripChatMessages}
           globalChatMessages={globalChatMessages}
           userEmail={user?.email?.trim() ?? null}
+          userDisplayName={user?.displayName?.trim() ?? null}
+          isTripOwner={isTripOwner}
           canPersistMemory={Boolean(useFirestore && user?.email?.trim())}
         />
       ) : null}

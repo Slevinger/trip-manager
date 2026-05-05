@@ -23,6 +23,30 @@ export interface TripChatMessage {
 
 export type ImmutableMemoryEntryKind = "message" | "summary";
 
+/**
+ * One entry in the **shared per-trip assistant thread** (`trips/{tripId}/assistantThread/{id}`).
+ * Visible to every member of the trip; immutable from the client (only compaction / owner-clear
+ * server routes update `active`). `from` is the email of the speaker or `"agent"`.
+ */
+export interface SharedTripThreadEntry {
+  tripId: string;
+  role: "user" | "assistant";
+  from: "agent" | Email;
+  /** Optional display name of the human speaker, captured at write time for UI. */
+  fromDisplayName?: string;
+  content: string;
+  kind: ImmutableMemoryEntryKind;
+  active: boolean;
+  createdAtMs: number;
+  /** Trip context snapshot at the time of the turn (same shape as user-scope entries). */
+  tripContext?: string;
+  /** Assistant self-classification of the most recent user message in this turn. */
+  requestKind?: "general" | "specific";
+  memoryCompressed?: boolean;
+  /** For `kind === "summary"`: how many compaction passes produced this entry. */
+  evolveCount?: number;
+}
+
 /** One immutable entry in the centralized per-user history queue. */
 export interface ImmutableMemoryQueueEntry {
   seq: number;

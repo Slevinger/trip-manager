@@ -90,6 +90,18 @@ service cloud.firestore {
       allow read, create, update, delete: if signedIn();
     }
 
+    /**
+     * Shared per-trip assistant thread — every member of the trip can read and append
+     * messages. Updates and deletes are forbidden from clients (only server routes
+     * with the Admin SDK touch `active` for compaction or owner-clear).
+     */
+    match /trips/{tripId}/assistantThread/{entryId} {
+      allow read: if isMember(tripId);
+      allow create: if isMember(tripId);
+      allow update: if false;
+      allow delete: if false;
+    }
+
     function canonicalTripParticipantEmailRead() {
       return currentEmailLower() != "" &&
         resource.data.keys().hasAny(['participantEmailsLower']) &&
