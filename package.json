@@ -17,6 +17,7 @@
   "dependencies": {
     "firebase": "^12.12.1",
     "firebase-admin": "^13.8.0",
+    "google-auth-library": "^9.15.1",
     "leaflet": "^1.9.4",
     "next": "16.2.4",
     "react": "19.2.4",
@@ -34,7 +35,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
-    "google-auth-library": "^9.15.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

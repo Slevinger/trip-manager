@@ -11,15 +11,15 @@ import type {
   TripStep,
 } from "@/lib/types/trip";
 
-type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
+export type TFn = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
-function stepEmoji(step: TripStep): string {
+export function stepEmoji(step: TripStep): string {
   if (step.stepType === "stay") return "🏨";
   if (step.stepType === "activity") return "📍";
   return "✈️";
 }
 
-function kindLabel(step: TripStep, t: TFn): string {
+export function kindLabel(step: TripStep, t: TFn): string {
   switch (step.stepType) {
     case "stay":
       return t("view.kindStay");
@@ -30,7 +30,7 @@ function kindLabel(step: TripStep, t: TFn): string {
   }
 }
 
-function formatStepRange(startIso: string, endIso: string | undefined, empty: string): string {
+export function formatStepRange(startIso: string, endIso: string | undefined, empty: string): string {
   const a = new Date(startIso);
   const b = endIso ? new Date(endIso) : null;
   const opts: Intl.DateTimeFormatOptions = {
@@ -43,7 +43,7 @@ function formatStepRange(startIso: string, endIso: string | undefined, empty: st
   return `${a.toLocaleString(undefined, opts)} → ${b.toLocaleString(undefined, opts)}`;
 }
 
-function stepPlaceLine(step: TripStep, destinations: Destination[], t: TFn): string {
+export function stepPlaceLine(step: TripStep, destinations: Destination[], t: TFn): string {
   const unk = t("view.placeUnknown");
   const dash = t("view.emDash");
   if (step.stepType === "stay") {
@@ -61,7 +61,7 @@ function stepPlaceLine(step: TripStep, destinations: Destination[], t: TFn): str
   return d?.title || d?.location || dash;
 }
 
-function StepIntervalsBlock({
+export function StepIntervalsBlock({
   step,
   destinations,
   t,

@@ -83,6 +83,23 @@ const en = {
     "Location permission denied. Allow location access in your browser settings.",
   "trip.liveLocationUpdateFailed": "Couldn't update live location right now.",
   "trip.liveLocationDefaultName": "Traveler",
+  "trip.tools": "Trip tools",
+
+  "trip.gmail.title": "Gmail (read-only)",
+  "trip.gmail.intro":
+    "Connect Gmail to search your inbox for messages that match this trip’s dates and places. Opens threads in Gmail — nothing is imported into the trip yet.",
+  "trip.gmail.connect": "Connect Gmail",
+  "trip.gmail.connected": "Gmail connected",
+  "trip.gmail.disconnect": "Disconnect Gmail",
+  "trip.gmail.extraTerms": "Extra search words (optional)",
+  "trip.gmail.extraPlaceholder": "e.g. airline name or confirmation code",
+  "trip.gmail.search": "Search Gmail",
+  "trip.gmail.searching": "Searching…",
+  "trip.gmail.queryLabel": "Query:",
+  "trip.gmail.noResults": "No messages matched. Try different keywords or widen the trip dates.",
+  "trip.gmail.justConnected": "Gmail connected. You can search your inbox below.",
+  "trip.gmail.oauthNotConfigured":
+    "Gmail OAuth is not configured on this server.\n\n1. Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID (Web).\n2. Authorized redirect URI must include:\n{hint}\n3. Set env vars GMAIL_GOOGLE_CLIENT_ID and GMAIL_GOOGLE_CLIENT_SECRET (e.g. in .env.local), then restart dev or redeploy.\n4. Optional: NEXT_PUBLIC_APP_URL so redirect URIs match production.",
 
   "userMenu.profilePreferences": "Profile preferences…",
   "userMenu.signOut": "Sign out",
@@ -145,10 +162,18 @@ const en = {
 
   "manage.workspaceDestHelp":
     "Destinations are the heart of the trip: one registry row per place you care about (title, notes, and an optional map placement). Itinerary steps reference those rows by id. In Edit, name each destination and use address search to attach a place — Google plus OpenStreetMap (Photon) via /api/places/search when configured.",
+  "manage.tabsLabel": "Manage sections",
+  "manage.tabOverview": "Overview",
+  "manage.tabItinerary": "Itinerary",
+  "manage.tabPeople": "People",
+  "manage.tabLogistics": "Logistics",
+  "manage.placesHeading": "Places",
   "manage.steps": "Steps",
   "manage.addStep": "Add step",
   "manage.saveTrip": "Save trip",
   "manage.saveSaving": "Saving…",
+  "manage.statusUnsaved": "Unsaved changes",
+  "manage.statusSaved": "All changes saved",
   "manage.saveWritesTo": "Save writes to {target}.",
   "manage.saveSignInCloud": "Sign in from home to save cloud trips to Firestore.",
   "manage.tripTitle": "Trip title",
@@ -227,7 +252,10 @@ const en = {
     "Remove this unused destination from the trip? This cannot be undone from here.",
 
   "view.placesTitle": "Places on this trip",
+  "view.placesTab": "Places ({count})",
   "view.placesEmpty": "No destinations yet. Add a step in Manage to create places.",
+  "view.stepPrev": "Previous step",
+  "view.stepNext": "Next step",
   "view.destinationsCount": "{count} destinations",
   "view.destinationsWithSteps":
     " — each id lists where it is referenced on your itinerary (field names in parentheses).",
@@ -502,6 +530,23 @@ const he: Record<MessageKey, string> = {
   "trip.liveLocationPermissionDenied": "הרשאת מיקום נדחתה. אפשרו גישה למיקום בהגדרות הדפדפן.",
   "trip.liveLocationUpdateFailed": "לא ניתן לעדכן מיקום חי כרגע.",
   "trip.liveLocationDefaultName": "מטייל",
+  "trip.tools": "כלי הטיול",
+
+  "trip.gmail.title": "Gmail (קריאה בלבד)",
+  "trip.gmail.intro":
+    "חברו את Gmail כדי לחפש בהודעות שמתאימות לתאריכי הטיול וליעדים. הקישורים נפתחים ב-Gmail — עדיין לא מייבאים קבצים לטיול.",
+  "trip.gmail.connect": "חיבור Gmail",
+  "trip.gmail.connected": "Gmail מחובר",
+  "trip.gmail.disconnect": "ניתוק Gmail",
+  "trip.gmail.extraTerms": "מילות חיפוש נוספות (אופציונלי)",
+  "trip.gmail.extraPlaceholder": "למשל שם חברת תעופה או קוד אישור",
+  "trip.gmail.search": "חיפוש ב-Gmail",
+  "trip.gmail.searching": "מחפש…",
+  "trip.gmail.queryLabel": "שאילתה:",
+  "trip.gmail.noResults": "לא נמצאו התאמות. נסו מילים אחרות או הרחיבו את טווח התאריכים בטיול.",
+  "trip.gmail.justConnected": "Gmail חובר. אפשר לחפש למטה.",
+  "trip.gmail.oauthNotConfigured":
+    "Gmail OAuth לא מוגדר בשרת הזה.\n\n1. Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID (Web).\n2. Authorized redirect URI חייב לכלול:\n{hint}\n3. הגדירו משתני סביבה GMAIL_GOOGLE_CLIENT_ID ו-GMAIL_GOOGLE_CLIENT_SECRET (למשל ב-.env.local), הפעילו מחדש את השרת או פרסמו מחדש.\n4. אופציונלי: NEXT_PUBLIC_APP_URL כדי שכתובות ההפניה בפרודקשן יהיו עקביות.",
 
   "userMenu.profilePreferences": "העדפות פרופיל…",
   "userMenu.signOut": "התנתקות",
@@ -563,10 +608,18 @@ const he: Record<MessageKey, string> = {
 
   "manage.workspaceDestHelp":
     "היעדים הם ליבת הטיול: שורת רישום לכל מקום חשוב (כותרת, הערות ומיקום אופציונלי במפה). שלבי המסלול מפנים לשורות האלה לפי id. בעריכה תנו שם לכל יעד והשתמשו בחיפוש כתובת כדי לצרף מקום — Google ו-OpenStreetMap (Photon) דרך /api/places/search כשמוגדר.",
+  "manage.tabsLabel": "מקטעי ניהול",
+  "manage.tabOverview": "סקירה",
+  "manage.tabItinerary": "מסלול",
+  "manage.tabPeople": "אנשים",
+  "manage.tabLogistics": "לוגיסטיקה",
+  "manage.placesHeading": "מקומות",
   "manage.steps": "שלבים",
   "manage.addStep": "הוספת שלב",
   "manage.saveTrip": "שמירת טיול",
   "manage.saveSaving": "שומר…",
+  "manage.statusUnsaved": "שינויים שלא נשמרו",
+  "manage.statusSaved": "כל השינויים נשמרו",
   "manage.saveWritesTo": "השמירה נכתבת ל-{target}.",
   "manage.saveSignInCloud": "התחברו מהבית כדי לשמור טיולי ענן ב-Firestore.",
   "manage.tripTitle": "כותרת הטיול",
@@ -645,7 +698,10 @@ const he: Record<MessageKey, string> = {
     "להסיר את היעד הלא בשימוש מהטיול? לא ניתן לבטל כאן.",
 
   "view.placesTitle": "מקומות בטיול",
+  "view.placesTab": "מקומות ({count})",
   "view.placesEmpty": "אין עדיין יעדים. הוסיפו שלב בניהול כדי ליצור מקומות.",
+  "view.stepPrev": "השלב הקודם",
+  "view.stepNext": "השלב הבא",
   "view.destinationsCount": "{count} יעדים",
   "view.destinationsWithSteps": " — כל id מציג איפה הוא מופיע במסלול (שמות שדות בסוגריים).",
   "view.destinationsNoSteps": " — הפניות מהשלבים נטענות עם המסלול.",
@@ -919,6 +975,23 @@ const ru: Record<MessageKey, string> = {
     "Доступ к геолокации запрещён. Разрешите его в настройках браузера.",
   "trip.liveLocationUpdateFailed": "Сейчас не удалось обновить геопозицию.",
   "trip.liveLocationDefaultName": "Участник",
+  "trip.tools": "Инструменты поездки",
+
+  "trip.gmail.title": "Gmail (только чтение)",
+  "trip.gmail.intro":
+    "Подключите Gmail, чтобы искать письма по датам и местам поездки. Ссылки открываются в Gmail — в поездку пока ничего не импортируется.",
+  "trip.gmail.connect": "Подключить Gmail",
+  "trip.gmail.connected": "Gmail подключён",
+  "trip.gmail.disconnect": "Отключить Gmail",
+  "trip.gmail.extraTerms": "Дополнительные слова (необязательно)",
+  "trip.gmail.extraPlaceholder": "например авиакомпания или код брони",
+  "trip.gmail.search": "Искать в Gmail",
+  "trip.gmail.searching": "Поиск…",
+  "trip.gmail.queryLabel": "Запрос:",
+  "trip.gmail.noResults": "Ничего не найдено. Попробуйте другие слова или расширьте даты поездки.",
+  "trip.gmail.justConnected": "Gmail подключён. Можно искать ниже.",
+  "trip.gmail.oauthNotConfigured":
+    "На этом сервере не настроен Gmail OAuth.\n\n1. Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID (Web).\n2. В Authorized redirect URI добавьте:\n{hint}\n3. Задайте переменные окружения GMAIL_GOOGLE_CLIENT_ID и GMAIL_GOOGLE_CLIENT_SECRET (например в .env.local), перезапустите dev или задеплойте снова.\n4. По желанию: NEXT_PUBLIC_APP_URL для согласованности redirect URI в продакшене.",
 
   "userMenu.profilePreferences": "Настройки профиля…",
   "userMenu.signOut": "Выйти",
@@ -982,10 +1055,18 @@ const ru: Record<MessageKey, string> = {
 
   "manage.workspaceDestHelp":
     "Пункты назначения — основа поездки: одна строка реестра на каждое важное место (название, заметки и при желании положение на карте). Шаги маршрута ссылаются на эти строки по id. В Правке задайте название и через поиск адреса привяжите место — Google и OpenStreetMap (Photon) через /api/places/search при настройке.",
+  "manage.tabsLabel": "Разделы управления",
+  "manage.tabOverview": "Обзор",
+  "manage.tabItinerary": "Маршрут",
+  "manage.tabPeople": "Люди",
+  "manage.tabLogistics": "Логистика",
+  "manage.placesHeading": "Места",
   "manage.steps": "Шаги",
   "manage.addStep": "Добавить шаг",
   "manage.saveTrip": "Сохранить поездку",
   "manage.saveSaving": "Сохранение…",
+  "manage.statusUnsaved": "Есть несохранённые изменения",
+  "manage.statusSaved": "Все изменения сохранены",
   "manage.saveWritesTo": "Сохранение записывается в {target}.",
   "manage.saveSignInCloud": "Войдите с главной, чтобы сохранять облачные поездки в Firestore.",
   "manage.tripTitle": "Название поездки",
@@ -1064,7 +1145,10 @@ const ru: Record<MessageKey, string> = {
     "Удалить неиспользуемый пункт из поездки? Отменить здесь нельзя.",
 
   "view.placesTitle": "Места в поездке",
+  "view.placesTab": "Места ({count})",
   "view.placesEmpty": "Пока нет пунктов назначения. Добавьте шаг в «Управлении», чтобы создать места.",
+  "view.stepPrev": "Предыдущий шаг",
+  "view.stepNext": "Следующий шаг",
   "view.destinationsCount": "{count} пункт(ов) назначения",
   "view.destinationsWithSteps":
     " — для каждого id показано, где он используется в маршруте (имена полей в скобках).",

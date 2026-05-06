@@ -18,6 +18,13 @@ const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"]
 
 type PrefsKey = keyof UserPreferences;
 
+/**
+ * Slice of the management form to render. Omit (or pass `undefined`) to render
+ * the whole form (legacy single-page layout). Used by ManageTripWorkspace to
+ * partition the form across tabs without breaking the editor's state shape.
+ */
+export type ManageFormSection = "overview" | "people" | "tasks";
+
 function prefsOptions(key: PrefsKey): readonly string[] {
   switch (key) {
     case "hobbies":
@@ -37,11 +44,14 @@ export function ManageTripForm({
   trip,
   onChange,
   profilePreferences,
+  section,
 }: {
   trip: Trip;
   onChange: (next: Trip) => void;
   /** Signed-in user defaults from `users/{emailLower}`; optional when offline / unsigned. */
   profilePreferences?: UserPreferences | null;
+  /** When set, render only the matching slice; omit to render the full form. */
+  section?: ManageFormSection;
 }) {
   const { t, locale } = useI18n();
   const intlLocale = intlLocaleForApp(locale);
@@ -49,8 +59,14 @@ export function ManageTripForm({
   const tasks = trip.tasks ?? [];
   const [prefsDlg, setPrefsDlg] = useState<{ travelerId: string; key: PrefsKey } | null>(null);
 
+  const showOverview = !section || section === "overview";
+  const showPeople = !section || section === "people";
+  const showTasks = !section || section === "tasks";
+
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      {showOverview ? (
+      <>
       <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
         {t("manage.tripTitle")}
         <input
@@ -138,8 +154,12 @@ export function ManageTripForm({
       <p className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/80 px-2 py-1.5 text-[10px] text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
         {t("manage.cloudAccessBody")}
       </p>
+      </>
+      ) : null}
 
-      <div className="mt-6">
+      {showPeople ? (
+      <>
+      <div className="mt-6 first:mt-0">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t("manage.travelers")}</h3>
@@ -315,8 +335,11 @@ export function ManageTripForm({
           <p className="mt-1 text-xs text-zinc-500">{t("manage.noViewers")}</p>
         ) : null}
       </div>
+      </>
+      ) : null}
 
-      <div className="mt-6">
+      {showTasks ? (
+      <div className="mt-6 first:mt-0">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t("manage.tasks")}</h3>
           <button
@@ -382,6 +405,7 @@ export function ManageTripForm({
         </ul>
         {tasks.length === 0 ? <p className="mt-1 text-xs text-zinc-500">{t("manage.noTasksYet")}</p> : null}
       </div>
+      ) : null}
 
       {prefsDlg ? (
         (() => {

@@ -342,6 +342,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    /** Gmail OAuth CSRF state blobs — written/read only via Admin SDK (`/api/integrations/gmail/*`). */
+    match /gmailOAuthStates/{docId} {
+      allow read, write: if false;
+    }
+
+    /** Per-user Gmail refresh token — Admin SDK only (clients never touch). */
+    match /users/{userEmail}/integrations/{docId} {
+      allow read, write: if false;
+    }
+
     /**
      * User profile prefs; doc id is lowercase email (must match JWT email).
      * Do not require email_verified: it is missing or false on some Google tokens while

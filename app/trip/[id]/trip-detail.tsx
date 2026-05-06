@@ -86,8 +86,17 @@ const TripRecommendationsDock = dynamic(
   { ssr: false }
 );
 
+const TripGmailDocumentsPanel = dynamic(
+  () =>
+    import("@/components/trip/TripGmailDocumentsPanel").then((m) => ({
+      default: m.TripGmailDocumentsPanel,
+    })),
+  { ssr: false }
+);
+
 export function TripDetail({ tripId }: { tripId: string }) {
   const [tab, setTab] = useState<"view" | "manage">("view");
+  const [viewSubTab, setViewSubTab] = useState<"itinerary" | "places">("itinerary");
   const [loadState, setLoadState] = useState<
     "loading" | "ok" | "missing" | "needs_auth" | "needs_google" | "access_denied"
   >("loading");
@@ -136,6 +145,16 @@ export function TripDetail({ tripId }: { tripId: string }) {
     () => (useFirestore && user ? t("trip.saveTargetFirestore") : t("trip.saveTargetLocal")),
     [useFirestore, user, t]
   );
+
+  /**
+   * Whether the manage draft has uncommitted edits compared to the canonical
+   * `trip` snapshot. JSON stringify is fine here — Trip objects are small and
+   * we already pay this cost for advanced-JSON / Firestore writes.
+   */
+  const manageDirty = useMemo(() => {
+    if (!trip || !manageDraft) return false;
+    return JSON.stringify(trip) !== JSON.stringify(manageDraft);
+  }, [trip, manageDraft]);
 
   useEffect(() => {
     if (tab !== "view") return;
@@ -675,116 +694,132 @@ export function TripDetail({ tripId }: { tripId: string }) {
         </div>
       </div>
 
-      <h1 className="mt-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{displayTitle}</h1>
-      <p className="mt-1 font-mono text-xs text-zinc-500">{trip.id}</p>
+      <h1 className="mt-6 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+        {displayTitle}
+      </h1>
 
       {tab === "view" ? (
-        <>
-          <section className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="inline-flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+        <div className="mt-6 space-y-6">
+          <details className="group rounded-2xl border border-zinc-200/70 bg-white/40 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/30">
+            <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 [&::-webkit-details-marker]:hidden [&::marker]:hidden">
+              <span>{t("trip.tools")}</span>
+              <span aria-hidden className="text-zinc-400 transition-transform group-open:rotate-180 dark:text-zinc-500">
+                ▾
+              </span>
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                    <input
+                      type="checkbox"
+                      checked={simulateLocalDateTimeEnabled}
+                      onChange={(e) => setSimulateLocalDateTimeEnabled(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600 dark:bg-zinc-800"
+                    />
+                    {t("trip.timeSimulationLabel")}
+                  </label>
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    {simulateLocalDateTimeEnabled
+                      ? t("trip.timeSimulationSimulated")
+                      : t("trip.timeSimulationLive")}
+                  </span>
+                </div>
                 <input
-                  type="checkbox"
-                  checked={simulateLocalDateTimeEnabled}
-                  onChange={(e) => setSimulateLocalDateTimeEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600 dark:bg-zinc-800"
+                  id="trip-local-datetime-sim"
+                  type="datetime-local"
+                  value={simulatedLocalDateTime}
+                  disabled={!simulateLocalDateTimeEnabled}
+                  onChange={(e) => setSimulatedLocalDateTime(e.target.value)}
+                  className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                 />
-                {t("trip.timeSimulationLabel")}
-              </label>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                {simulateLocalDateTimeEnabled
-                  ? t("trip.timeSimulationSimulated")
-                  : t("trip.timeSimulationLive")}
-              </p>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label
-                htmlFor="trip-local-datetime-sim"
-                className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
-              >
-                {t("trip.timeSimulationDateTime")}
-              </label>
-              <input
-                id="trip-local-datetime-sim"
-                type="datetime-local"
-                value={simulatedLocalDateTime}
-                disabled={!simulateLocalDateTimeEnabled}
-                onChange={(e) => setSimulatedLocalDateTime(e.target.value)}
-                className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-              />
-            </div>
-            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{t("trip.timeSimulationHelp")}</p>
-          </section>
-          {useFirestore ? (
-            <section className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                  <input
-                    type="checkbox"
-                    checked={liveLocationSharing}
-                    disabled={!canShareLiveLocation}
-                    onChange={(e) => {
-                      setLiveLocationError(null);
-                      setLiveLocationSharing(e.target.checked);
-                    }}
-                    className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800"
-                  />
-                  {t("trip.liveLocationToggle")}
-                </label>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {liveLocationSharing
-                    ? t("trip.liveLocationStatusSharing")
-                    : t("trip.liveLocationStatusOff")}
-                </p>
               </div>
-              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                {canShareLiveLocation
-                  ? t("trip.liveLocationHelp")
-                  : t("trip.liveLocationRequiresTraveler")}
-              </p>
-              {liveLocationError ? (
-                <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">{liveLocationError}</p>
+
+              {useFirestore ? (
+                <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/60">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="inline-flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                      <input
+                        type="checkbox"
+                        checked={liveLocationSharing}
+                        disabled={!canShareLiveLocation}
+                        onChange={(e) => {
+                          setLiveLocationError(null);
+                          setLiveLocationSharing(e.target.checked);
+                        }}
+                        className="h-3.5 w-3.5 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800"
+                      />
+                      {t("trip.liveLocationToggle")}
+                    </label>
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                      {liveLocationSharing
+                        ? t("trip.liveLocationStatusSharing")
+                        : t("trip.liveLocationStatusOff")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+                    {canShareLiveLocation
+                      ? t("trip.liveLocationHelp")
+                      : t("trip.liveLocationRequiresTraveler")}
+                  </p>
+                  {liveLocationError ? (
+                    <p className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">{liveLocationError}</p>
+                  ) : null}
+                </div>
               ) : null}
-            </section>
-          ) : null}
+
+              <div className="md:col-span-2">
+                <TripGmailDocumentsPanel
+                  tripId={trip.id}
+                  user={user}
+                  enabled={Boolean(useFirestore && user?.email?.trim())}
+                />
+              </div>
+            </div>
+          </details>
+
           {destinationsMissingMapCoordinates.length > 0 ? (
             <aside
-              className="mt-6 rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+              className="rounded-xl border border-amber-300/60 bg-amber-50/80 px-3 py-2.5 text-xs text-amber-950 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-100"
               role="status"
             >
               <p className="font-medium">
                 {destinationsMissingMapCoordinates.length === 1
                   ? t("trip.destMissingOne")
                   : t("trip.destMissingMany", { count: destinationsMissingMapCoordinates.length })}{" "}
-                {t("trip.destMissingSuffix")}
+                <span className="text-amber-900/80 dark:text-amber-100/70">{t("trip.destMissingSuffix")}</span>
               </p>
-              <ul className="mt-2 space-y-1.5">
+              <ul className="mt-1.5 flex flex-wrap gap-1.5">
                 {destinationsMissingMapCoordinates.map((d) => {
                   const label = (d.title || d.location || t("common.untitled")).trim() || t("common.untitled");
                   return (
-                    <li key={d.id} className="flex flex-wrap items-center gap-2">
-                      <span className="text-amber-900/90 dark:text-amber-100/90">{label}</span>
+                    <li key={d.id}>
                       {canEditTripDestinations ? (
                         <button
                           type="button"
-                          className="rounded-lg bg-amber-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-900 dark:bg-amber-600 dark:hover:bg-amber-500"
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-white dark:border-amber-600/40 dark:bg-amber-900/30 dark:text-amber-100 dark:hover:bg-amber-900/50"
                           onClick={() => {
                             setDestinationLocationEditSnapshot({ ...d });
                             setDestinationLocationDialogOpen(true);
                           }}
                         >
-                          {t("trip.setLocation")}
+                          {label} <span aria-hidden>·</span> {t("trip.setLocation")}
                         </button>
-                      ) : null}
+                      ) : (
+                        <span className="inline-flex rounded-full border border-amber-300/50 bg-amber-100/60 px-2 py-0.5 text-[11px] text-amber-900 dark:border-amber-700/40 dark:bg-amber-900/30 dark:text-amber-100">
+                          {label}
+                        </span>
+                      )}
                     </li>
                   );
                 })}
               </ul>
               {!canEditTripDestinations && useFirestore ? (
-                <p className="mt-2 text-xs text-amber-900/80 dark:text-amber-200/80">{t("trip.destReadOnlyHint")}</p>
+                <p className="mt-2 text-[11px] text-amber-900/80 dark:text-amber-200/80">{t("trip.destReadOnlyHint")}</p>
               ) : null}
             </aside>
           ) : null}
+
           <TripItineraryMap
             tripId={trip.id}
             sortedSteps={sortedSteps}
@@ -812,16 +847,54 @@ export function TripDetail({ tripId }: { tripId: string }) {
             existingDestination={destinationLocationEditSnapshot}
             onSave={handleViewDestinationLocationSave}
           />
-          {viewPhase === "before_start" ? (
-            <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={effectiveNowMs} variant="default" />
-          ) : null}
-          {viewPhase === "during" ? (
-            <TripCurrentStepDashboard trip={trip} focus={viewStepFocus} nowMs={effectiveNowMs} />
-          ) : null}
-          {viewPhase === "after_end" ? (
-            <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={effectiveNowMs} variant="ended" />
-          ) : null}
-          <div className="mt-8">
+          <div className="flex justify-center">
+            <div
+              role="tablist"
+              aria-label={t("view.itinerary")}
+              className="inline-flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewSubTab === "itinerary"}
+                onClick={() => setViewSubTab("itinerary")}
+                className={
+                  viewSubTab === "itinerary"
+                    ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 shadow dark:bg-zinc-800 dark:text-zinc-50"
+                    : "rounded-md px-3 py-1.5 text-xs text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }
+              >
+                {t("view.itinerary")}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewSubTab === "places"}
+                onClick={() => setViewSubTab("places")}
+                className={
+                  viewSubTab === "places"
+                    ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 shadow dark:bg-zinc-800 dark:text-zinc-50"
+                    : "rounded-md px-3 py-1.5 text-xs text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }
+              >
+                {t("view.placesTab", { count: trip.destinations.length })}
+              </button>
+            </div>
+          </div>
+
+          {viewSubTab === "itinerary" ? (
+            <>
+              {viewPhase === "before_start" ? (
+                <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={effectiveNowMs} variant="default" />
+              ) : null}
+              {viewPhase === "during" ? (
+                <TripCurrentStepDashboard trip={trip} focus={viewStepFocus} nowMs={effectiveNowMs} />
+              ) : null}
+              {viewPhase === "after_end" ? (
+                <TripViewSummary trip={trip} sortedSteps={sortedSteps} nowMs={effectiveNowMs} variant="ended" />
+              ) : null}
+            </>
+          ) : (
             <TripDestinationsRoster
               destinations={trip.destinations}
               steps={sortedSteps}
@@ -830,8 +903,8 @@ export function TripDetail({ tripId }: { tripId: string }) {
               onSaveDestination={(d) => void handleViewDestinationLocationSave(d)}
               onDeleteDestination={(id) => void handleViewDestinationDelete(id)}
             />
-          </div>
-        </>
+          )}
+        </div>
       ) : manageDraft ? (
         <div className="mt-8 pb-40">
           <ManageTripWorkspace
@@ -845,6 +918,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
             saveError={saveError}
             user={user}
             profilePreferences={profilePreferences}
+            dirty={manageDirty}
           />
 
           <details

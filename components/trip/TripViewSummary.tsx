@@ -1,7 +1,7 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n/context";
-import { TripStepsDetailList } from "@/components/trip/TripStepsDetailList";
+import { TripStepsCarousel } from "@/components/trip/TripStepsCarousel";
 import {
   formatDurationMs,
   msUntilTripStart,
@@ -98,6 +98,11 @@ export function TripViewSummary({
         </p>
       ) : null}
 
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("view.itinerary")}</h3>
+        <TripStepsCarousel steps={sortedSteps} destinations={trip.destinations} />
+      </section>
+
       <dl className="grid gap-4 rounded-2xl border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-2">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{t("view.starts")}</dt>
@@ -135,11 +140,6 @@ export function TripViewSummary({
           </div>
         ) : null}
       </dl>
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("view.itinerary")}</h3>
-        <TripStepsDetailList steps={sortedSteps} destinations={trip.destinations} dense />
-      </section>
 
       <div className="rounded-2xl border border-zinc-200 bg-zinc-50/60 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
         <p className="font-medium text-zinc-900 dark:text-zinc-100">{t("view.tasksAndDocuments")}</p>

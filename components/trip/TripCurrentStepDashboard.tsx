@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { TripStepsDetailList } from "@/components/trip/TripStepsDetailList";
+import { TripStepsCarousel } from "@/components/trip/TripStepsCarousel";
 import { useI18n } from "@/lib/i18n/context";
 import type { MessageKey } from "@/lib/i18n/messages";
 import type { CurrentStepFocus } from "@/lib/tripViewPhase";
@@ -251,7 +251,7 @@ export function TripCurrentStepDashboard({
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             {t("view.fullItinerary")}
           </h3>
-          <TripStepsDetailList
+          <TripStepsCarousel
             steps={sortedSteps}
             destinations={trip.destinations}
             emphasizedStepId={step.id}

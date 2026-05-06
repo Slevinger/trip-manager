@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n/context";
 import {
@@ -26,6 +26,29 @@ const FAB_SIZE = 52;
 const PANEL_W = 360;
 const PANEL_MAX_H = 560;
 const EDGE = 12;
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+type RecDragSession =
+  | {
+      kind: "header";
+      startX: number;
+      startY: number;
+      startLeft: number;
+      startTop: number;
+    }
+  | {
+      kind: "fab";
+      startX: number;
+      startY: number;
+      startLeft: number;
+      startTop: number;
+      /** True after pointer moved past threshold — then we drag instead of toggling open. */
+      dragging: boolean;
+      wasClosed: boolean;
+    };
 
 function formatRange(startIso: string, endIso: string): string | null {
   const a = new Date(startIso);
@@ -370,11 +393,124 @@ export function TripRecommendationsDock({
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [leftPx, setLeftPx] = useState(24);
+  const [topPx, setTopPx] = useState(24);
+  const dragSessionRef = useRef<RecDragSession | null>(null);
+  /** Suppress the synthetic `click` after pointer-based open / drag so the panel does not flash closed. */
+  const swallowFabClickRef = useRef(false);
+  const posRef = useRef({ left: 24, top: 24 });
+  const [viewport, setViewport] = useState<{ w: number; h: number }>(() => ({
+    w: typeof window !== "undefined" ? window.innerWidth : 1024,
+    h: typeof window !== "undefined" ? window.innerHeight : 768,
+  }));
+
+  useEffect(() => {
+    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
   const [activeIndex, setActiveIndex] = useState(0);
   /** Per-recommendation chosen option id; defaults to first option. */
   const [selectedOptionByRec, setSelectedOptionByRec] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<"approve" | "delete" | "skip" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    posRef.current = { left: leftPx, top: topPx };
+  }, [leftPx, topPx]);
+
+  const onPointerDownHeader = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button, a, [role='button']")) return;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    const p = posRef.current;
+    dragSessionRef.current = {
+      kind: "header",
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: p.left,
+      startTop: p.top,
+    };
+  }, []);
+
+  const onPointerDownFab = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0) return;
+      if (open) return;
+      const p = posRef.current;
+      dragSessionRef.current = {
+        kind: "fab",
+        startX: e.clientX,
+        startY: e.clientY,
+        startLeft: p.left,
+        startTop: p.top,
+        dragging: false,
+        wasClosed: true,
+      };
+    },
+    [open]
+  );
+
+  useEffect(() => {
+    const applyDrag = (startLeft: number, startTop: number, dx: number, dy: number) => {
+      const maxL = typeof window !== "undefined" ? window.innerWidth - EDGE - FAB_SIZE : 400;
+      const maxT = typeof window !== "undefined" ? window.innerHeight - EDGE - FAB_SIZE : 400;
+      setLeftPx(clamp(startLeft + dx, EDGE, maxL));
+      setTopPx(clamp(startTop + dy, EDGE, maxT));
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const s = dragSessionRef.current;
+      if (!s) return;
+      const dx = e.clientX - s.startX;
+      const dy = e.clientY - s.startY;
+      if (s.kind === "header") {
+        applyDrag(s.startLeft, s.startTop, dx, dy);
+        return;
+      }
+      const dist = Math.hypot(dx, dy);
+      if (!s.dragging) {
+        if (dist < 8) return;
+        const p = posRef.current;
+        dragSessionRef.current = {
+          ...s,
+          dragging: true,
+          startX: e.clientX,
+          startY: e.clientY,
+          startLeft: p.left,
+          startTop: p.top,
+        };
+        return;
+      }
+      applyDrag(s.startLeft, s.startTop, dx, dy);
+    };
+
+    const onUp = () => {
+      const s = dragSessionRef.current;
+      dragSessionRef.current = null;
+      if (s?.kind === "fab") {
+        if (s.dragging) {
+          swallowFabClickRef.current = true;
+        } else if (s.wasClosed) {
+          /** Tap = open (only when there are recommendations to show). */
+          swallowFabClickRef.current = true;
+          if ((tripRef.current.recommendations ?? []).length > 0) {
+            setOpen(true);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
 
   /** Latest trip from props — used after chained awaits so rapid arrow navigation doesn't lose earlier `seen` updates. */
   const tripRef = useRef(trip);
@@ -487,25 +623,98 @@ export function TripRecommendationsDock({
     }
   }
 
-  const dockStyle: CSSProperties = {
+  /** FAB stays anchored where the user dragged it. The panel is positioned
+   * independently so it always fits in the viewport at full size:
+   *   - prefer below+left-aligned with the FAB
+   *   - flip above when there's no room below
+   *   - flip horizontal alignment when right edge would overflow
+   *   - finally clamp inside the viewport
+   * Panel height shrinks only when the viewport itself is smaller than the
+   * panel's intrinsic max-height (i.e. on tiny phones / split views). */
+  const PANEL_GAP = 8;
+  const intrinsicPanelH = PANEL_MAX_H;
+  const panelW = Math.min(PANEL_W, Math.max(viewport.w - EDGE * 2, 200));
+  const panelMaxH = Math.min(intrinsicPanelH, Math.max(viewport.h - EDGE * 2, 160));
+  const placement = (() => {
+    let panelTop = topPx + FAB_SIZE + PANEL_GAP;
+    let panelLeft = leftPx;
+    if (panelLeft + panelW > viewport.w - EDGE) {
+      panelLeft = leftPx + FAB_SIZE - panelW;
+    }
+    panelLeft = clamp(panelLeft, EDGE, Math.max(viewport.w - panelW - EDGE, EDGE));
+    if (panelTop + panelMaxH > viewport.h - EDGE) {
+      const above = topPx - PANEL_GAP - panelMaxH;
+      if (above >= EDGE) {
+        panelTop = above;
+      } else {
+        panelTop = clamp(panelTop, EDGE, Math.max(viewport.h - panelMaxH - EDGE, EDGE));
+      }
+    }
+    return { panelLeft, panelTop };
+  })();
+
+  const fabStyle: CSSProperties = {
     position: "fixed",
-    left: 24,
-    bottom: 24,
+    left: leftPx,
+    top: topPx,
+    zIndex: 51,
+    touchAction: "none",
+  };
+  const panelStyle: CSSProperties = {
+    position: "fixed",
+    left: placement.panelLeft,
+    top: placement.panelTop,
+    width: panelW,
+    maxHeight: panelMaxH,
     zIndex: 50,
-    width: open ? PANEL_W : FAB_SIZE,
-    maxWidth: `min(${PANEL_W}px, calc(100vw - ${EDGE * 2}px))`,
   };
 
   return (
-    <div className="pointer-events-none font-sans" style={dockStyle}>
-      <div className="pointer-events-auto flex flex-col items-start gap-2">
-        {open && current ? (
-          <section
-            className="flex w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
-            style={{ maxHeight: PANEL_MAX_H }}
-          >
-            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/80">
-              <div className="min-w-0">
+    <>
+      <button
+        type="button"
+        aria-label={
+          open
+            ? t("recs.closePanel")
+            : unseen > 0
+              ? t("recs.openPanelWithUnseen", { unseen, total })
+              : total > 0
+                ? t("recs.openPanelWithCount", { count: total })
+                : t("recs.openPanelEmpty")
+        }
+        aria-disabled={total === 0 && !open}
+        onPointerDown={onPointerDownFab}
+        onClick={() => {
+          if (swallowFabClickRef.current) {
+            swallowFabClickRef.current = false;
+            return;
+          }
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          if (total > 0) setOpen(true);
+        }}
+        style={fabStyle}
+        className={
+          "flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border shadow-lg ring-2 transition-all duration-300 ease-out focus-visible:opacity-100 active:opacity-100 cursor-grab active:cursor-grabbing " +
+          (unseen > 0
+            ? "opacity-100 border-amber-300 bg-gradient-to-br from-amber-400 to-amber-600 text-white ring-white/30 hover:from-amber-500 hover:to-amber-700 dark:border-amber-400 dark:ring-zinc-900/40"
+            : "opacity-50 border-zinc-200 bg-white text-zinc-500 ring-transparent hover:opacity-100 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800")
+        }
+      >
+        <BellIcon unseen={unseen} total={total} />
+      </button>
+      {open && current ? (
+        <section
+          className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          style={panelStyle}
+        >
+            <header
+              onPointerDown={onPointerDownHeader}
+              className="flex cursor-grab items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 active:cursor-grabbing dark:border-zinc-700 dark:bg-zinc-800/80"
+            >
+              <div className="min-w-0 select-none">
                 <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                   {t("recs.title")}
                 </p>
@@ -591,39 +800,8 @@ export function TripRecommendationsDock({
                 </div>
               </div>
             </div>
-          </section>
-        ) : null}
-        <button
-          type="button"
-          aria-label={
-            open
-              ? t("recs.closePanel")
-              : unseen > 0
-                ? t("recs.openPanelWithUnseen", { unseen, total })
-                : total > 0
-                  ? t("recs.openPanelWithCount", { count: total })
-                  : t("recs.openPanelEmpty")
-          }
-          onClick={() => {
-            if (open) {
-              setOpen(false);
-              return;
-            }
-            if (total > 0) setOpen(true);
-          }}
-          disabled={total === 0 && !open}
-          className={
-            "flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border shadow-lg ring-2 transition disabled:cursor-not-allowed " +
-            (unseen > 0
-              ? "border-amber-300 bg-gradient-to-br from-amber-400 to-amber-600 text-white ring-white/30 hover:from-amber-500 hover:to-amber-700 dark:border-amber-400 dark:ring-zinc-900/40"
-              : total > 0
-                ? "border-zinc-200 bg-white text-zinc-500 ring-transparent hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                : "border-zinc-200 bg-white text-zinc-400 ring-transparent dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-500")
-          }
-        >
-          <BellIcon unseen={unseen} total={total} />
-        </button>
-      </div>
-    </div>
+        </section>
+      ) : null}
+    </>
   );
 }

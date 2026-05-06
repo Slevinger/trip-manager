@@ -125,6 +125,42 @@ export function TripAssistantChatDock(props: {
   const [open, setOpen] = useState(false);
   const [rightPx, setRightPx] = useState(24);
   const [bottomPx, setBottomPx] = useState(24);
+  const [viewport, setViewport] = useState<{ w: number; h: number }>(() => ({
+    w: typeof window !== "undefined" ? window.innerWidth : 1024,
+    h: typeof window !== "undefined" ? window.innerHeight : 768,
+  }));
+  useEffect(() => {
+    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  /** Idle fade: when the panel is closed and the user hasn't interacted with the
+   * FAB for 2s, drop to 60% opacity. Reset on hover or pointer down. */
+  const [idle, setIdle] = useState(false);
+  const idleTimerRef = useRef<number | null>(null);
+  const wakeIdle = useCallback(() => {
+    setIdle(false);
+    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => setIdle(true), 2000);
+  }, []);
+  useEffect(() => {
+    if (open) {
+      setIdle(false);
+      if (idleTimerRef.current !== null) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return;
+    }
+    wakeIdle();
+    return () => {
+      if (idleTimerRef.current !== null) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [open, wakeIdle]);
   const dragSessionRef = useRef<DragSession | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   const [input, setInput] = useState("");
@@ -540,23 +576,57 @@ export function TripAssistantChatDock(props: {
     t,
   ]);
 
-  const styleDock: CSSProperties = {
+  /** FAB stays anchored where the user dragged it (right/bottom). The panel is
+   * positioned independently in viewport pixel coordinates so it always fits at
+   * full size, flipping above/below or left/right of the FAB depending on
+   * available room. Panel only shrinks when the viewport itself is smaller. */
+  const PANEL_GAP = 8;
+  const intrinsicPanelH = PANEL_MAX_H;
+  const panelW = Math.min(PANEL_W, Math.max(viewport.w - EDGE * 2, 200));
+  const panelMaxH = Math.min(intrinsicPanelH, Math.max(viewport.h - EDGE * 2, 160));
+  const placement = (() => {
+    const fabRight = viewport.w - rightPx;
+    const fabLeft = fabRight - FAB_SIZE;
+    const fabBottom = viewport.h - bottomPx;
+    const fabTop = fabBottom - FAB_SIZE;
+    let panelLeft = fabRight - panelW;
+    let panelTop = fabTop - PANEL_GAP - panelMaxH;
+    if (panelLeft < EDGE) panelLeft = fabLeft;
+    panelLeft = clamp(panelLeft, EDGE, Math.max(viewport.w - panelW - EDGE, EDGE));
+    if (panelTop < EDGE) {
+      const below = fabBottom + PANEL_GAP;
+      if (below + panelMaxH <= viewport.h - EDGE) {
+        panelTop = below;
+      } else {
+        panelTop = clamp(panelTop, EDGE, Math.max(viewport.h - panelMaxH - EDGE, EDGE));
+      }
+    }
+    return { panelLeft, panelTop };
+  })();
+
+  const fabStyle: CSSProperties = {
     position: "fixed",
     right: rightPx,
     bottom: bottomPx,
+    zIndex: 51,
+    touchAction: "none",
+  };
+  const panelStyle: CSSProperties = {
+    position: "fixed",
+    left: placement.panelLeft,
+    top: placement.panelTop,
+    width: panelW,
+    maxHeight: panelMaxH,
     zIndex: 50,
-    width: open ? PANEL_W : FAB_SIZE,
-    maxWidth: `min(${PANEL_W}px, calc(100vw - ${EDGE * 2}px))`,
   };
 
   return (
-    <div className="pointer-events-none font-sans" style={styleDock}>
-      <div className="pointer-events-auto flex flex-col items-end gap-2">
-        {open ? (
-          <section
-            className="flex max-h-[min(70vh,520px)] w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
-            style={{ maxHeight: PANEL_MAX_H }}
-          >
+    <>
+      {open ? (
+        <section
+          className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          style={panelStyle}
+        >
             <header
               className="flex cursor-grab touch-none items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 active:cursor-grabbing dark:border-zinc-700 dark:bg-zinc-800/80"
               onPointerDown={onPointerDownHeader}
@@ -678,24 +748,34 @@ export function TripAssistantChatDock(props: {
                 <p className="mt-1 px-1 text-[10px] text-zinc-400 dark:text-zinc-500">{t("assistant.memoryHint")}</p>
               ) : null}
             </div>
-          </section>
-        ) : null}
-        <button
-          type="button"
-          aria-label={open ? t("assistant.closeChat") : t("assistant.openChat")}
-          onPointerDown={onPointerDownFab}
-          onClick={() => {
-            if (swallowFabClickRef.current) {
-              swallowFabClickRef.current = false;
-              return;
-            }
-            if (open) setOpen(false);
-          }}
-          className="flex h-[52px] w-[52px] shrink-0 cursor-grab items-center justify-center rounded-full border border-violet-300 bg-gradient-to-br from-violet-500 to-violet-700 text-xl text-white shadow-lg ring-2 ring-white/30 active:cursor-grabbing dark:border-violet-400 dark:ring-zinc-900/40"
-        >
-          💬
-        </button>
-      </div>
-    </div>
+        </section>
+      ) : null}
+      <button
+        type="button"
+        aria-label={open ? t("assistant.closeChat") : t("assistant.openChat")}
+        onPointerDown={(e) => {
+          wakeIdle();
+          onPointerDownFab(e);
+        }}
+        onPointerEnter={wakeIdle}
+        onTouchStart={wakeIdle}
+        onFocus={wakeIdle}
+        onClick={() => {
+          wakeIdle();
+          if (swallowFabClickRef.current) {
+            swallowFabClickRef.current = false;
+            return;
+          }
+          if (open) setOpen(false);
+        }}
+        style={fabStyle}
+        className={
+          "flex h-[52px] w-[52px] shrink-0 cursor-grab items-center justify-center rounded-full border border-violet-300 bg-gradient-to-br from-violet-500 to-violet-700 text-xl text-white shadow-lg ring-2 ring-white/30 transition-opacity duration-300 ease-out hover:opacity-100 focus-visible:opacity-100 active:opacity-100 active:cursor-grabbing dark:border-violet-400 dark:ring-zinc-900/40 " +
+          (!open && idle ? "opacity-60" : "opacity-100")
+        }
+      >
+        💬
+      </button>
+    </>
   );
 }
