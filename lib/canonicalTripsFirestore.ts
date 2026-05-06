@@ -1,16 +1,13 @@
 import {
-  collection,
+  arrayUnion,
   deleteField,
   deleteDoc,
   doc,
   getDoc,
   onSnapshot,
-  query,
   setDoc,
-  where,
   type DocumentData,
   type Firestore,
-  type QuerySnapshot,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getIdTokenResult, type User } from "firebase/auth";
@@ -20,15 +17,22 @@ import type { Trip, TripLiveLocation } from "@/lib/types/trip";
 /** Top-level collection for canonical (v2) trip documents. */
 export const CANONICAL_TRIPS_COLLECTION = "canonicalTrips";
 
-const OWNER_UID = "ownerUid";
+export const OWNER_UID = "ownerUid";
 const OWNER_EMAIL_LOWER = "ownerEmailLower";
-/** Lowercased emails: trip owner + travelers + viewers; used in rules + shared-trip listing. */
+/** Lowercased emails: trip owner + travelers + viewers; used in rules + invites. */
 export const PARTICIPANT_EMAILS_LOWER = "participantEmailsLower";
+/**
+ * Firebase Auth uids allowed to open the trip. Used for home-list queries:
+ * `where(participantUids, array-contains, request.auth.uid)` is what Firestore's
+ * rule analyzer accepts reliably (email array-contains + JWT email often fails).
+ */
+export const PARTICIPANT_UIDS = "participantUids";
 
 export type CanonicalTripFirestoreDoc = Trip & {
   [OWNER_UID]: string;
   [OWNER_EMAIL_LOWER]?: string;
   [PARTICIPANT_EMAILS_LOWER]: string[];
+  [PARTICIPANT_UIDS]: string[];
 };
 
 function emailLower(user: User): string {
@@ -127,6 +131,7 @@ function stripMeta(data: DocumentData): Trip {
     [OWNER_UID]: _u,
     [OWNER_EMAIL_LOWER]: _e,
     [PARTICIPANT_EMAILS_LOWER]: _p,
+    [PARTICIPANT_UIDS]: _pu,
     ...rest
   } = data as Record<string, unknown>;
   const next = { ...rest };
@@ -135,6 +140,30 @@ function stripMeta(data: DocumentData): Trip {
     if (flat) next.liveLocations = flat;
   }
   return migrateTripToDestinationRegistry(next);
+}
+
+/** Plain-object Firestore payload → client {@link Trip} (server Admin SDK or tests). */
+export function canonicalFirestoreDataToTrip(data: Record<string, unknown>): Trip {
+  return stripMeta(data as DocumentData);
+}
+
+/** Same visibility as home / trip snapshot: owner, participant uid/email lists, or nested party emails. */
+export function canonicalTripDocReadableByUser(
+  uid: string,
+  viewerEmailLower: string,
+  data: Record<string, unknown>
+): boolean {
+  if (data[OWNER_UID] === uid) return true;
+  const uidList = data[PARTICIPANT_UIDS];
+  if (Array.isArray(uidList) && uidList.some((x) => x === uid)) return true;
+  const em = viewerEmailLower.trim().toLowerCase();
+  if (em) {
+    const list = data[PARTICIPANT_EMAILS_LOWER];
+    if (Array.isArray(list) && list.some((x) => typeof x === "string" && x === em)) return true;
+  }
+  const ownerEl = String(data[OWNER_EMAIL_LOWER] ?? "").trim().toLowerCase();
+  const trip = canonicalFirestoreDataToTrip(data);
+  return em ? participantEmailsLowerFromTrip(trip, ownerEl).includes(em) : false;
 }
 
 /**
@@ -200,13 +229,39 @@ function pruneUndefinedForFirestore(value: unknown): unknown {
   return out;
 }
 
-function buildCanonicalTripFirestoreDoc(trip: Trip, editor: User, ownerUid: string): CanonicalTripFirestoreDoc {
+function normalizeParticipantUidList(
+  existing: unknown,
+  ownerUid: string,
+  editorUid: string
+): string[] {
+  const s = new Set<string>();
+  if (ownerUid.trim()) s.add(ownerUid.trim());
+  if (editorUid.trim()) s.add(editorUid.trim());
+  if (Array.isArray(existing)) {
+    for (const x of existing) {
+      if (typeof x === "string" && x.trim()) s.add(x.trim());
+    }
+  }
+  return Array.from(s).sort();
+}
+
+function buildCanonicalTripFirestoreDoc(
+  trip: Trip,
+  editor: User,
+  ownerUid: string,
+  existingParticipantUids?: unknown
+): CanonicalTripFirestoreDoc {
   const editorEl = emailLower(editor);
   const raw: CanonicalTripFirestoreDoc = {
     ...trip,
     [OWNER_UID]: ownerUid,
     ...(editorEl ? { [OWNER_EMAIL_LOWER]: editorEl } : {}),
     [PARTICIPANT_EMAILS_LOWER]: participantEmailsLowerFromTrip(trip, editorEl),
+    [PARTICIPANT_UIDS]: normalizeParticipantUidList(
+      existingParticipantUids,
+      ownerUid,
+      editor.uid
+    ),
   };
   return pruneUndefinedForFirestore(raw) as CanonicalTripFirestoreDoc;
 }
@@ -217,15 +272,7 @@ export function tripToFirestoreDoc(trip: Trip, user: User): CanonicalTripFiresto
 }
 
 function snapshotReadableByUser(user: User, data: DocumentData): boolean {
-  if (data[OWNER_UID] === user.uid) return true;
-  const em = emailLower(user);
-  if (!em) return false;
-  const list = data[PARTICIPANT_EMAILS_LOWER];
-  if (Array.isArray(list) && list.some((x) => typeof x === "string" && x === em)) return true;
-  /** Legacy / hand-edited docs: match travelers + viewers on the trip payload (same as save rebuild). */
-  const ownerEl = String(data[OWNER_EMAIL_LOWER] ?? "").trim().toLowerCase();
-  const trip = stripMeta(data) as Trip;
-  return participantEmailsLowerFromTrip(trip, ownerEl).includes(em);
+  return canonicalTripDocReadableByUser(user.uid, emailLower(user), data as Record<string, unknown>);
 }
 
 /** Owner uid match, or Google email listed on a {@link Trip.travelers} row (not view-only viewers). */
@@ -298,7 +345,31 @@ export async function saveCanonicalTrip(
   if (existing && !userCanManageCanonicalTripDoc(user, existing)) {
     throw new Error("Only the trip owner or a listed traveler can save changes.");
   }
-  await setDoc(ref, buildCanonicalTripFirestoreDoc(trip, user, ownerUid || user.uid));
+  const existingUids = existing ? existing[PARTICIPANT_UIDS] : undefined;
+  await setDoc(
+    ref,
+    buildCanonicalTripFirestoreDoc(trip, user, ownerUid || user.uid, existingUids)
+  );
+}
+
+/**
+ * Ensures `participantUids` includes the signed-in user's uid (merge, idempotent).
+ * Call after a successful single-trip read so travelers/viewers who open a shared
+ * link once will appear on the home list (`array-contains` on uid).
+ */
+export async function ensureCanonicalTripListsMyUid(
+  db: Firestore,
+  tripId: string,
+  user: User
+): Promise<void> {
+  const uid = user.uid?.trim();
+  const tid = tripId.trim();
+  if (!uid || !tid) return;
+  await setDoc(
+    tripDocRef(db, tid),
+    { [PARTICIPANT_UIDS]: arrayUnion(uid) },
+    { merge: true }
+  );
 }
 
 export async function updateCanonicalTripLiveLocation(
@@ -360,91 +431,56 @@ function firestoreErrCode(err: unknown): string {
 }
 
 /**
- * Lists trips the user may open: owned by uid, OR listed by email on
- * `participantEmailsLower` (traveler / viewer row with matching Google email).
+ * Lists trips the user may open via **GET /api/canonical-trips/my** (Admin SDK + ID token).
+ * Client Firestore `list` on `canonicalTrips` is not used (rules can deny collection queries).
  *
- * Uses TWO parallel listeners (owner + participant) instead of `or(...)`. Each is a
- * single-field query that Firestore's rule analyzer can validate independently
- * against the inlined `hasAny([request.auth.token.email.lower()])` clause in
- * `firestore.rules`. Rationale: `or(...)` couples both branches into one
- * permission check; if either side gets statically refused, the entire query is
- * rejected and non-owner participants silently see nothing. Two listeners means
- * a failure on one branch only hides that branch (and surfaces it via `onError`).
- *
- * Results from both listeners are merged by id (a trip the user owns is also in
- * `participantEmailsLower`, so de-dup by `Trip.id`).
+ * @param pollMs Refetch interval; default 12s. Use `0` for a single load (no interval).
  */
 export function subscribeMyCanonicalTrips(
-  db: Firestore,
   user: User,
   onTrips: (trips: Trip[]) => void,
-  onError?: (e: Error) => void
+  onError?: (e: Error) => void,
+  pollMs: number = 12_000
 ): Unsubscribe {
-  const col = collection(db, CANONICAL_TRIPS_COLLECTION);
-  const em = emailLower(user);
+  let cancelled = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
 
-  const ownerByTripId = new Map<string, Trip>();
-  const sharedByTripId = new Map<string, Trip>();
-
-  function emit() {
-    const merged = new Map<string, Trip>();
-    for (const [id, t] of ownerByTripId) merged.set(id, t);
-    for (const [id, t] of sharedByTripId) {
-      if (!merged.has(id)) merged.set(id, t);
-    }
-    const trips = Array.from(merged.values());
-    sortTripsByUpdatedDesc(trips);
-    onTrips(trips);
-  }
-
-  function indexFromSnap(target: Map<string, Trip>) {
-    return (snap: QuerySnapshot) => {
-      target.clear();
-      for (const d of snap.docs) {
-        const trip = stripMeta(d.data());
-        target.set(trip.id, trip);
+  async function tick() {
+    if (cancelled) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch("/api/canonical-trips/my", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let body: { trips?: Trip[]; error?: string } = {};
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        /* ignore */
       }
-      emit();
-    };
-  }
-
-  const unsubOwner = onSnapshot(
-    query(col, where(OWNER_UID, "==", user.uid)),
-    indexFromSnap(ownerByTripId),
-    (err) => {
+      if (!res.ok) {
+        const msg =
+          typeof body.error === "string" && body.error.trim()
+            ? body.error
+            : res.statusText || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      if (!cancelled) onTrips(Array.isArray(body.trips) ? body.trips : []);
+    } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn("[canonicalTrips] owner listener failed.", {
-        code: firestoreErrCode(err),
+      console.warn("[canonicalTrips] /api/canonical-trips/my failed.", {
         message: err instanceof Error ? err.message : String(err),
       });
-      onError?.(err instanceof Error ? err : new Error(String(err)));
+      if (!cancelled) onError?.(err instanceof Error ? err : new Error(String(err)));
     }
-  );
-
-  let unsubShared: Unsubscribe | undefined;
-  if (em.length > 0) {
-    unsubShared = onSnapshot(
-      query(col, where(PARTICIPANT_EMAILS_LOWER, "array-contains", em)),
-      indexFromSnap(sharedByTripId),
-      (err) => {
-        /**
-         * If this branch is refused (permission-denied / failed-precondition),
-         * non-owner participants will be missing from the list — surface it
-         * loudly. Owner trips still render via the other listener.
-         */
-        // eslint-disable-next-line no-console
-        console.warn("[canonicalTrips] shared-participant listener failed.", {
-          code: firestoreErrCode(err),
-          message: err instanceof Error ? err.message : String(err),
-        });
-        onError?.(err instanceof Error ? err : new Error(String(err)));
-      }
-    );
   }
 
+  void tick();
+  if (pollMs > 0) timer = setInterval(() => void tick(), pollMs);
   return () => {
-    unsubOwner();
-    unsubShared?.();
+    cancelled = true;
+    if (timer) clearInterval(timer);
   };
 }
 

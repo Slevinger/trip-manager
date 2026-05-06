@@ -19,7 +19,7 @@ type ImmutableRow = {
   memoryCompressed?: boolean;
   tripContext?: string;
   originTripId?: string;
-  requestKind?: "general" | "specific";
+  requestKind?: "general" | "specific" | "suggestions";
 };
 type TripChatDoc = { tripId: string; messages?: unknown[]; updatedAt?: unknown };
 

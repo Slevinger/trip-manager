@@ -17,7 +17,7 @@ import {
   appendImmutableMemoryQueueTurn,
 } from "@/lib/usersFirestore";
 import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
-import type { Trip, UserPreferences } from "@/lib/types/trip";
+import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
 import type { TripChatMessage } from "@/lib/types/user";
 
 type Role = "user" | "assistant";
@@ -113,6 +113,13 @@ export function TripAssistantChatDock(props: {
   isTripOwner?: boolean;
   /** When true, append each exchange to Firestore after a successful reply. */
   canPersistMemory: boolean;
+  /**
+   * Optional handler invoked when the assistant returns structured trip
+   * recommendations (parsed from a fenced `trip-suggestions` JSON block).
+   * Receives this dock’s current {@link Trip} so merges are not applied from a stale
+   * parent closure after async LLM + Firestore subscription churn.
+   */
+  onAddRecommendations?: (trip: Trip, recommendations: TripRecommendation[]) => Promise<void>;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -145,9 +152,16 @@ export function TripAssistantChatDock(props: {
     [props.trip.id, props.tripChatMessages]
   );
 
+  /** Latest persisted transcript without listing it on useEffect deps (Firestore churn). */
+  const tripChatMessagesRef = useRef(props.tripChatMessages ?? []);
+  tripChatMessagesRef.current = props.tripChatMessages ?? [];
+
+  // Sync persisted transcript → UI only when **content** changes (`memorySyncKey`).
+  // Read messages from `tripChatMessagesRef` (Firestore churn) — deps stay fixed-length
+  // `[memorySyncKey, trip.id]` so React never sees a changing dependency-array size.
   useEffect(() => {
-    setLines(tripMessagesToLines(props.tripChatMessages ?? []));
-  }, [memorySyncKey, props.tripChatMessages]);
+    setLines(tripMessagesToLines(tripChatMessagesRef.current ?? []));
+  }, [memorySyncKey, props.trip.id]);
 
   const persistedTripMessageCount = useMemo(
     () => messagesForTrip(props.tripChatMessages ?? [], props.trip.id).length,
@@ -405,6 +419,7 @@ export function TripAssistantChatDock(props: {
         detail?: string;
         provider?: "openai" | "anthropic";
         model?: string;
+        suggestions?: TripRecommendation[];
       };
       if (!res.ok) {
         const head = data.error?.trim() || `Request failed (${res.status})`;
@@ -427,6 +442,17 @@ export function TripAssistantChatDock(props: {
         setActiveModel(data.model.trim());
       }
       setLines((prev) => [...prev, { role: "assistant", content: reply }]);
+
+      /** Push parsed structured suggestions onto the trip's recommendations queue.
+       * Best-effort: failures surface inline but never throw away the chat reply. */
+      if (Array.isArray(data.suggestions) && data.suggestions.length > 0 && props.onAddRecommendations) {
+        try {
+          await props.onAddRecommendations(props.trip, data.suggestions);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : t("recs.errorGeneric");
+          setError(`${t("assistant.suggestionsFailed")} ${msg}`);
+        }
+      }
 
       if (props.canPersistMemory && props.userEmail?.trim()) {
         const where = buildChatMemoryTripWhere(props.trip, contextAtMs);
@@ -506,6 +532,7 @@ export function TripAssistantChatDock(props: {
     lines,
     persistedTripMessageCount,
     props.canPersistMemory,
+    props.onAddRecommendations,
     props.profilePreferences,
     props.trip,
     props.tripChatMessages,

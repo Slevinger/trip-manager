@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import { capEvolveSummaryChars, TRIP_MEMORY_EVOLVE_SYSTEM } from "@/lib/tripMemoryEvolvePrompt";
 import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
+import { canonicalTripDocReadableByUser } from "@/lib/canonicalTripsFirestore";
 
 /**
  * Compaction for the shared per-trip assistant thread (`trips/{tripId}/assistantThread`).
@@ -14,8 +15,7 @@ import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmM
  * 20, summarize them with `TRIP_MEMORY_EVOLVE_SYSTEM`, insert one summary entry, and mark
  * the originals inactive (never deleted).
  *
- * Caller must be a member of the trip (verified by reading `trips/{tripId}/members/{uid}`
- * with the admin SDK after decoding the Firebase ID token).
+ * Caller must be allowed to read the canonical trip (same logic as shared-thread append).
  */
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
@@ -219,10 +219,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Trip not found" }, { status: 404 });
   }
   const tripData = canonicalSnap.data() as Record<string, unknown>;
-  const ownerUid = typeof tripData.ownerUid === "string" ? tripData.ownerUid : "";
-  const participantEmailsRaw = Array.isArray(tripData.participantEmailsLower)
-    ? (tripData.participantEmailsLower as unknown[]).filter((x): x is string => typeof x === "string")
-    : [];
   let callerEmail = "";
   try {
     const u = await auth.getUser(uid);
@@ -230,11 +226,7 @@ export async function POST(req: NextRequest) {
   } catch {
     callerEmail = "";
   }
-  const isOwner = ownerUid === uid;
-  const isParticipant =
-    callerEmail.length > 0 &&
-    participantEmailsRaw.map((s) => s.trim().toLowerCase()).includes(callerEmail);
-  if (!isOwner && !isParticipant) {
+  if (!canonicalTripDocReadableByUser(uid, callerEmail, tripData)) {
     return NextResponse.json({ error: "Caller is not a participant of this trip" }, { status: 403 });
   }
 

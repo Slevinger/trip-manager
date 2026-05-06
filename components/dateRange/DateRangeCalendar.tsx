@@ -73,6 +73,24 @@ export function joinDateTimeLocal(date: string, time: string): string {
   return new Date(y!, (m ?? 1) - 1, d ?? 1, hh, mm, 0, 0).toISOString();
 }
 
+/**
+ * Merge calendar output into persisted ISO fields. Empty string means **cleared** by the
+ * picker (e.g. starting a new range clears the end first). Using `nextEnd || prevEnd`
+ * incorrectly keeps the old checkout, so both dates stay set and the next day-click looks
+ * like “only one date works”.
+ */
+export function mergeCalendarIsoPair(
+  prevStart: string,
+  prevEnd: string,
+  nextStart: string,
+  nextEnd: string
+): { startIso: string; endIso: string } {
+  return {
+    startIso: nextStart === "" ? "" : nextStart || prevStart,
+    endIso: nextEnd === "" ? "" : nextEnd || prevEnd,
+  };
+}
+
 export function formatPrettyDate(isoDate: string, intlLocale: string): string {
   if (!isoDate) return "";
   const [y, m, d] = isoDate.split("-").map((s) => Number(s));
@@ -209,7 +227,13 @@ export function DateRangeCalendar({
         <CalendarNavButton onClick={goNext} dir="next" />
       </div>
 
-      <div className="grid grid-cols-1 gap-px bg-zinc-100 dark:bg-zinc-800 md:grid-cols-2">
+      <div
+        className={
+          monthsToShow === 2
+            ? "grid grid-cols-1 gap-px bg-zinc-100 dark:bg-zinc-800 md:grid-cols-2"
+            : "grid grid-cols-1 gap-px bg-zinc-100 dark:bg-zinc-800"
+        }
+      >
         <MonthGrid
           year={anchor.year}
           month={anchor.month}
@@ -755,7 +779,13 @@ function DateRangeCalendarForDateTime({
         <CalendarNavButton onClick={goNext} dir="next" />
       </div>
 
-      <div className="grid grid-cols-1 gap-px bg-zinc-100 dark:bg-zinc-800 md:grid-cols-2">
+      <div
+        className={
+          monthsToShow === 2
+            ? "grid grid-cols-1 gap-px bg-zinc-100 dark:bg-zinc-800 md:grid-cols-2"
+            : "grid grid-cols-1 gap-px bg-zinc-100 dark:bg-zinc-800"
+        }
+      >
         <MonthGrid
           year={anchor.year}
           month={anchor.month}

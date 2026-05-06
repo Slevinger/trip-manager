@@ -3,6 +3,7 @@ import {
   buildTripAssistantSystemPrompt,
   TRIP_ASSISTANT_WEB_REFINE_APPENDIX,
 } from "@/lib/tripAssistantPrompt";
+import { extractTripSuggestionsFromReply } from "@/lib/tripAssistantSuggestionSchema";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import {
   normalizeTripAssistantTurnsForWebTool,
@@ -482,9 +483,13 @@ export async function POST(req: NextRequest) {
       console.warn("[llmMonthlyBudget] record failed after trip assistant", e);
     }
 
-    const text = formatAssistantReplyForMarkdown(result.text);
+    /** Pull any `trip-suggestions` JSON block out of the raw reply BEFORE markdown
+     * normalization — the parser tolerates the original fence formatting. */
+    const { cleanedReply, suggestions } = extractTripSuggestionsFromReply(result.text);
+    const text = formatAssistantReplyForMarkdown(cleanedReply);
     return NextResponse.json({
       reply: text,
+      ...(suggestions.length > 0 ? { suggestions } : {}),
       provider: "anthropic" as const,
       model: anthropicModel(),
     });
@@ -548,9 +553,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const text = formatAssistantReplyForMarkdown(parsed.choices?.[0]?.message?.content?.trim() ?? "");
+  const rawText = parsed.choices?.[0]?.message?.content?.trim() ?? "";
+  const { cleanedReply, suggestions } = extractTripSuggestionsFromReply(rawText);
+  const text = formatAssistantReplyForMarkdown(cleanedReply);
   return NextResponse.json({
     reply: text,
+    ...(suggestions.length > 0 ? { suggestions } : {}),
     provider: "openai" as const,
     model: openaiModel(),
   });

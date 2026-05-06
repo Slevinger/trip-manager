@@ -264,7 +264,7 @@ export async function appendImmutableMemoryQueueTurn(
     sentAtMs: number;
     tripContextNote?: string;
     originTripId?: string;
-    requestKind?: "general" | "specific";
+    requestKind?: "general" | "specific" | "suggestions";
   }
 ): Promise<void> {
   const db = getDb();
@@ -279,7 +279,12 @@ export async function appendImmutableMemoryQueueTurn(
 
   const ctxNote = (opts.tripContextNote ?? "").trim().slice(0, 500);
   const origin = (opts.originTripId ?? "").trim();
-  const requestKind = opts.requestKind === "general" || opts.requestKind === "specific" ? opts.requestKind : undefined;
+  const requestKind =
+    opts.requestKind === "general" ||
+    opts.requestKind === "specific" ||
+    opts.requestKind === "suggestions"
+      ? opts.requestKind
+      : undefined;
   const ctxPrefix = ctxNote ? `[trip-context] ${ctxNote}\n` : "";
   const userContentSaved = (ctxPrefix + opts.userContent).slice(0, 8000);
 
@@ -364,8 +369,10 @@ export function subscribeImmutableMemoryQueueEntries(
         const tripContextRaw = typeof raw.tripContext === "string" ? raw.tripContext.trim() : "";
         const originTripIdRaw = typeof raw.originTripId === "string" ? raw.originTripId.trim() : "";
         const requestKindRaw =
-          raw.requestKind === "general" || raw.requestKind === "specific"
-            ? (raw.requestKind as "general" | "specific")
+          raw.requestKind === "general" ||
+          raw.requestKind === "specific" ||
+          raw.requestKind === "suggestions"
+            ? (raw.requestKind as "general" | "specific" | "suggestions")
             : undefined;
         const row: ImmutableMemoryQueueEntry = {
           seq,

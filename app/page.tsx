@@ -67,11 +67,8 @@ export default function HomePage() {
         return;
       }
       setError(null);
-      unsub = subscribeMyCanonicalTrips(
-        db,
-        user,
-        (list) => setTrips(list),
-        (e) => setError(e.message)
+      unsub = subscribeMyCanonicalTrips(user, (list) => setTrips(list), (e) =>
+        setError(e.message)
       );
     })();
     return () => {

@@ -247,6 +247,11 @@ export interface ActivityStep extends BaseStep {
   stepType: "activity";
   destinationId: string;
   targetDestinationId: string;
+  /**
+   * Optional anchor stay this activity belongs with (e.g. day trips while based there).
+   * Must reference {@link StayStep#id} from the same trip when set.
+   */
+  hostStayStepId?: string;
   stepIntervals: ActivityStepInterval[];
 }
 
@@ -282,6 +287,90 @@ export interface TripLiveLocation {
   updatedAt: ISODateString;
 }
 
+/**
+ * Pending suggestion for the trip — surfaced in the floating notifications dock.
+ *
+ * A recommendation is a *bundle of options* (each carrying a full step-interval
+ * payload of the same `kind`). The user picks one option to approve, which
+ * becomes a new step on the trip. The whole recommendation stays in the queue
+ * until the user approves an option or deletes the recommendation.
+ *
+ * Recommendations live alongside `steps` rather than inside one so the queue
+ * is order-independent and can be authored by the assistant or other tooling.
+ */
+export type TripRecommendationKind = "stay" | "transit" | "activity";
+
+interface BaseRecommendationOption {
+  id: string;
+  /** Short label shown in the option picker (falls back to `interval.title`). */
+  label?: string;
+  /** Per-option rationale shown when this option is selected. */
+  note?: string;
+  /**
+   * Optional registry rows to merge into {@link Trip#destinations} when this
+   * option is approved. Use when the option references destinations that may
+   * not yet exist on the trip (ids should match the interval's references).
+   */
+  destinations?: Destination[];
+}
+
+export interface StayRecommendationOption extends BaseRecommendationOption {
+  interval: StayStepInterval;
+}
+
+export interface TransitRecommendationOption extends BaseRecommendationOption {
+  interval: TransitStepInterval;
+}
+
+export interface ActivityRecommendationOption extends BaseRecommendationOption {
+  interval: ActivityStepInterval;
+  /** When the activity is tied to an existing stay segment, set to that {@link StayStep#id}. */
+  hostStayStepId?: string;
+}
+
+interface BaseTripRecommendation {
+  id: string;
+  /** ISO time the recommendation was added to the queue. */
+  createdAt: ISODateString;
+  /** Free-form provenance ("assistant", "manual", a tool name…). Used in the dock subtitle. */
+  source?: string;
+  /** Headline shown on the notification card. */
+  title?: string;
+  /** Why-this-recommendation note shown above the option picker. */
+  note?: string;
+  /**
+   * Set to `true` once the user explicitly skipped this card in the dock without
+   * approving or deleting it. Skipped items stay in the queue (moved to the end)
+   * but no longer trigger the "new" indicator on the bell or the card.
+   */
+  seen?: boolean;
+}
+
+export interface StayRecommendation extends BaseTripRecommendation {
+  kind: "stay";
+  options: StayRecommendationOption[];
+}
+
+export interface TransitRecommendation extends BaseTripRecommendation {
+  kind: "transit";
+  options: TransitRecommendationOption[];
+}
+
+export interface ActivityRecommendation extends BaseTripRecommendation {
+  kind: "activity";
+  options: ActivityRecommendationOption[];
+}
+
+export type TripRecommendation =
+  | StayRecommendation
+  | TransitRecommendation
+  | ActivityRecommendation;
+
+export type TripRecommendationOption =
+  | StayRecommendationOption
+  | TransitRecommendationOption
+  | ActivityRecommendationOption;
+
 export interface Trip {
   id: string;
   title: string;
@@ -304,6 +393,11 @@ export interface Trip {
   budget?: TripBudget;
   tasks?: TripTask[];
   documents?: TripDocument[];
+  /**
+   * Pending suggestions queued for review. Surfaced via the floating notifications dock;
+   * each entry carries a full step interval that can be promoted into `steps` on approve.
+   */
+  recommendations?: TripRecommendation[];
   /** Live device positions by participant key (typically lowercased email). */
   liveLocations?: Record<string, TripLiveLocation>;
   warnings?: TripWarning[];

@@ -14,7 +14,7 @@ import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmM
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 type Provider = "openai" | "anthropic";
-type Kind = "general" | "specific";
+type Kind = "general" | "specific" | "suggestions";
 
 function openaiKey(): string | undefined {
   return (
@@ -59,16 +59,24 @@ const SYSTEM = [
   "(plus the optional trip title and last few turns) and decide how to route it.",
   "",
   "Output EXACTLY one lowercase word, with no quotes, no punctuation, no explanation:",
-  "  general   → the message is about the USER (likes, dislikes, hobbies, music, food",
-  "              preferences, lifestyle, pace, budget style), or cross-trip questions",
-  "              (e.g. \"where should I travel next\", \"plan my next trip\", \"remember\",",
-  "              \"in general I prefer ...\", generic destination ideas).",
-  "  specific  → the message is about THIS trip's concrete details — a step, place,",
-  "              date, time, booking, route, price, schedule, document, or a simple",
-  "              factual question grounded in the current itinerary.",
+  "  general      → the message is about the USER (likes, dislikes, hobbies, music, food",
+  "                 preferences, lifestyle, pace, budget style), or cross-trip questions",
+  "                 (e.g. \"where should I travel next\", \"plan my next trip\", \"remember\",",
+  "                 \"in general I prefer ...\", generic destination ideas).",
+  "  specific     → the message is about THIS trip's concrete details — a step, place,",
+  "                 date, time, booking, route, price, schedule, document, or a simple",
+  "                 factual question grounded in the current itinerary.",
+  "  suggestions  → the user is explicitly asking the assistant to PROPOSE concrete",
+  "                 additions to THIS trip's queue: ideas for hotels/stays, transit options,",
+  "                 day-trip activities, restaurants, museums, etc. Triggers include",
+  "                 \"suggest\", \"recommend X for me\", \"what should I add\", \"give me a few",
+  "                 options for...\", \"propose...\", and similar imperative requests where",
+  "                 the natural answer is a small set of actionable, structured proposals.",
   "",
-  "If both apply, pick the dominant intent. If unclear, default to specific.",
-  "Never output anything other than the single word `general` or `specific`.",
+  "If `suggestions` and `specific` both apply (e.g. \"suggest a hotel for night 3\"),",
+  "prefer `suggestions`. If `general` and `suggestions` both apply (e.g. \"suggest my next",
+  "trip\"), prefer `general`. If still unclear, default to specific.",
+  "Never output anything other than the single word `general`, `specific`, or `suggestions`.",
 ].join("\n");
 
 function buildUserBlock(input: {
@@ -87,6 +95,7 @@ function buildUserBlock(input: {
 
 function parseKind(raw: string): Kind {
   const v = (raw ?? "").trim().toLowerCase();
+  if (v.startsWith("suggestion")) return "suggestions";
   if (v.startsWith("general")) return "general";
   // Anything else (including "specific" or noise) → specific. Safe default.
   return "specific";
@@ -141,7 +150,7 @@ export async function POST(req: NextRequest) {
       model: anthropicModel(),
       system: SYSTEM,
       turns: [{ role: "user", content: userBlock }],
-      maxOutputTokens: 8,
+      maxOutputTokens: 12,
       temperature: 0,
     });
     if (!r.ok) {
@@ -178,7 +187,7 @@ export async function POST(req: NextRequest) {
         { role: "user", content: userBlock },
       ],
       temperature: 0,
-      max_completion_tokens: 8,
+      max_completion_tokens: 12,
     }),
   });
 

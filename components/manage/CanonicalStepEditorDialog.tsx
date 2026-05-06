@@ -33,6 +33,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { intlLocaleForApp } from "@/lib/i18n/messages";
 import {
   DateTimeRangeCalendar,
+  mergeCalendarIsoPair,
   StartTimeAndDuration,
 } from "@/components/dateRange/DateRangeCalendar";
 import { STEP_WIZARD_IDS, type WizardFrame } from "@/lib/wizardStack/types";
@@ -173,6 +174,10 @@ export function CanonicalStepEditorDialog({
   const tripPlaceGrouped = useMemo(
     () => collectStayGroupedTripPlacePicks(stepsForPicks, mergedDestinations),
     [stepsForPicks, mergedDestinations]
+  );
+  const stayStepsForHostPicker = useMemo(
+    () => stepsForPicks.filter((s): s is StayStep => s.stepType === "stay"),
+    [stepsForPicks]
   );
   const { t, locale } = useI18n();
   const intlLocale = intlLocaleForApp(locale);
@@ -671,6 +676,33 @@ export function CanonicalStepEditorDialog({
         {draft.stepType === "activity" ? (
           <>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              <span className="block">{t("manage.activityHostStay")}</span>
+              <span className="mt-0.5 block text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+                {t("manage.activityHostStayHint")}
+              </span>
+              <select
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={(draft as ActivityStep).hostStayStepId ?? ""}
+                onChange={(e) => {
+                  const d = draft as ActivityStep;
+                  const v = e.target.value.trim();
+                  setDraft(() => {
+                    const next = { ...d };
+                    if (v) next.hostStayStepId = v;
+                    else delete next.hostStayStepId;
+                    return next;
+                  });
+                }}
+              >
+                <option value="">{t("manage.activityHostStayNone")}</option>
+                {stayStepsForHostPicker.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.title?.trim() || `Stay · ${s.order + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               Activity place
               <input
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
@@ -902,12 +934,18 @@ export function CanonicalStepEditorDialog({
               <StartTimeAndDuration
                 startIso={active.startTime}
                 endIso={active.endTime}
-                onChange={(startIso, endIso) =>
+                onChange={(startIso, endIso) => {
+                  const merged = mergeCalendarIsoPair(
+                    active.startTime,
+                    active.endTime,
+                    startIso,
+                    endIso
+                  );
                   patchActiveInterval({
-                    startTime: startIso || active.startTime,
-                    endTime: endIso || active.endTime,
-                  })
-                }
+                    startTime: merged.startIso,
+                    endTime: merged.endIso,
+                  });
+                }}
                 intlLocale={intlLocale}
                 startLabel={startLabel}
                 durationLabel="Duration"
@@ -921,16 +959,21 @@ export function CanonicalStepEditorDialog({
               <DateTimeRangeCalendar
                 startIso={active.startTime}
                 endIso={active.endTime}
-                onChange={(startIso, endIso) =>
+                onChange={(startIso, endIso) => {
+                  const merged = mergeCalendarIsoPair(
+                    active.startTime,
+                    active.endTime,
+                    startIso,
+                    endIso
+                  );
                   patchActiveInterval({
-                    startTime: startIso || active.startTime,
-                    endTime: endIso || active.endTime,
-                  })
-                }
+                    startTime: merged.startIso,
+                    endTime: merged.endIso,
+                  });
+                }}
                 intlLocale={intlLocale}
                 startLabel={startLabel}
                 endLabel={endLabel}
-                monthsToShow={1}
                 collapsible
               />
             </>

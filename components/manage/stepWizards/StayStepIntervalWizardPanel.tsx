@@ -14,7 +14,10 @@ import {
   WizardPageHeading,
   WizardSection,
 } from "@/components/manage/stepWizards/wizardShared";
-import { DateTimeRangeCalendar } from "@/components/dateRange/DateRangeCalendar";
+import {
+  DateTimeRangeCalendar,
+  mergeCalendarIsoPair,
+} from "@/components/dateRange/DateRangeCalendar";
 import { appendStepInterval, destinationFromPlacePick } from "@/lib/canonicalStepBuilders";
 import { useI18n } from "@/lib/i18n/context";
 import { intlLocaleForApp } from "@/lib/i18n/messages";
@@ -163,12 +166,18 @@ export function StayStepIntervalWizardPanel({
               <DateTimeRangeCalendar
                 startIso={interval.startTime}
                 endIso={interval.endTime}
-                onChange={(startIso, endIso) =>
+                onChange={(startIso, endIso) => {
+                  const merged = mergeCalendarIsoPair(
+                    interval.startTime,
+                    interval.endTime,
+                    startIso,
+                    endIso
+                  );
                   patchIntervalAt(intervalIndex, {
-                    startTime: startIso || interval.startTime,
-                    endTime: endIso || interval.endTime,
-                  })
-                }
+                    startTime: merged.startIso,
+                    endTime: merged.endIso,
+                  });
+                }}
                 intlLocale={intlLocale}
                 startLabel="Check-in"
                 endLabel="Check-out"

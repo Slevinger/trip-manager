@@ -1,5 +1,6 @@
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION } from "@/lib/tripAssistantRequestKind";
+import { buildTripRecommendationSchemaPrompt } from "@/lib/tripAssistantSuggestionSchema";
 import type { Trip, TripStep, UserPreferences } from "@/lib/types/trip";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
 
@@ -111,7 +112,15 @@ export function buildTripAssistantSystemPrompt(
     "```json",
     tripJson,
     "```",
+    "",
+    "### Destination ids (use these in suggestions)",
+    "Every place on this trip is listed under `destinations` above; each row’s `id` is the canonical key.",
+    "When you reply with `##suggestions##` and the fenced `trip-suggestions` JSON, set `destinationId`, `fromDestinationId`, and `toDestinationId` on intervals to **those exact id strings** whenever the proposal refers to an existing row.",
+    "For **activity** suggestions, also set each option’s `hostStayStepId` to the **`trip.steps` stay step `id`** when the activity belongs while the traveler is based at that stay.",
+    "Do **not** mint a second id or duplicate that place inside `option.destinations` — reserve `option.destinations` only for places that are **not** already in `trip.destinations`.",
     prefsBlock,
+    "",
+    buildTripRecommendationSchemaPrompt(),
     TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION,
   ].join("\n");
 }

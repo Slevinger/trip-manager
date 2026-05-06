@@ -90,44 +90,6 @@ service cloud.firestore {
       allow read, create, update, delete: if signedIn();
     }
 
-    /**
-     * Shared per-trip assistant thread — every participant of the trip can read and
-     * append messages. Updates and deletes are forbidden from clients (only server
-     * routes with the Admin SDK touch `active` for compaction or owner-clear).
-     *
-     * NOTE: trip auth metadata (`ownerUid`, `participantEmailsLower`) lives on the
-     * `canonicalTrips/{tripId}` doc, not `trips/{tripId}` (which is mostly an empty
-     * shell used as a parent for subcollections like `assistantThread`). Mirror the
-     * canonical trip read rule below: owner uid match, or email listed on the trip.
-     */
-    match /trips/{tripId}/assistantThread/{entryId} {
-      allow read: if signedIn() && (
-        get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.ownerUid == request.auth.uid ||
-        (
-          currentEmailLower() != "" &&
-          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower is list &&
-          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower.hasAny([currentEmailLower()])
-        )
-      );
-      allow create: if signedIn() && (
-        get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.ownerUid == request.auth.uid ||
-        (
-          currentEmailLower() != "" &&
-          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower is list &&
-          get(/databases/$(database)/documents/canonicalTrips/$(tripId)).data.participantEmailsLower.hasAny([currentEmailLower()])
-        )
-      );
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    function canonicalTripParticipantEmailRead() {
-      return currentEmailLower() != "" &&
-        resource.data.keys().hasAny(['participantEmailsLower']) &&
-        resource.data.participantEmailsLower is list &&
-        resource.data.participantEmailsLower.hasAny([currentEmailLower()]);
-    }
-
     /** Party row email matches JWT email (lowercase). Accepts `email` or `Email` field names. */
     function canonicalTripPartyMapEmailEq(m) {
       return m is map &&
@@ -182,6 +144,38 @@ service cloud.firestore {
           canonicalTripPartyListEmailAt(resource.data.travelers, 21) ||
           canonicalTripPartyListEmailAt(resource.data.travelers, 22) ||
           canonicalTripPartyListEmailAt(resource.data.travelers, 23)
+        );
+    }
+
+    /** Read-only party: JWT email matches a `viewers[]` row (for self-serve `participantUids` patch). */
+    function canonicalTripNestedViewerEmailRead() {
+      return currentEmailLower() != "" &&
+        resource.data.keys().hasAny(['viewers']) &&
+        resource.data.viewers is list && (
+          canonicalTripPartyListEmailAt(resource.data.viewers, 0) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 1) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 2) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 3) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 4) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 5) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 6) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 7) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 8) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 9) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 10) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 11) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 12) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 13) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 14) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 15) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 16) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 17) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 18) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 19) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 20) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 21) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 22) ||
+          canonicalTripPartyListEmailAt(resource.data.viewers, 23)
         );
     }
 
@@ -247,6 +241,108 @@ service cloud.firestore {
     }
 
     /**
+     * Same party check as {@link canonicalTripNestedPartyEmailRead} but against an
+     * arbitrary map (the canonical trip payload from `get(...).data`). Needed for
+     * `trips/{tripId}/assistantThread` rules: there `resource` is the thread entry,
+     * not the canonical trip — without this, travelers matched only via nested
+     * `travelers[]` on the canonical doc could read the trip yet get permission-denied
+     * on the shared assistant thread when `participantEmailsLower` was stale.
+     */
+    function canonicalTripMapNestedPartyEmailRead(d) {
+      return d is map &&
+        currentEmailLower() != "" && (
+          (d.keys().hasAny(['travelers']) && d.travelers is list && (
+            canonicalTripPartyListEmailAt(d.travelers, 0) ||
+            canonicalTripPartyListEmailAt(d.travelers, 1) ||
+            canonicalTripPartyListEmailAt(d.travelers, 2) ||
+            canonicalTripPartyListEmailAt(d.travelers, 3) ||
+            canonicalTripPartyListEmailAt(d.travelers, 4) ||
+            canonicalTripPartyListEmailAt(d.travelers, 5) ||
+            canonicalTripPartyListEmailAt(d.travelers, 6) ||
+            canonicalTripPartyListEmailAt(d.travelers, 7) ||
+            canonicalTripPartyListEmailAt(d.travelers, 8) ||
+            canonicalTripPartyListEmailAt(d.travelers, 9) ||
+            canonicalTripPartyListEmailAt(d.travelers, 10) ||
+            canonicalTripPartyListEmailAt(d.travelers, 11) ||
+            canonicalTripPartyListEmailAt(d.travelers, 12) ||
+            canonicalTripPartyListEmailAt(d.travelers, 13) ||
+            canonicalTripPartyListEmailAt(d.travelers, 14) ||
+            canonicalTripPartyListEmailAt(d.travelers, 15) ||
+            canonicalTripPartyListEmailAt(d.travelers, 16) ||
+            canonicalTripPartyListEmailAt(d.travelers, 17) ||
+            canonicalTripPartyListEmailAt(d.travelers, 18) ||
+            canonicalTripPartyListEmailAt(d.travelers, 19) ||
+            canonicalTripPartyListEmailAt(d.travelers, 20) ||
+            canonicalTripPartyListEmailAt(d.travelers, 21) ||
+            canonicalTripPartyListEmailAt(d.travelers, 22) ||
+            canonicalTripPartyListEmailAt(d.travelers, 23)
+          )) ||
+          (d.keys().hasAny(['viewers']) && d.viewers is list && (
+            canonicalTripPartyListEmailAt(d.viewers, 0) ||
+            canonicalTripPartyListEmailAt(d.viewers, 1) ||
+            canonicalTripPartyListEmailAt(d.viewers, 2) ||
+            canonicalTripPartyListEmailAt(d.viewers, 3) ||
+            canonicalTripPartyListEmailAt(d.viewers, 4) ||
+            canonicalTripPartyListEmailAt(d.viewers, 5) ||
+            canonicalTripPartyListEmailAt(d.viewers, 6) ||
+            canonicalTripPartyListEmailAt(d.viewers, 7) ||
+            canonicalTripPartyListEmailAt(d.viewers, 8) ||
+            canonicalTripPartyListEmailAt(d.viewers, 9) ||
+            canonicalTripPartyListEmailAt(d.viewers, 10) ||
+            canonicalTripPartyListEmailAt(d.viewers, 11) ||
+            canonicalTripPartyListEmailAt(d.viewers, 12) ||
+            canonicalTripPartyListEmailAt(d.viewers, 13) ||
+            canonicalTripPartyListEmailAt(d.viewers, 14) ||
+            canonicalTripPartyListEmailAt(d.viewers, 15) ||
+            canonicalTripPartyListEmailAt(d.viewers, 16) ||
+            canonicalTripPartyListEmailAt(d.viewers, 17) ||
+            canonicalTripPartyListEmailAt(d.viewers, 18) ||
+            canonicalTripPartyListEmailAt(d.viewers, 19) ||
+            canonicalTripPartyListEmailAt(d.viewers, 20) ||
+            canonicalTripPartyListEmailAt(d.viewers, 21) ||
+            canonicalTripPartyListEmailAt(d.viewers, 22) ||
+            canonicalTripPartyListEmailAt(d.viewers, 23)
+          ))
+        );
+    }
+
+    /**
+     * Shared-thread access from the canonical trip doc (see `canonicalTripMapNestedPartyEmailRead`).
+     * Declared after party helpers; `let` is only valid inside functions, not in `allow` lines.
+     */
+    function assistantThreadPartyMayAccessCanonical(tripId) {
+      let c = get(/databases/$(database)/documents/canonicalTrips/$(tripId));
+      return c.exists && c.data is map && (
+        c.data.ownerUid == request.auth.uid ||
+        (
+          request.auth.token.email is string &&
+          c.data.keys().hasAny(['participantEmailsLower']) &&
+          c.data.participantEmailsLower is list &&
+          request.auth.token.email.lower() in c.data.participantEmailsLower
+        ) ||
+        (
+          c.data.keys().hasAny(['participantUids']) &&
+          c.data.participantUids is list &&
+          request.auth.uid in c.data.participantUids
+        ) ||
+        canonicalTripMapNestedPartyEmailRead(c.data)
+      );
+    }
+
+    /**
+     * Shared per-trip assistant thread — every participant of the trip can read and
+     * append messages. Uses the same access logic as `canonicalTrips` including nested
+     * `travelers` / `viewers` (not only `participantEmailsLower`).
+     */
+    match /trips/{tripId}/assistantThread/{entryId} {
+      allow read: if signedIn() && assistantThreadPartyMayAccessCanonical(tripId);
+      /** Appends go through POST /api/chat/shared-trip-thread-append (Admin SDK). */
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
      * User profile prefs; doc id is lowercase email (must match JWT email).
      * Do not require email_verified: it is missing or false on some Google tokens while
      * request.auth.token.email is still correct — matching the path id is sufficient here.
@@ -304,34 +400,47 @@ service cloud.firestore {
     /** Canonical trips: signed-in + owner / participant / traveler rules (app enforces Google in UI). */
     match /canonicalTrips/{tripId} {
       /**
-       * The `array-contains` branch is INLINED (not delegated to a helper) and uses
-       * the literal token expression — Firestore's query rule validator can only
-       * statically prove `where(participantEmailsLower, "array-contains", X)` is safe
-       * when the rule contains the exact `participantEmailsLower.hasAny([X])` pattern
-       * with `X` matching the query argument. Helper-function indirection (e.g.
-       * `currentEmailLower()`) caused the analyzer to refuse the query, silently
-       * sending non-owner participants down the owner-only fallback in
-       * `subscribeMyCanonicalTrips` (i.e. they saw zero shared trips).
+       * Single-document reads (trip page, repair flows): full party match including nested
+       * travelers/viewers when flat participant* fields are stale.
        */
-      allow read: if signedIn() && (
-        resource.data.ownerUid == request.auth.uid ||
-        (
-          request.auth.token.email is string &&
-          resource.data.participantEmailsLower is list &&
-          resource.data.participantEmailsLower.hasAny([request.auth.token.email.lower()])
-        ) ||
-        canonicalTripNestedPartyEmailRead()
-      );
+      function canonicalTripGetMayRead() {
+        return signedIn() && (
+          resource.data.ownerUid == request.auth.uid ||
+          (
+            resource.data.participantUids is list &&
+            request.auth.uid in resource.data.participantUids
+          ) ||
+          (
+            request.auth.token.email is string &&
+            resource.data.participantEmailsLower is list &&
+            request.auth.token.email.lower() in resource.data.participantEmailsLower
+          ) ||
+          canonicalTripNestedPartyEmailRead()
+        );
+      }
+
+      /** Home trip list uses GET /api/canonical-trips/my (Admin SDK); clients must not list this collection. */
+      allow get: if canonicalTripGetMayRead();
+      allow list: if false;
       allow create: if signedIn() &&
         request.resource.data.ownerUid == request.auth.uid &&
         request.resource.data.id is string &&
         request.resource.data.id == tripId &&
-        request.resource.data.participantEmailsLower is list;
+        request.resource.data.participantEmailsLower is list &&
+        request.resource.data.participantUids is list &&
+        request.auth.uid in request.resource.data.participantUids;
       allow update: if signedIn() && (
         resource.data.ownerUid == request.auth.uid ||
         (
           canonicalTripNestedTravelerEmailWrite() &&
           request.resource.data.ownerUid == resource.data.ownerUid
+        ) ||
+        (
+          canonicalTripNestedViewerEmailRead() &&
+          request.resource.data.ownerUid == resource.data.ownerUid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantUids']) &&
+          request.resource.data.participantUids is list &&
+          request.auth.uid in request.resource.data.participantUids
         )
       );
       allow delete: if signedIn() &&

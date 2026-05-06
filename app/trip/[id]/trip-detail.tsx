@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   clearCanonicalTripLiveLocation,
+  ensureCanonicalTripListsMyUid,
   saveCanonicalTrip,
   sessionIsGoogleSignIn,
   subscribeCanonicalTrip,
@@ -25,9 +26,10 @@ import { normalizeTripForPersist } from "@/lib/canonicalStepBuilders";
 import { upsertDestinationRow } from "@/lib/tripDestinationRegistry";
 import { destinationHasMapCoordinates } from "@/lib/tripDestinationGeo";
 import { getTrip, putTrip } from "@/lib/tripLocalStore";
+import { addTripRecommendation } from "@/lib/tripRecommendations";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
-import type { Destination, Trip, UserPreferences } from "@/lib/types/trip";
+import type { Destination, Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
 import { messagesForTrip } from "@/lib/tripChatMessages";
 import type {
   ImmutableMemoryQueueEntry,
@@ -76,6 +78,14 @@ const TripAssistantChatDock = dynamic(
   { ssr: false }
 );
 
+const TripRecommendationsDock = dynamic(
+  () =>
+    import("@/components/trip/TripRecommendationsDock").then((m) => ({
+      default: m.TripRecommendationsDock,
+    })),
+  { ssr: false }
+);
+
 export function TripDetail({ tripId }: { tripId: string }) {
   const [tab, setTab] = useState<"view" | "manage">("view");
   const [loadState, setLoadState] = useState<
@@ -115,6 +125,8 @@ export function TripDetail({ tripId }: { tripId: string }) {
   }>({ exists: false, messages: [] });
   const liveLocationWatchIdRef = useRef<number | null>(null);
   const liveLocationLastSentRef = useRef<{ ts: number; lat: number; lon: number } | null>(null);
+  /** Lets travelers/viewers register `participantUids` once per trip+user for home-list queries. */
+  const participantUidSelfHealKeyRef = useRef<string>("");
 
   const { t } = useI18n();
   const useFirestore = Boolean(getDb() && getMissingFirebasePublicEnv().length === 0);
@@ -269,6 +281,22 @@ export function TripDetail({ tripId }: { tripId: string }) {
       unsubAuth();
     };
   }, [tripId]);
+
+  useEffect(() => {
+    participantUidSelfHealKeyRef.current = "";
+  }, [tripId]);
+
+  useEffect(() => {
+    if (loadState !== "ok" || !trip || !user) return;
+    const db = getDb();
+    if (!db || getMissingFirebasePublicEnv().length > 0) return;
+    const key = `${tripId}:${user.uid}`;
+    if (participantUidSelfHealKeyRef.current === key) return;
+    participantUidSelfHealKeyRef.current = key;
+    void ensureCanonicalTripListsMyUid(db, tripId, user).catch(() => {
+      if (participantUidSelfHealKeyRef.current === key) participantUidSelfHealKeyRef.current = "";
+    });
+  }, [loadState, trip, tripId, user]);
 
   useEffect(() => {
     if (tab === "view") {
@@ -440,6 +468,24 @@ export function TripDetail({ tripId }: { tripId: string }) {
       updatedAt: new Date().toISOString(),
     };
     await persistTrip(normalizeTripForPersist(next));
+  }
+
+  /**
+   * Handler invoked by `TripAssistantChatDock` when the LLM returned a
+   * `trip-suggestions` JSON block. We append every entry to the queue and
+   * persist once — the recommendations dock subscribes to the same `Trip`
+   * state and surfaces the new bell badge automatically.
+   */
+  async function handleAddAssistantRecommendations(
+    baseTrip: Trip,
+    recommendations: TripRecommendation[]
+  ): Promise<void> {
+    if (recommendations.length === 0) return;
+    let next: Trip = baseTrip;
+    for (const rec of recommendations) {
+      next = addTripRecommendation(next, rec);
+    }
+    await persistTrip(next);
   }
 
   async function handleSaveAdvancedJson() {
@@ -848,8 +894,15 @@ export function TripDetail({ tripId }: { tripId: string }) {
           userDisplayName={user?.displayName?.trim() ?? null}
           isTripOwner={isTripOwner}
           canPersistMemory={Boolean(useFirestore && user?.email?.trim())}
+          onAddRecommendations={handleAddAssistantRecommendations}
         />
       ) : null}
+
+      <TripRecommendationsDock
+        trip={dockTrip ?? trip}
+        canModify={!useFirestore || canManageFirestore}
+        onPersist={persistTrip}
+      />
     </main>
   );
 }

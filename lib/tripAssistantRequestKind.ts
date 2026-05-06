@@ -1,17 +1,22 @@
 /**
  * Classification of a trip-assistant user message:
- * - `general`  → about the user themself (likes, hobbies, lifestyle, future trips,
- *               cross-trip preferences). Worth attaching `__global__` context.
- * - `specific` → about the current trip (a step, booking, place, time, budget).
- *               `__global__` context is unhelpful and just costs tokens.
+ * - `general`     → about the user themself (likes, hobbies, lifestyle, future trips,
+ *                  cross-trip preferences). Worth attaching `__global__` context.
+ * - `specific`    → about the current trip (a step, booking, place, time, budget).
+ *                  `__global__` context is unhelpful and just costs tokens.
+ * - `suggestions` → user explicitly asks for actionable proposals to add to the trip.
+ *                  The assistant must emit a fenced `trip-suggestions` JSON block in
+ *                  addition to the conversational reply (see
+ *                  {@link buildTripRecommendationSchemaPrompt}).
  */
-export type TripAssistantRequestKind = "general" | "specific";
+export type TripAssistantRequestKind = "general" | "specific" | "suggestions";
 
 export const REQUEST_KIND_GENERAL_MARKER = "##general##";
 export const REQUEST_KIND_SPECIFIC_MARKER = "##specific##";
+export const REQUEST_KIND_SUGGESTIONS_MARKER = "##suggestions##";
 
-/** Either marker, optionally surrounded by whitespace, on the LAST non-empty line. */
-const TRAILING_MARKER_RE = /\s*##(general|specific)##\s*$/i;
+/** Any marker, optionally surrounded by whitespace, on the LAST non-empty line. */
+const TRAILING_MARKER_RE = /\s*##(general|specific|suggestions)##\s*$/i;
 
 /**
  * Parses the trailing classification marker the assistant is instructed to emit.
@@ -22,7 +27,10 @@ export function parseTripAssistantRequestKind(replyText: string): TripAssistantR
   const m = TRAILING_MARKER_RE.exec(replyText);
   if (!m) return null;
   const v = m[1].toLowerCase();
-  return v === "general" || v === "specific" ? (v as TripAssistantRequestKind) : null;
+  if (v === "general" || v === "specific" || v === "suggestions") {
+    return v as TripAssistantRequestKind;
+  }
+  return null;
 }
 
 /**
@@ -95,7 +103,8 @@ export const TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION = [
   "",
   "### Classify your reply",
   `End your reply with EXACTLY one classification marker on its own final line, with no extra punctuation, prefix, or trailing text:`,
-  `- ${REQUEST_KIND_GENERAL_MARKER}  → use when the user's latest message is about THEM as a traveler (likes, dislikes, hobbies, music, food preferences, lifestyle, pace, budget style, future trips, or cross-trip questions).`,
-  `- ${REQUEST_KIND_SPECIFIC_MARKER} → use when the user's latest message is about THIS trip's concrete details (a step, place, date, booking, route, price, schedule, document).`,
+  `- ${REQUEST_KIND_GENERAL_MARKER}     → use when the user's latest message is about THEM as a traveler (likes, dislikes, hobbies, music, food preferences, lifestyle, pace, budget style, future trips, or cross-trip questions).`,
+  `- ${REQUEST_KIND_SPECIFIC_MARKER}    → use when the user's latest message is about THIS trip's concrete details (a step, place, date, booking, route, price, schedule, document).`,
+  `- ${REQUEST_KIND_SUGGESTIONS_MARKER} → use when the user explicitly asks you to PROPOSE additions to the trip queue (stays, transit, or activities they should consider). When you pick this marker you MUST also include the fenced \`trip-suggestions\` JSON block described above; bind places to existing \`trip.destinations[].id\` values whenever they match (do not invent parallel ids). For activity options tied to a stay in \`trip.steps\`, set \`hostStayStepId\` to that stay step's \`id\`. If you cannot, choose \`${REQUEST_KIND_SPECIFIC_MARKER}\` or \`${REQUEST_KIND_GENERAL_MARKER}\` instead.`,
   "If both apply, pick the dominant intent. Never omit the marker. Never invent other markers.",
 ].join("\n");

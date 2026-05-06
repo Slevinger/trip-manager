@@ -41,7 +41,7 @@ export interface SharedTripThreadEntry {
   /** Trip context snapshot at the time of the turn (same shape as user-scope entries). */
   tripContext?: string;
   /** Assistant self-classification of the most recent user message in this turn. */
-  requestKind?: "general" | "specific";
+  requestKind?: "general" | "specific" | "suggestions";
   memoryCompressed?: boolean;
   /** For `kind === "summary"`: how many compaction passes produced this entry. */
   evolveCount?: number;
@@ -66,8 +66,8 @@ export interface ImmutableMemoryQueueEntry {
   originTripId?: string;
   /** One-line trip context snapshot at the time the turn happened (assistant scope). */
   tripContext?: string;
-  /** Assistant self-classification of this turn ("general" → personal/cross-trip; "specific" → trip detail). */
-  requestKind?: "general" | "specific";
+  /** Assistant self-classification of this turn ("general" → personal/cross-trip; "specific" → trip detail; "suggestions" → user asked for proposals). */
+  requestKind?: "general" | "specific" | "suggestions";
   createdAtMs: number;
 }
 

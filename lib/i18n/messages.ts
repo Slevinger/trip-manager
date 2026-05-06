@@ -130,6 +130,8 @@ const en = {
     "Clear the shared assistant chat for this trip for everyone? Cross-trip personal memory is not affected. This cannot be undone.",
   "assistant.forgetOwnerOnly": "Only the trip owner can clear the shared chat.",
   "assistant.forgetting": "Clearing…",
+  "assistant.suggestionsFailed":
+    "Couldn't queue the suggestions returned by the assistant.",
 
   "common.remove": "Remove",
   "common.edit": "Edit",
@@ -182,6 +184,9 @@ const en = {
   "manage.invalidStayInterval": "Invalid stay interval.",
   "manage.invalidTransitInterval": "Invalid transit interval.",
   "manage.invalidActivityInterval": "Invalid activity interval.",
+  "manage.activityHostStay": "Linked stay (optional)",
+  "manage.activityHostStayHint": "Tie this activity to a stay segment on the itinerary (e.g. day trips from that base).",
+  "manage.activityHostStayNone": "None — not tied to a stay",
   "manage.intervalsLabel": "Intervals",
   "manage.noIntervalAddress": "No interval address yet",
   "manage.priceOptional": "Price (optional)",
@@ -391,6 +396,32 @@ const en = {
   "newTrip.review.currency": "Currency",
   "newTrip.review.empty": "—",
   "newTrip.review.editStep": "Edit",
+
+  "recs.title": "Recommendations",
+  "recs.counter": "{current} of {total}",
+  "recs.openPanelEmpty": "No pending recommendations",
+  "recs.openPanelWithCount": "Open recommendations ({count} pending)",
+  "recs.openPanelWithUnseen": "Open recommendations ({unseen} new of {total})",
+  "recs.closePanel": "Close recommendations",
+  "recs.prev": "Previous recommendation",
+  "recs.next": "Next recommendation",
+  "recs.approve": "Approve",
+  "recs.approveSelected": "Add selected",
+  "recs.approving": "Adding…",
+  "recs.delete": "Delete",
+  "recs.deleting": "Deleting…",
+  "recs.skip": "Skip",
+  "recs.skipping": "Skipping…",
+  "recs.skipTitle":
+    "Move this recommendation to the end of the queue and stop flagging it as new.",
+  "recs.newPill": "New",
+  "recs.optionsLabel": "Pick one of {count} options",
+  "recs.optionFallback": "Option {index}",
+  "recs.linkedStay": "Linked stay",
+  "recs.readOnlyHint":
+    "Read-only access: ask the trip owner or a traveler to approve or delete this recommendation.",
+  "recs.errorGeneric": "Could not update recommendations.",
+  "recs.errorNoOption": "Pick one of the suggested options first.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -517,6 +548,8 @@ const he: Record<MessageKey, string> = {
     "לנקות את הצ'אט המשותף לטיול הזה לכולם? הזיכרון האישי בין הטיולים לא מושפע. לא ניתן לבטל.",
   "assistant.forgetOwnerOnly": "רק בעל/ת הטיול יכול/ה לנקות את הצ'אט המשותף.",
   "assistant.forgetting": "מוחק…",
+  "assistant.suggestionsFailed":
+    "לא ניתן להוסיף את ההמלצות שהעוזר החזיר לתור.",
 
   "common.remove": "הסרה",
   "common.edit": "עריכה",
@@ -569,6 +602,9 @@ const he: Record<MessageKey, string> = {
   "manage.invalidStayInterval": "מרווח שהייה לא תקין.",
   "manage.invalidTransitInterval": "מרווח נסיעה לא תקין.",
   "manage.invalidActivityInterval": "מרווח פעילות לא תקין.",
+  "manage.activityHostStay": "שהייה מקושרת (אופציונלי)",
+  "manage.activityHostStayHint": "קשר את הפעילות למקטע שהייה במסלול (למשל טיולי יום מהבסיס ההוא).",
+  "manage.activityHostStayNone": "ללא — לא משויך לשהייה",
   "manage.intervalsLabel": "מרווחים",
   "manage.noIntervalAddress": "אין עדיין כתובת למרווח",
   "manage.priceOptional": "מחיר (אופציונלי)",
@@ -775,6 +811,32 @@ const he: Record<MessageKey, string> = {
   "newTrip.review.currency": "מטבע",
   "newTrip.review.empty": "—",
   "newTrip.review.editStep": "עריכה",
+
+  "recs.title": "המלצות",
+  "recs.counter": "{current} מתוך {total}",
+  "recs.openPanelEmpty": "אין המלצות ממתינות",
+  "recs.openPanelWithCount": "פתיחת המלצות ({count} ממתינות)",
+  "recs.openPanelWithUnseen": "פתיחת המלצות ({unseen} חדשות מתוך {total})",
+  "recs.closePanel": "סגירת המלצות",
+  "recs.prev": "ההמלצה הקודמת",
+  "recs.next": "ההמלצה הבאה",
+  "recs.approve": "אישור",
+  "recs.approveSelected": "הוספה לטיול",
+  "recs.approving": "מוסיף…",
+  "recs.delete": "מחיקה",
+  "recs.deleting": "מוחק…",
+  "recs.skip": "דילוג",
+  "recs.skipping": "מדלג…",
+  "recs.skipTitle":
+    "להעביר את ההמלצה לסוף התור ולהפסיק לסמן אותה כחדשה.",
+  "recs.newPill": "חדש",
+  "recs.optionsLabel": "בחרו אחת מתוך {count} אפשרויות",
+  "recs.optionFallback": "אפשרות {index}",
+  "recs.linkedStay": "שהייה מקושרת",
+  "recs.readOnlyHint":
+    "גישה לקריאה בלבד: בקשו מבעל/ת הטיול או ממטייל/ת לאשר או למחוק את ההמלצה.",
+  "recs.errorGeneric": "לא ניתן לעדכן את ההמלצות.",
+  "recs.errorNoOption": "בחרו אחת מהאפשרויות תחילה.",
 };
 
 const ru: Record<MessageKey, string> = {
@@ -905,6 +967,8 @@ const ru: Record<MessageKey, string> = {
     "Очистить общий чат по этой поездке для всех? Личная память между поездками не затрагивается. Отменить нельзя.",
   "assistant.forgetOwnerOnly": "Только владелец поездки может очистить общий чат.",
   "assistant.forgetting": "Удаление…",
+  "assistant.suggestionsFailed":
+    "Не удалось добавить предложения помощника в очередь.",
 
   "common.remove": "Удалить",
   "common.edit": "Правка",
@@ -957,6 +1021,9 @@ const ru: Record<MessageKey, string> = {
   "manage.invalidStayInterval": "Некорректный интервал проживания.",
   "manage.invalidTransitInterval": "Некорректный интервал переезда.",
   "manage.invalidActivityInterval": "Некорректный интервал активности.",
+  "manage.activityHostStay": "Привязка к проживанию (необязательно)",
+  "manage.activityHostStayHint": "Свяжите активность с этапом проживания в маршруте (например однодневные поездки из этого базового места).",
+  "manage.activityHostStayNone": "Нет — без привязки к проживанию",
   "manage.intervalsLabel": "Интервалы",
   "manage.noIntervalAddress": "Пока нет адреса интервала",
   "manage.priceOptional": "Цена (необязательно)",
@@ -1165,6 +1232,32 @@ const ru: Record<MessageKey, string> = {
   "newTrip.review.currency": "Валюта",
   "newTrip.review.empty": "—",
   "newTrip.review.editStep": "Изменить",
+
+  "recs.title": "Рекомендации",
+  "recs.counter": "{current} из {total}",
+  "recs.openPanelEmpty": "Нет ожидающих рекомендаций",
+  "recs.openPanelWithCount": "Открыть рекомендации ({count} ожидают)",
+  "recs.openPanelWithUnseen": "Открыть рекомендации ({unseen} новых из {total})",
+  "recs.closePanel": "Закрыть рекомендации",
+  "recs.prev": "Предыдущая рекомендация",
+  "recs.next": "Следующая рекомендация",
+  "recs.approve": "Принять",
+  "recs.approveSelected": "Добавить выбранное",
+  "recs.approving": "Добавление…",
+  "recs.delete": "Удалить",
+  "recs.deleting": "Удаление…",
+  "recs.skip": "Отложить",
+  "recs.skipping": "Откладываем…",
+  "recs.skipTitle":
+    "Перенести рекомендацию в конец очереди и не отмечать её как новую.",
+  "recs.newPill": "Новое",
+  "recs.optionsLabel": "Выберите один из {count} вариантов",
+  "recs.optionFallback": "Вариант {index}",
+  "recs.linkedStay": "Привязано к проживанию",
+  "recs.readOnlyHint":
+    "Доступ только на чтение: попросите владельца или участника поездки принять или удалить рекомендацию.",
+  "recs.errorGeneric": "Не удалось обновить рекомендации.",
+  "recs.errorNoOption": "Сначала выберите один из вариантов.",
 };
 
 export const translations = { en, he, ru } as const;

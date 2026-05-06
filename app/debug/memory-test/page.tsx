@@ -129,7 +129,6 @@ export default function MemoryTestPage() {
     if (!useFirestore || !user || !db) return () => {};
     let unsub: (() => void) | undefined;
     unsub = subscribeMyCanonicalTrips(
-      db,
       user,
       (list) => {
         setTrips(list);

@@ -18,7 +18,10 @@ import {
   WizardPageHeading,
   WizardSection,
 } from "@/components/manage/stepWizards/wizardShared";
-import { StartTimeAndDuration } from "@/components/dateRange/DateRangeCalendar";
+import {
+  mergeCalendarIsoPair,
+  StartTimeAndDuration,
+} from "@/components/dateRange/DateRangeCalendar";
 import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
 import { useI18n } from "@/lib/i18n/context";
 import { intlLocaleForApp } from "@/lib/i18n/messages";
@@ -125,12 +128,18 @@ export function TransitStepIntervalWizardPanel({
               <StartTimeAndDuration
                 startIso={interval.startTime}
                 endIso={interval.endTime}
-                onChange={(startIso, endIso) =>
+                onChange={(startIso, endIso) => {
+                  const merged = mergeCalendarIsoPair(
+                    interval.startTime,
+                    interval.endTime,
+                    startIso,
+                    endIso
+                  );
                   patchIntervalAt(intervalIndex, {
-                    startTime: startIso || interval.startTime,
-                    endTime: endIso || interval.endTime,
-                  })
-                }
+                    startTime: merged.startIso,
+                    endTime: merged.endIso,
+                  });
+                }}
                 intlLocale={intlLocale}
                 startLabel="Departs"
                 durationLabel="Duration"

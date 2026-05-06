@@ -1,14 +1,5 @@
-import {
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  type Firestore,
-  type Unsubscribe,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { collection, onSnapshot, orderBy, query, type Firestore, type Unsubscribe } from "firebase/firestore";
+import { getClientAuth, getDb } from "@/lib/firebase";
 import type {
   Email,
   ImmutableMemoryEntryKind,
@@ -39,54 +30,47 @@ export async function appendSharedTripThreadTurn(opts: {
   agentContent: string;
   sentAtMs: number;
   tripContextNote?: string;
-  requestKind?: "general" | "specific";
+  requestKind?: "general" | "specific" | "suggestions";
 }): Promise<void> {
-  const db = getDb();
-  if (!db) return;
   const tid = opts.tripId.trim();
   if (!tid) return;
 
-  const col = colRef(db, tid);
-  const userFrom = opts.fromEmailLower.trim().toLowerCase() as Email;
-  const ctxNote = (opts.tripContextNote ?? "").trim().slice(0, 500);
-  const requestKind =
-    opts.requestKind === "general" || opts.requestKind === "specific" ? opts.requestKind : undefined;
-  const t0 = Math.floor(opts.sentAtMs);
-  const t1 = t0 + 1;
+  const auth = getClientAuth();
+  const token = await auth?.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("Not signed in");
+  }
 
-  const userEntry: SharedTripThreadEntry = {
-    tripId: tid,
-    role: "user",
-    from: userFrom,
-    ...(opts.fromDisplayName?.trim()
-      ? { fromDisplayName: opts.fromDisplayName.trim().slice(0, 120) }
-      : {}),
-    content: opts.userContent.slice(0, 8000),
-    kind: "message",
-    active: true,
-    createdAtMs: t0,
-    ...(ctxNote ? { tripContext: ctxNote } : {}),
-    ...(requestKind ? { requestKind } : {}),
-  };
-
-  const agentEntry: SharedTripThreadEntry = {
-    tripId: tid,
-    role: "assistant",
-    from: "agent",
-    content: opts.agentContent.slice(0, 8000),
-    kind: "message",
-    active: true,
-    createdAtMs: t1,
-    ...(ctxNote ? { tripContext: ctxNote } : {}),
-    ...(requestKind ? { requestKind } : {}),
-  };
-
-  const userDoc = doc(col);
-  const agentDoc = doc(col);
-  await runTransaction(db, async (tx) => {
-    tx.set(userDoc, userEntry);
-    tx.set(agentDoc, agentEntry);
+  const res = await fetch("/api/chat/shared-trip-thread-append", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      tripId: tid,
+      fromEmailLower: opts.fromEmailLower.trim().toLowerCase(),
+      ...(opts.fromDisplayName?.trim()
+        ? { fromDisplayName: opts.fromDisplayName.trim().slice(0, 120) }
+        : {}),
+      userContent: opts.userContent,
+      agentContent: opts.agentContent,
+      sentAtMs: opts.sentAtMs,
+      ...(opts.tripContextNote?.trim()
+        ? { tripContextNote: opts.tripContextNote.trim().slice(0, 500) }
+        : {}),
+      ...(opts.requestKind === "general" ||
+      opts.requestKind === "specific" ||
+      opts.requestKind === "suggestions"
+        ? { requestKind: opts.requestKind }
+        : {}),
+    }),
   });
+
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    throw new Error(data.error?.trim() || res.statusText || `HTTP ${res.status}`);
+  }
 }
 
 /** Live shared-thread subscription. Ordered by createdAtMs ascending. */
@@ -136,8 +120,10 @@ export function subscribeSharedTripThread(
             ? raw.tripContext.trim().slice(0, 500)
             : undefined;
         const requestKind =
-          raw.requestKind === "general" || raw.requestKind === "specific"
-            ? (raw.requestKind as "general" | "specific")
+          raw.requestKind === "general" ||
+          raw.requestKind === "specific" ||
+          raw.requestKind === "suggestions"
+            ? (raw.requestKind as "general" | "specific" | "suggestions")
             : undefined;
         const evolveCountRaw = raw.evolveCount;
         const evolveCount =
