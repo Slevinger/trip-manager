@@ -70,9 +70,9 @@ function partitionMemoryNotes(msgs: TripChatMessage[]): { notes: string; lines: 
   return { notes: notes.join("\n\n---\n\n"), lines };
 }
 
-const FAB_SIZE = 52;
+const FAB_SIZE = 64;
 const PANEL_W = 360;
-const PANEL_MAX_H = 480;
+const PANEL_MAX_H = 640;
 const EDGE = 12;
 /** Magic send — runs memory compression instead of calling the trip assistant. */
 const EVOLVE_COMMAND = "#evolve";
@@ -113,6 +113,10 @@ export function TripAssistantChatDock(props: {
   isTripOwner?: boolean;
   /** When true, append each exchange to Firestore after a successful reply. */
   canPersistMemory: boolean;
+  /** When this number changes, open the panel (used by hamburger). */
+  openRequest?: number;
+  /** Called when user drags the FAB into the hide target. */
+  onRequestHide?: () => void;
   /**
    * Optional handler invoked when the assistant returns structured trip
    * recommendations (parsed from a fenced `trip-suggestions` JSON block).
@@ -168,6 +172,9 @@ export function TripAssistantChatDock(props: {
   const [evolving, setEvolving] = useState(false);
   const [forgetting, setForgetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const lastUserTurnRef = useRef<{ content: string; key: string } | null>(null);
   /** Set from first successful `/api/chat/trip-assistant` response. */
   const [llmBackend, setLlmBackend] = useState<"openai" | "anthropic" | null>(null);
   const [activeModel, setActiveModel] = useState<string | null>(null);
@@ -175,6 +182,19 @@ export function TripAssistantChatDock(props: {
   /** Suppress the synthetic `click` after pointer-based open / drag so the panel does not flash closed. */
   const swallowFabClickRef = useRef(false);
   const posRef = useRef({ right: 24, bottom: 24 });
+  const prevOpenRequestRef = useRef<number | null>(null);
+  const hideZoneRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const [showHideTarget, setShowHideTarget] = useState(false);
+  const [hideTargetHot, setHideTargetHot] = useState(false);
+  const hideTargetHotRef = useRef(false);
+
+  useEffect(() => {
+    if (props.openRequest == null) return;
+    if (prevOpenRequestRef.current === props.openRequest) return;
+    prevOpenRequestRef.current = props.openRequest;
+    setOpen(true);
+  }, [props.openRequest]);
 
   useEffect(() => {
     posRef.current = { right: rightPx, bottom: bottomPx };
@@ -258,6 +278,7 @@ export function TripAssistantChatDock(props: {
     const onMove = (e: PointerEvent) => {
       const s = dragSessionRef.current;
       if (!s) return;
+      dragPointerRef.current = { x: e.clientX, y: e.clientY };
       const dx = e.clientX - s.startX;
       const dy = e.clientY - s.startY;
       if (s.kind === "header") {
@@ -276,17 +297,31 @@ export function TripAssistantChatDock(props: {
           startRight: p.right,
           startBottom: p.bottom,
         };
+        setShowHideTarget(true);
         return;
       }
       applyDrag(s.startRight, s.startBottom, dx, dy);
+      const zone = hideZoneRef.current;
+      const pt = dragPointerRef.current;
+      if (zone && pt) {
+        const r = zone.getBoundingClientRect();
+        const hot = pt.x >= r.left && pt.x <= r.right && pt.y >= r.top && pt.y <= r.bottom;
+        hideTargetHotRef.current = hot;
+        setHideTargetHot(hot);
+      }
     };
 
     const onUp = () => {
       const s = dragSessionRef.current;
       dragSessionRef.current = null;
+      setShowHideTarget(false);
+      const dropHot = hideTargetHotRef.current;
+      hideTargetHotRef.current = false;
+      setHideTargetHot(false);
       if (s?.kind === "fab") {
         if (s.dragging) {
           swallowFabClickRef.current = true;
+          if (dropHot) props.onRequestHide?.();
         } else if (s.wasClosed) {
           setOpen(true);
           swallowFabClickRef.current = true;
@@ -392,10 +427,16 @@ export function TripAssistantChatDock(props: {
 
     setInput("");
     setError(null);
-    const nextLines: Line[] = [...lines, { role: "user", content: text }];
+    const userLine: Line = { role: "user", content: text };
+    const nextLines: Line[] = [...lines, userLine];
     setLines(nextLines);
     setLoading(true);
     const contextAtMs = Date.now();
+    const userTurnKey = `${contextAtMs}-user`;
+    lastUserTurnRef.current = { content: text, key: userTurnKey };
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       // Decide whether to attach `__global__` cross-trip memory to this LLM call.
       // First-class signal: tiny LLM router. Falls back to the regex heuristic on failure.
@@ -405,6 +446,7 @@ export function TripAssistantChatDock(props: {
         const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             latestUserText: text,
             tripTitle: props.trip.title ?? "",
@@ -442,6 +484,7 @@ export function TripAssistantChatDock(props: {
       const res = await fetch("/api/chat/trip-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           trip: props.trip,
           preferences: props.profilePreferences ?? undefined,
@@ -552,11 +595,15 @@ export function TripAssistantChatDock(props: {
         })();
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
       const msg = err instanceof Error ? err.message : t("assistant.genericError");
       setError(msg);
       setLines((prev) => prev.slice(0, -1));
       setInput(text);
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
     }
   }, [
@@ -575,6 +622,23 @@ export function TripAssistantChatDock(props: {
     props.userEmail,
     t,
   ]);
+
+  const stopAndEditLast = useCallback(() => {
+    if (!loading) return;
+    const last = lastUserTurnRef.current;
+    if (!last) return;
+    abortRef.current?.abort();
+    setError(null);
+    setLoading(false);
+    setLines((prev) => {
+      if (prev.length === 0) return prev;
+      const tail = prev[prev.length - 1];
+      if (tail.role !== "user") return prev;
+      if (tail.content !== last.content) return prev;
+      return prev.slice(0, -1);
+    });
+    setInput(last.content);
+  }, [loading]);
 
   /** FAB stays anchored where the user dragged it (right/bottom). The panel is
    * positioned independently in viewport pixel coordinates so it always fits at
@@ -610,6 +674,8 @@ export function TripAssistantChatDock(props: {
     bottom: bottomPx,
     zIndex: 51,
     touchAction: "none",
+    width: FAB_SIZE,
+    height: FAB_SIZE,
   };
   const panelStyle: CSSProperties = {
     position: "fixed",
@@ -622,6 +688,20 @@ export function TripAssistantChatDock(props: {
 
   return (
     <>
+      {showHideTarget ? (
+        <div
+          ref={hideZoneRef}
+          className={
+            "fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 rounded-full border px-5 py-3 text-sm font-semibold shadow-lg transition " +
+            (hideTargetHot
+              ? "border-red-300 bg-red-600 text-white dark:border-red-400"
+              : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200")
+          }
+          style={{ touchAction: "none" }}
+        >
+          ✕ Hide
+        </div>
+      ) : null}
       {open ? (
         <section
           className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
@@ -674,9 +754,30 @@ export function TripAssistantChatDock(props: {
                       : "mr-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-100"
                   }
                 >
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    {l.role === "user" ? t("assistant.you") : t("assistant.assistant")}
-                  </p>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      {l.role === "user" ? t("assistant.you") : t("assistant.assistant")}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            await navigator.clipboard.writeText(l.content);
+                            const key = `${i}-${l.role}`;
+                            setCopiedKey(key);
+                            window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 900);
+                          } catch {
+                            /* ignore */
+                          }
+                        })();
+                      }}
+                      className="rounded-md px-2 py-0.5 text-[10px] font-semibold text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-100"
+                      aria-label="Copy message"
+                    >
+                      {copiedKey === `${i}-${l.role}` ? "Copied" : "Copy"}
+                    </button>
+                  </div>
                   <TripAssistantMessageBody content={l.content} variant={l.role === "user" ? "user" : "assistant"} />
                 </div>
               ))}
@@ -715,35 +816,17 @@ export function TripAssistantChatDock(props: {
                 >
                   {t("assistant.send")}
                 </button>
+                {loading ? (
+                  <button
+                    type="button"
+                    onClick={stopAndEditLast}
+                    className="shrink-0 self-end rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    Stop
+                  </button>
+                ) : null}
               </div>
-              {props.canPersistMemory && props.userEmail?.trim() && persistedTripMessageCount >= 1 && props.isTripOwner ? (
-                <div className="mb-1 flex gap-2">
-                  <button
-                    type="button"
-                    title={t("assistant.evolveTitle")}
-                    disabled={
-                      loading ||
-                      evolving ||
-                      forgetting ||
-                      persistedTripMessageCount < 2 ||
-                      evolveRedundantBlocked
-                    }
-                    onClick={() => void handleEvolve()}
-                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800/80 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                  >
-                    {evolving ? t("assistant.evolving") : t("assistant.evolve")}
-                  </button>
-                  <button
-                    type="button"
-                    title={t("assistant.forgetTitle")}
-                    disabled={loading || evolving || forgetting}
-                    onClick={() => void handleForgetChat()}
-                    className="min-w-0 flex-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-40 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
-                  >
-                    {forgetting ? t("assistant.forgetting") : t("assistant.forget")}
-                  </button>
-                </div>
-              ) : null}
+              {/** Intentionally hidden: evolve/forget controls */} 
               {!props.canPersistMemory ? (
                 <p className="mt-1 px-1 text-[10px] text-zinc-400 dark:text-zinc-500">{t("assistant.memoryHint")}</p>
               ) : null}
@@ -770,7 +853,7 @@ export function TripAssistantChatDock(props: {
         }}
         style={fabStyle}
         className={
-          "flex h-[52px] w-[52px] shrink-0 cursor-grab items-center justify-center rounded-full border border-violet-300 bg-gradient-to-br from-violet-500 to-violet-700 text-xl text-white shadow-lg ring-2 ring-white/30 transition-opacity duration-300 ease-out hover:opacity-100 focus-visible:opacity-100 active:opacity-100 active:cursor-grabbing dark:border-violet-400 dark:ring-zinc-900/40 " +
+          "flex shrink-0 cursor-grab items-center justify-center rounded-full border border-violet-300 bg-gradient-to-br from-violet-500 to-violet-700 text-[22px] text-white shadow-lg ring-2 ring-white/30 transition-opacity duration-300 ease-out hover:opacity-100 focus-visible:opacity-100 active:opacity-100 active:cursor-grabbing dark:border-violet-400 dark:ring-zinc-900/40 " +
           (!open && idle ? "opacity-60" : "opacity-100")
         }
       >

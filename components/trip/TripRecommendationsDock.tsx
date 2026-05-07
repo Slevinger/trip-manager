@@ -22,7 +22,7 @@ import type {
   TripRecommendationOption,
 } from "@/lib/types/trip";
 
-const FAB_SIZE = 52;
+const FAB_SIZE = 64;
 const PANEL_W = 360;
 const PANEL_MAX_H = 560;
 const EDGE = 12;
@@ -359,7 +359,7 @@ function BellIcon({ unseen, total }: { unseen: number; total: number }) {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="h-6 w-6"
+        className="h-7 w-7"
         aria-hidden
       >
         <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
@@ -385,19 +385,32 @@ export function TripRecommendationsDock({
   trip,
   canModify,
   onPersist,
+  openRequest,
+  onRequestHide,
 }: {
   trip: Trip;
   /** False for read-only viewers (or when the persist callback isn't wired). */
   canModify: boolean;
   onPersist: (next: Trip) => Promise<void>;
+  openRequest?: number;
+  onRequestHide?: () => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [leftPx, setLeftPx] = useState(24);
+  const [leftPx, setLeftPx] = useState(() => {
+    if (typeof window === "undefined") return 24;
+    return Math.max(EDGE, Math.round(window.innerWidth / 2 - FAB_SIZE / 2));
+  });
   const [topPx, setTopPx] = useState(24);
   const dragSessionRef = useRef<RecDragSession | null>(null);
   /** Suppress the synthetic `click` after pointer-based open / drag so the panel does not flash closed. */
   const swallowFabClickRef = useRef(false);
+  const prevOpenRequestRef = useRef<number | null>(null);
+  const hideZoneRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const [showHideTarget, setShowHideTarget] = useState(false);
+  const [hideTargetHot, setHideTargetHot] = useState(false);
+  const hideTargetHotRef = useRef(false);
   const posRef = useRef({ left: 24, top: 24 });
   const [viewport, setViewport] = useState<{ w: number; h: number }>(() => ({
     w: typeof window !== "undefined" ? window.innerWidth : 1024,
@@ -410,6 +423,13 @@ export function TripRecommendationsDock({
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
+
+  useEffect(() => {
+    if (openRequest == null) return;
+    if (prevOpenRequestRef.current === openRequest) return;
+    prevOpenRequestRef.current = openRequest;
+    setOpen(true);
+  }, [openRequest]);
   const [activeIndex, setActiveIndex] = useState(0);
   /** Per-recommendation chosen option id; defaults to first option. */
   const [selectedOptionByRec, setSelectedOptionByRec] = useState<Record<string, string>>({});
@@ -463,6 +483,7 @@ export function TripRecommendationsDock({
     const onMove = (e: PointerEvent) => {
       const s = dragSessionRef.current;
       if (!s) return;
+      dragPointerRef.current = { x: e.clientX, y: e.clientY };
       const dx = e.clientX - s.startX;
       const dy = e.clientY - s.startY;
       if (s.kind === "header") {
@@ -481,23 +502,35 @@ export function TripRecommendationsDock({
           startLeft: p.left,
           startTop: p.top,
         };
+        setShowHideTarget(true);
         return;
       }
       applyDrag(s.startLeft, s.startTop, dx, dy);
+      const zone = hideZoneRef.current;
+      const pt = dragPointerRef.current;
+      if (zone && pt) {
+        const r = zone.getBoundingClientRect();
+        const hot = pt.x >= r.left && pt.x <= r.right && pt.y >= r.top && pt.y <= r.bottom;
+        hideTargetHotRef.current = hot;
+        setHideTargetHot(hot);
+      }
     };
 
     const onUp = () => {
       const s = dragSessionRef.current;
       dragSessionRef.current = null;
+      setShowHideTarget(false);
+      const dropHot = hideTargetHotRef.current;
+      hideTargetHotRef.current = false;
+      setHideTargetHot(false);
       if (s?.kind === "fab") {
         if (s.dragging) {
           swallowFabClickRef.current = true;
+          if (dropHot) onRequestHide?.();
         } else if (s.wasClosed) {
           /** Tap = open (only when there are recommendations to show). */
           swallowFabClickRef.current = true;
-          if ((tripRef.current.recommendations ?? []).length > 0) {
-            setOpen(true);
-          }
+          setOpen(true);
         }
       }
     };
@@ -659,6 +692,8 @@ export function TripRecommendationsDock({
     top: topPx,
     zIndex: 51,
     touchAction: "none",
+    width: FAB_SIZE,
+    height: FAB_SIZE,
   };
   const panelStyle: CSSProperties = {
     position: "fixed",
@@ -671,6 +706,20 @@ export function TripRecommendationsDock({
 
   return (
     <>
+      {showHideTarget ? (
+        <div
+          ref={hideZoneRef}
+          className={
+            "fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 rounded-full border px-5 py-3 text-sm font-semibold shadow-lg transition " +
+            (hideTargetHot
+              ? "border-red-300 bg-red-600 text-white dark:border-red-400"
+              : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200")
+          }
+          style={{ touchAction: "none" }}
+        >
+          ✕ Hide
+        </div>
+      ) : null}
       <button
         type="button"
         aria-label={
@@ -697,7 +746,7 @@ export function TripRecommendationsDock({
         }}
         style={fabStyle}
         className={
-          "flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border shadow-lg ring-2 transition-all duration-300 ease-out focus-visible:opacity-100 active:opacity-100 cursor-grab active:cursor-grabbing " +
+          "flex shrink-0 items-center justify-center rounded-full border shadow-lg ring-2 transition-all duration-300 ease-out focus-visible:opacity-100 active:opacity-100 cursor-grab active:cursor-grabbing " +
           (unseen > 0
             ? "opacity-100 border-amber-300 bg-gradient-to-br from-amber-400 to-amber-600 text-white ring-white/30 hover:from-amber-500 hover:to-amber-700 dark:border-amber-400 dark:ring-zinc-900/40"
             : "opacity-50 border-zinc-200 bg-white text-zinc-500 ring-transparent hover:opacity-100 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800")
@@ -800,6 +849,26 @@ export function TripRecommendationsDock({
                 </div>
               </div>
             </div>
+        </section>
+      ) : open ? (
+        <section
+          className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          style={panelStyle}
+        >
+          <header className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/80">
+            <div className="min-w-0 select-none">
+              <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">{t("recs.title")}</p>
+              <p className="truncate text-[11px] text-zinc-500">{t("recs.openPanelEmpty")}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            >
+              {t("common.close")}
+            </button>
+          </header>
+          <div className="px-4 py-4 text-sm text-zinc-600 dark:text-zinc-300">{t("recs.openPanelEmpty")}</div>
         </section>
       ) : null}
     </>

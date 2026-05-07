@@ -29,7 +29,7 @@ import { getTrip, putTrip } from "@/lib/tripLocalStore";
 import { addTripRecommendation } from "@/lib/tripRecommendations";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
-import type { Destination, Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
+import type { Destination, Traveler, Trip, TripRecommendation, TripViewer, UserPreferences } from "@/lib/types/trip";
 import { messagesForTrip } from "@/lib/tripChatMessages";
 import type {
   ImmutableMemoryQueueEntry,
@@ -42,6 +42,14 @@ import {
   subscribeUser,
 } from "@/lib/usersFirestore";
 import { subscribeSharedTripThread } from "@/lib/sharedTripThread";
+import { useAppDispatch, useAppSelector } from "@/lib/store/hooks";
+import {
+  redo as redoAction,
+  setActiveTripId,
+  setManageDraft as setManageDraftAction,
+  setTrip as setTripAction,
+  undo as undoAction,
+} from "@/lib/store/tripSlice";
 
 function toLocalDateTimeInputValue(epochMs: number): string {
   const d = new Date(epochMs);
@@ -70,7 +78,19 @@ const CreateDestinationDialog = dynamic(
   { ssr: false }
 );
 
-const TripAssistantChatDock = dynamic(
+const TripAssistantChatDock = dynamic<{
+  trip: Trip;
+  profilePreferences: UserPreferences | null;
+  tripChatMessages: TripChatMessage[];
+  globalChatMessages?: TripChatMessage[];
+  userEmail: string | null;
+  userDisplayName?: string | null;
+  isTripOwner?: boolean;
+  canPersistMemory: boolean;
+  onAddRecommendations?: (trip: Trip, recommendations: TripRecommendation[]) => Promise<void>;
+  openRequest?: number;
+  onRequestHide?: () => void;
+}>(
   () =>
     import("@/components/trip/TripAssistantChatDock").then((m) => ({
       default: m.TripAssistantChatDock,
@@ -78,7 +98,13 @@ const TripAssistantChatDock = dynamic(
   { ssr: false }
 );
 
-const TripRecommendationsDock = dynamic(
+const TripRecommendationsDock = dynamic<{
+  trip: Trip;
+  canModify: boolean;
+  onPersist: (next: Trip) => Promise<void>;
+  openRequest?: number;
+  onRequestHide?: () => void;
+}>(
   () =>
     import("@/components/trip/TripRecommendationsDock").then((m) => ({
       default: m.TripRecommendationsDock,
@@ -95,13 +121,14 @@ const TripGmailDocumentsPanel = dynamic(
 );
 
 export function TripDetail({ tripId }: { tripId: string }) {
+  const dispatch = useAppDispatch();
   const [tab, setTab] = useState<"view" | "manage">("view");
   const [viewSubTab, setViewSubTab] = useState<"itinerary" | "places">("itinerary");
   const [loadState, setLoadState] = useState<
     "loading" | "ok" | "missing" | "needs_auth" | "needs_google" | "access_denied"
   >("loading");
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [manageDraft, setManageDraft] = useState<Trip | null>(null);
+  const trip = useAppSelector((s) => s.trip.trip);
+  const manageDraft = useAppSelector((s) => s.trip.draft);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [canManageFirestore, setCanManageFirestore] = useState(false);
@@ -137,9 +164,37 @@ export function TripDetail({ tripId }: { tripId: string }) {
   /** Lets travelers/viewers register `participantUids` once per trip+user for home-list queries. */
   const participantUidSelfHealKeyRef = useRef<string>("");
 
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const useFirestore = Boolean(getDb() && getMissingFirebasePublicEnv().length === 0);
   const liveLocationUserKey = (user?.email ?? "").trim().toLowerCase();
+
+  const canUndo = useAppSelector((s) => s.trip.past.length > 0);
+  const canRedo = useAppSelector((s) => s.trip.future.length > 0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [chatDockVisible, setChatDockVisible] = useState(true);
+  const [recsDockVisible, setRecsDockVisible] = useState(true);
+  const [chatOpenRequest, setChatOpenRequest] = useState<number | undefined>(undefined);
+  const [recsOpenRequest, setRecsOpenRequest] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    dispatch(setActiveTripId(tripId));
+  }, [dispatch, tripId]);
+
+  const setTripState = (next: Trip | null, opts?: { skipHistory?: boolean }) => {
+    if (opts?.skipHistory) {
+      dispatch({ type: setTripAction.type, payload: next, meta: { history: "skip" } });
+      return;
+    }
+    dispatch(setTripAction(next));
+  };
+
+  const setManageDraftState = (next: Trip | null, opts?: { skipHistory?: boolean }) => {
+    if (opts?.skipHistory) {
+      dispatch({ type: setManageDraftAction.type, payload: next, meta: { history: "skip" } });
+      return;
+    }
+    dispatch(setManageDraftAction(next));
+  };
 
   const saveTargetLabel = useMemo(
     () => (useFirestore && user ? t("trip.saveTargetFirestore") : t("trip.saveTargetLocal")),
@@ -229,11 +284,11 @@ export function TripDetail({ tripId }: { tripId: string }) {
     if (!db || missing.length > 0) {
       const t = getTrip(tripId);
       if (!t) {
-        setTrip(null);
+        setTripState(null, { skipHistory: true });
         setLoadState("missing");
         return;
       }
-      setTrip(t);
+      setTripState(t, { skipHistory: true });
       setLoadState("ok");
       return;
     }
@@ -248,14 +303,14 @@ export function TripDetail({ tripId }: { tripId: string }) {
         unsubTrip = undefined;
         if (cancelled) return;
         if (!u) {
-          setTrip(null);
+          setTripState(null, { skipHistory: true });
           setLoadState("needs_auth");
           return;
         }
         const google = await sessionIsGoogleSignIn(u);
         if (cancelled) return;
         if (!google) {
-          setTrip(null);
+          setTripState(null, { skipHistory: true });
           setLoadState("needs_google");
           return;
         }
@@ -265,13 +320,13 @@ export function TripDetail({ tripId }: { tripId: string }) {
           u,
           (t, access) => {
             if (!t) {
-              setTrip(null);
+              setTripState(null, { skipHistory: true });
               setCanManageFirestore(false);
               setIsTripOwner(false);
               setLoadState("missing");
               return;
             }
-            setTrip(t);
+            setTripState(t, { skipHistory: true });
             setCanManageFirestore(access?.canManageFirestore ?? false);
             setIsTripOwner(access?.isOwner ?? false);
             setLoadState("ok");
@@ -282,7 +337,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
                 ? String((err as { code?: string }).code)
                 : "";
             if (code.includes("permission-denied")) {
-              setTrip(null);
+              setTripState(null, { skipHistory: true });
               setCanManageFirestore(false);
               setIsTripOwner(false);
               setLoadState("access_denied");
@@ -319,15 +374,17 @@ export function TripDetail({ tripId }: { tripId: string }) {
 
   useEffect(() => {
     if (tab === "view") {
-      setManageDraft(null);
+      setManageDraftState(null, { skipHistory: true });
       return;
     }
-    setManageDraft((d) => {
-      if (!trip) return null;
-      if (!d || d.id !== trip.id) return { ...trip };
-      return d;
-    });
-  }, [tab, trip]);
+    if (!trip) {
+      setManageDraftState(null, { skipHistory: true });
+      return;
+    }
+    if (!manageDraft || manageDraft.id !== trip.id) {
+      setManageDraftState({ ...trip }, { skipHistory: true });
+    }
+  }, [tab, trip, manageDraft]);
 
   const sortedSteps = useMemo(() => {
     if (!trip) return [];
@@ -352,7 +409,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
 
   const destinationsMissingMapCoordinates = useMemo(() => {
     if (!trip?.destinations?.length) return [];
-    return trip.destinations.filter((d) => !destinationHasMapCoordinates(d));
+    return trip.destinations.filter((d: Destination) => !destinationHasMapCoordinates(d));
   }, [trip]);
 
   const canEditTripDestinations = !useFirestore || (Boolean(user) && canManageFirestore);
@@ -366,10 +423,12 @@ export function TripDetail({ tripId }: { tripId: string }) {
   const liveLocationDisplayName = useMemo(() => {
     const fallback = t("trip.liveLocationDefaultName");
     if (!trip || !liveLocationUserKey) return fallback;
-    const traveler = trip.travelers.find((row) => (row.email ?? "").trim().toLowerCase() === liveLocationUserKey);
+    const traveler = trip.travelers.find(
+      (row: Traveler) => (row.email ?? "").trim().toLowerCase() === liveLocationUserKey
+    );
     if (traveler?.name?.trim()) return traveler.name.trim();
     const viewer = (trip.viewers ?? []).find(
-      (row) => (row.email ?? "").trim().toLowerCase() === liveLocationUserKey
+      (row: TripViewer) => (row.email ?? "").trim().toLowerCase() === liveLocationUserKey
     );
     if (viewer?.name?.trim()) return viewer.name.trim();
     return fallback;
@@ -454,14 +513,14 @@ export function TripDetail({ tripId }: { tripId: string }) {
       const db = getDb();
       if (useFirestore && db && user) {
         await saveCanonicalTrip(db, normalized, user);
-        setTrip(normalized);
-        setManageDraft(normalized);
+        setTripState(normalized, { skipHistory: true });
+        setManageDraftState(normalized, { skipHistory: true });
         return;
       }
       putTrip(normalized);
       const saved = getTrip(tripId);
-      setTrip(saved);
-      setManageDraft(saved ?? normalized);
+      setTripState(saved, { skipHistory: true });
+      setManageDraftState(saved ?? normalized, { skipHistory: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setSaveError(msg);
@@ -483,7 +542,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
     if (!trip) return;
     const next: Trip = {
       ...trip,
-      destinations: trip.destinations.filter((d) => d.id !== id),
+      destinations: trip.destinations.filter((d: Destination) => d.id !== id),
       updatedAt: new Date().toISOString(),
     };
     await persistTrip(normalizeTripForPersist(next));
@@ -520,16 +579,16 @@ export function TripDetail({ tripId }: { tripId: string }) {
       const db = getDb();
       if (useFirestore && db && user) {
         await saveCanonicalTrip(db, normalized, user);
-        setTrip(normalized);
-        setManageDraft(normalized);
+        setTripState(normalized, { skipHistory: true });
+        setManageDraftState(normalized, { skipHistory: true });
         setAdvancedJson(JSON.stringify(normalized, null, 2));
         return;
       }
       putTrip(normalized);
       const saved = getTrip(tripId);
-      setTrip(saved);
+      setTripState(saved, { skipHistory: true });
       const next = saved ?? normalized;
-      setManageDraft(next);
+      setManageDraftState(next, { skipHistory: true });
       setAdvancedJson(JSON.stringify(next, null, 2));
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Invalid JSON");
@@ -659,11 +718,224 @@ export function TripDetail({ tripId }: { tripId: string }) {
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/" className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
-          {t("trip.allTrips")}
-        </Link>
-        <div className="flex items-center gap-2">
-          <LanguageSwitcher />
+        {locale === "he" ? (
+          <>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Menu"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white/70 text-zinc-700 shadow-sm hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    ☰
+                  </span>
+                </button>
+                {menuOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                  >
+                    {user ? (
+                      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-50">Account</p>
+                          <p className="truncate text-[10px] text-zinc-500">{(user.email ?? user.uid).trim()}</p>
+                        </div>
+                        <UserMenu user={user} />
+                      </div>
+                    ) : null}
+                    <div className="border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        {t("common.language")}
+                      </p>
+                      <div className="mt-2">
+                        <LanguageSwitcher />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!showTripAssistant || chatDockVisible}
+                      onClick={() => {
+                        setChatDockVisible(true);
+                        setChatOpenRequest(Date.now());
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                    >
+                      <span>Chat with agent</span>
+                      <span className="text-xs text-zinc-400">💬</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={recsDockVisible}
+                      onClick={() => {
+                        setRecsDockVisible(true);
+                        setRecsOpenRequest(Date.now());
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                    >
+                      <span>Agent suggestions</span>
+                      <span className="text-xs text-zinc-400">🔔</span>
+                    </button>
+                    <div className="border-b border-zinc-100 dark:border-zinc-800" />
+                    {canUndo ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          dispatch(undoAction());
+                          setMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                      >
+                        <span>Undo</span>
+                        <span className="text-xs text-zinc-400">⌘Z</span>
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!canRedo}
+                      onClick={() => {
+                        dispatch(redoAction());
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                    >
+                      <span>Redo</span>
+                      <span className="text-xs text-zinc-400">⇧⌘Z</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
+                <button
+                  type="button"
+                  onClick={() => setTab("view")}
+                  className={
+                    tab === "view"
+                      ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
+                      : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
+                  }
+                >
+                  {t("trip.view")}
+                </button>
+                {useFirestore && !canManageFirestore ? null : (
+                  <button
+                    type="button"
+                    onClick={() => setTab("manage")}
+                    className={
+                      tab === "manage"
+                        ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
+                        : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
+                    }
+                  >
+                    {t("trip.manage")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <Link
+              href="/"
+              className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              {t("trip.allTrips")}
+            </Link>
+          </>
+        ) : (
+          <>
+            <Link
+              href="/"
+              className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              {t("trip.allTrips")}
+            </Link>
+            <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white/70 text-zinc-700 shadow-sm hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ☰
+              </span>
+            </button>
+            {menuOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                {user ? (
+                  <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-50">Account</p>
+                      <p className="truncate text-[10px] text-zinc-500">{(user.email ?? user.uid).trim()}</p>
+                    </div>
+                    <UserMenu user={user} />
+                  </div>
+                ) : null}
+                <div className="border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    {t("common.language")}
+                  </p>
+                  <div className="mt-2">
+                    <LanguageSwitcher />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!showTripAssistant || chatDockVisible}
+                  onClick={() => {
+                    setChatDockVisible(true);
+                    setChatOpenRequest(Date.now());
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                >
+                  <span>Chat with agent</span>
+                  <span className="text-xs text-zinc-400">💬</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={recsDockVisible}
+                  onClick={() => {
+                    setRecsDockVisible(true);
+                    setRecsOpenRequest(Date.now());
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                >
+                  <span>Agent suggestions</span>
+                  <span className="text-xs text-zinc-400">🔔</span>
+                </button>
+                <div className="border-b border-zinc-100 dark:border-zinc-800" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!canRedo}
+                  onClick={() => {
+                    dispatch(redoAction());
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+                >
+                  <span>Redo</span>
+                  <span className="text-xs text-zinc-400">⇧⌘Z</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
           <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
             <button
               type="button"
@@ -690,8 +962,9 @@ export function TripDetail({ tripId }: { tripId: string }) {
               </button>
             )}
           </div>
-          {user ? <UserMenu user={user} /> : null}
         </div>
+          </>
+        )}
       </div>
 
       <h1 className="mt-6 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -790,7 +1063,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
                 <span className="text-amber-900/80 dark:text-amber-100/70">{t("trip.destMissingSuffix")}</span>
               </p>
               <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                {destinationsMissingMapCoordinates.map((d) => {
+                {destinationsMissingMapCoordinates.map((d: Destination) => {
                   const label = (d.title || d.location || t("common.untitled")).trim() || t("common.untitled");
                   return (
                     <li key={d.id}>
@@ -830,7 +1103,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
             onDestinationDblClick={
               canEditTripDestinations
                 ? (destinationId) => {
-                    const d = trip.destinations.find((x) => x.id === destinationId);
+                    const d = trip.destinations.find((x: Destination) => x.id === destinationId);
                     if (!d) return;
                     setDestinationLocationEditSnapshot({ ...d });
                     setDestinationLocationDialogOpen(true);
@@ -909,7 +1182,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
         <div className="mt-8 pb-40">
           <ManageTripWorkspace
             trip={manageDraft}
-            onTripChange={setManageDraft}
+            onTripChange={setManageDraftState}
             persistTrip={persistTrip}
             canUploadTripFiles={canUploadTripFiles}
             uploadDisabledHint={uploadDisabledHint}
@@ -958,7 +1231,7 @@ export function TripDetail({ tripId }: { tripId: string }) {
         <p className="mt-8 text-sm text-zinc-500">{t("trip.preparingEditor")}</p>
       )}
 
-      {showTripAssistant ? (
+      {showTripAssistant && chatDockVisible ? (
         <TripAssistantChatDock
           trip={dockTrip ?? trip}
           profilePreferences={profilePreferences}
@@ -969,14 +1242,20 @@ export function TripDetail({ tripId }: { tripId: string }) {
           isTripOwner={isTripOwner}
           canPersistMemory={Boolean(useFirestore && user?.email?.trim())}
           onAddRecommendations={handleAddAssistantRecommendations}
+          openRequest={chatOpenRequest}
+          onRequestHide={() => setChatDockVisible(false)}
         />
       ) : null}
 
-      <TripRecommendationsDock
-        trip={dockTrip ?? trip}
-        canModify={!useFirestore || canManageFirestore}
-        onPersist={persistTrip}
-      />
+      {recsDockVisible ? (
+        <TripRecommendationsDock
+          trip={dockTrip ?? trip}
+          canModify={!useFirestore || canManageFirestore}
+          onPersist={persistTrip}
+          openRequest={recsOpenRequest}
+          onRequestHide={() => setRecsDockVisible(false)}
+        />
+      ) : null}
     </main>
   );
 }
