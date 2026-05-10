@@ -1,42 +1,46 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState } from "react";
-import { CircleMarker, MapContainer, TileLayer, useMapEvents } from "react-leaflet";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import Map, {
+  Marker,
+  NavigationControl,
+  type MapLayerMouseEvent,
+  type MapRef,
+} from "react-map-gl/maplibre";
+import "maplibre-gl/dist/maplibre-gl.css";
+import type maplibregl from "maplibre-gl";
 import { PlaceSearchInput } from "@/components/PlaceSearchInput";
 import { useI18n } from "@/lib/i18n/context";
 import type { Destination } from "@/lib/types/trip";
 import { newId } from "@/lib/canonicalIds";
 import type { PlaceSearchHit, PlaceSearchPickPayload } from "@/lib/places/types";
 
-import "leaflet/dist/leaflet.css";
-
-function MapClickSetPin({
-  position,
-  onPick,
-}: {
-  position: [number, number] | null;
-  onPick: (lat: number, lng: number) => void;
-}) {
-  useMapEvents({
-    click(e) {
-      onPick(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return position ? (
-    <CircleMarker
-      center={position}
-      radius={9}
-      pathOptions={{
-        color: "#5b21b6",
-        weight: 2,
-        fillColor: "#a78bfa",
-        fillOpacity: 0.9,
-      }}
-    />
-  ) : null;
-}
-
 const DEFAULT_CENTER: [number, number] = [20, 0];
+
+const FALLBACK_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    "osm-raster": {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: "osm-raster-layer",
+      type: "raster",
+      source: "osm-raster",
+    },
+  ],
+} as unknown as maplibregl.StyleSpecification;
+
+const MAP_STYLE_URL = process.env.NEXT_PUBLIC_MAPTILER_KEY
+  ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${process.env.NEXT_PUBLIC_MAPTILER_KEY}`
+  : null;
 
 async function fetchFirstPlaceHit(trimmed: string, lang: string): Promise<PlaceSearchHit | undefined> {
   if (trimmed.length < 2) return undefined;
@@ -83,17 +87,27 @@ export function CreateDestinationDialog({
   const [mapKey, setMapKey] = useState(0);
   const [geocodeBusy, setGeocodeBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const mapRef = useRef<MapRef>(null);
 
-  const applyHitToMap = useCallback((first: PlaceSearchHit) => {
-    const c: [number, number] = [first.lat, first.lng];
-    setMapCenter(c);
-    setMapZoom(12);
-    setPin(c);
-    setMapKey((k) => k + 1);
-    if (first.description?.trim()) {
-      setDescription((d) => d.trim() || first.description!.trim());
-    }
+  const flyTo = useCallback((center: [number, number], zoom: number) => {
+    const m = mapRef.current;
+    if (!m) return;
+    m.flyTo({ center: [center[1], center[0]], zoom, duration: 600 });
   }, []);
+
+  const applyHitToMap = useCallback(
+    (first: PlaceSearchHit) => {
+      const c: [number, number] = [first.lat, first.lng];
+      setMapCenter(c);
+      setMapZoom(12);
+      setPin(c);
+      flyTo(c, 12);
+      if (first.description?.trim()) {
+        setDescription((d) => d.trim() || first.description!.trim());
+      }
+    },
+    [flyTo]
+  );
 
   const bootstrapNewDestination = useCallback(
     async (q: string) => {
@@ -195,8 +209,9 @@ export function CreateDestinationDialog({
       const pos: [number, number] = [p.lat, p.lng];
       setPin(pos);
       setMapCenter(pos);
-      setMapZoom((z) => Math.max(z, 14));
-      setMapKey((k) => k + 1);
+      const z = Math.max(mapZoom, 14);
+      setMapZoom(z);
+      flyTo(pos, z);
     }
     if (p.title?.trim()) setTitle((t) => (t.trim() ? t : p.title!.trim()));
     if (p.description?.trim()) setDescription((d) => (d.trim() ? d : p.description!.trim()));
@@ -257,19 +272,31 @@ export function CreateDestinationDialog({
           </p>
 
           <div className="relative z-0 h-[220px] w-full overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
-            <MapContainer
+            <Map
               key={mapKey}
-              center={mapCenter}
-              zoom={mapZoom}
-              className="h-full w-full"
-              scrollWheelZoom
+              ref={mapRef}
+              initialViewState={{
+                latitude: mapCenter[0],
+                longitude: mapCenter[1],
+                zoom: mapZoom,
+              }}
+              mapStyle={MAP_STYLE_URL ?? (FALLBACK_STYLE as never)}
+              attributionControl={{ compact: true }}
+              onClick={(e: MapLayerMouseEvent) => {
+                setPin([e.lngLat.lat, e.lngLat.lng]);
+              }}
+              style={{ width: "100%", height: "100%" }}
             >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              <MapClickSetPin position={pin} onPick={(lat, lng) => setPin([lat, lng])} />
-            </MapContainer>
+              <NavigationControl position="top-right" />
+              {pin ? (
+                <Marker latitude={pin[0]} longitude={pin[1]} anchor="center">
+                  <span
+                    aria-hidden
+                    className="block h-4 w-4 rounded-full border-2 border-violet-700 bg-violet-300/90 shadow"
+                  />
+                </Marker>
+              ) : null}
+            </Map>
           </div>
 
           {geocodeBusy ? (

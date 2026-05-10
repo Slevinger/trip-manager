@@ -289,3 +289,50 @@ export function approveTripRecommendationOptionDetailed(
 export function tripRecommendationCount(trip: Trip | null | undefined): number {
   return trip?.recommendations?.length ?? 0;
 }
+
+/**
+ * Collaborative voting on a recommendation's option. Each traveler votes for at
+ * most one option per recommendation; calling this with the existing pair
+ * removes the vote (toggle behaviour). Voter identities are stored as
+ * lowercased emails to match traveler / viewer rows.
+ */
+export function toggleRecommendationVote(
+  trip: Trip,
+  recommendationId: string,
+  optionId: string,
+  travelerIdLower: string
+): Trip {
+  const id = travelerIdLower.trim().toLowerCase();
+  if (!id) return trip;
+  const list = trip.recommendationVotes ?? [];
+  const existing = list.find(
+    (v) =>
+      v.recommendationId === recommendationId &&
+      v.travelerId === id
+  );
+  let next = list.filter(
+    (v) => !(v.recommendationId === recommendationId && v.travelerId === id)
+  );
+  if (!existing || existing.optionId !== optionId) {
+    next = [
+      ...next,
+      {
+        recommendationId,
+        optionId,
+        travelerId: id,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  return { ...trip, recommendationVotes: next, updatedAt: new Date().toISOString() };
+}
+
+export function votesForOption(
+  trip: Trip | null | undefined,
+  recommendationId: string,
+  optionId: string
+): string[] {
+  return (trip?.recommendationVotes ?? [])
+    .filter((v) => v.recommendationId === recommendationId && v.optionId === optionId)
+    .map((v) => v.travelerId);
+}

@@ -1,167 +1,207 @@
 @import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+@plugin "tailwindcss-animate";
 
-:root {
-  --background: #fafafa;
-  --foreground: #18181b;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --foreground: #fafafa;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-}
+@custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Leaflet assumes LTR layout for tooltip/popup placement math. With Hebrew we set
- * document.documentElement.dir = rtl — without this, tooltips anchor far from markers (wrong side / off-map).
+ * Tailwind v4 design tokens. The color system is intentionally minimal in the
+ * neutral base, with bright accent ramps reserved for category badges, charts,
+ * and gradient highlights.
  */
-.leaflet-container {
-  direction: ltr;
+@theme {
+  --color-background: oklch(99% 0.005 250);
+  --color-foreground: oklch(18% 0.01 270);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-muted: oklch(97% 0.005 250);
+  --color-border: oklch(92% 0.01 250);
+  --color-border-strong: oklch(85% 0.01 250);
+  --color-muted: oklch(96% 0.005 250);
+  --color-muted-foreground: oklch(48% 0.012 260);
+
+  --color-brand: oklch(58% 0.21 295);
+  --color-brand-foreground: oklch(98% 0.01 295);
+  --color-brand-soft: oklch(95% 0.04 295);
+
+  --color-accent-coral: oklch(70% 0.18 25);
+  --color-accent-amber: oklch(80% 0.16 80);
+  --color-accent-mint: oklch(75% 0.13 165);
+  --color-accent-sky: oklch(72% 0.13 230);
+  --color-accent-rose: oklch(72% 0.17 8);
+
+  --color-success: oklch(65% 0.16 150);
+  --color-warning: oklch(78% 0.16 75);
+  --color-danger: oklch(62% 0.22 25);
+  --color-info: oklch(68% 0.13 235);
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -4px rgb(15 23 42 / 0.08);
+  --shadow-pop: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 12px 32px -8px rgb(15 23 42 / 0.16);
+  --shadow-float: 0 20px 50px -20px rgb(15 23 42 / 0.35);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-display:
+    "Inter", "ui-sans-serif", system-ui, -apple-system, "Segoe UI", Roboto;
 }
 
-html[dir="rtl"] .leaflet-tooltip {
-  direction: rtl;
-  text-align: right;
+.dark {
+  --color-background: oklch(16% 0.015 270);
+  --color-foreground: oklch(96% 0.01 270);
+  --color-surface: oklch(20% 0.015 270);
+  --color-surface-muted: oklch(23% 0.015 270);
+  --color-border: oklch(30% 0.015 270);
+  --color-border-strong: oklch(38% 0.015 270);
+  --color-muted: oklch(24% 0.015 270);
+  --color-muted-foreground: oklch(70% 0.012 260);
+
+  --color-brand: oklch(72% 0.19 295);
+  --color-brand-foreground: oklch(15% 0.04 295);
+  --color-brand-soft: oklch(28% 0.08 295);
 }
 
-html[dir="rtl"] .leaflet-popup-content-wrapper {
-  direction: rtl;
-  text-align: right;
-}
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-border);
+  }
 
-/* Leaflet itinerary map: arrowhead div icons */
-.leaflet-div-icon.trip-map-arrow-marker {
-  background: transparent !important;
-  border: none !important;
-}
+  html,
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+  }
 
-.trip-map-arrow-shape {
-  width: 0;
-  height: 0;
-  margin: 0 auto;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-bottom: 14px solid var(--arrow-color, #0ea5e9);
-  transform-origin: 50% 70%;
-  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.2));
-}
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
 
-/* Destination / activity dots — Marker + DivIcon so tooltips anchor like edges (not SVG CircleMarker drift). */
-.leaflet-div-icon.trip-map-destination-marker,
-.leaflet-div-icon.trip-map-activity-marker {
-  background: transparent !important;
-  border: none !important;
-}
+  ::selection {
+    background: color-mix(in oklab, var(--color-brand) 30%, transparent);
+    color: var(--color-foreground);
+  }
 
-.trip-map-destination-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 9999px;
-  box-sizing: border-box;
-  border: 2px solid #0f766e;
-  background: rgb(94 234 212 / 0.55);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
-}
-
-.trip-map-activity-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 9999px;
-  box-sizing: border-box;
-  border: 2px solid #047857;
-  background: rgb(16 185 129 / 0.85);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
-}
-
-/* Leaflet defaults to very dark #333; soften so tooltip copy matches app UI */
-.leaflet-tooltip {
-  color: #52525b;
-}
-
-@media (prefers-color-scheme: dark) {
-  .leaflet-tooltip {
-    color: #d4d4d8;
+  :focus-visible {
+    outline: none;
   }
 }
 
-/* Create-trip wizard animations: keyed remounts trigger a slide-in on each step change. */
+@layer utilities {
+  .glass {
+    background: color-mix(in oklab, var(--color-surface) 65%, transparent);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+  }
+
+  .glass-strong {
+    background: color-mix(in oklab, var(--color-surface) 88%, transparent);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid color-mix(in oklab, var(--color-border) 80%, transparent);
+  }
+
+  .bg-gradient-brand {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-brand) 0%,
+      color-mix(in oklab, var(--color-brand) 50%, var(--color-accent-coral)) 50%,
+      var(--color-accent-coral) 100%
+    );
+  }
+
+  .bg-gradient-aurora {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-accent-sky) 0%,
+      var(--color-brand) 45%,
+      var(--color-accent-rose) 100%
+    );
+  }
+
+  .bg-gradient-sunset {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-accent-amber) 0%,
+      var(--color-accent-coral) 60%,
+      var(--color-accent-rose) 100%
+    );
+  }
+
+  .bg-gradient-meadow {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-accent-mint) 0%,
+      var(--color-accent-sky) 100%
+    );
+  }
+
+  .bg-mesh-soft {
+    background-image:
+      radial-gradient(at 0% 0%, color-mix(in oklab, var(--color-brand) 22%, transparent) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, color-mix(in oklab, var(--color-accent-coral) 18%, transparent) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, color-mix(in oklab, var(--color-accent-sky) 18%, transparent) 0px, transparent 50%);
+  }
+
+  .ring-focus {
+    --tw-ring-color: color-mix(in oklab, var(--color-brand) 40%, transparent);
+  }
+}
+
+/* MapLibre overrides — soften default UI to match the design system. */
+.maplibregl-popup-content {
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 12px 32px -10px rgb(15 23 42 / 0.25);
+  background: var(--color-surface);
+  color: var(--color-foreground);
+}
+.maplibregl-popup-tip {
+  display: none;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--color-surface) 80%, transparent);
+}
+
+/* Wizard animations — kept from the legacy create-trip wizard. */
 @keyframes wizard-slide-in-forward {
-  from {
-    opacity: 0;
-    transform: translate3d(28px, 0, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
+  from { opacity: 0; transform: translate3d(28px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
-
 @keyframes wizard-slide-in-back {
-  from {
-    opacity: 0;
-    transform: translate3d(-28px, 0, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
+  from { opacity: 0; transform: translate3d(-28px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
-
 @keyframes wizard-pop-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.96) translateY(12px);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  0% { opacity: 0; transform: scale(0.96) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
-
 @keyframes wizard-overlay-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-
 @keyframes wizard-progress-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgb(139 92 246 / 0.45);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgb(139 92 246 / 0);
-  }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(139 92 246 / 0.45); }
+  50% { box-shadow: 0 0 0 6px rgb(139 92 246 / 0); }
 }
 
-.wizard-slide-in-forward {
-  animation: wizard-slide-in-forward 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.wizard-slide-in-back {
-  animation: wizard-slide-in-back 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.wizard-pop-in {
-  animation: wizard-pop-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.wizard-overlay-in {
-  animation: wizard-overlay-in 200ms ease-out both;
-}
-
-.wizard-progress-pulse {
-  animation: wizard-progress-pulse 2s ease-out infinite;
-}
+.wizard-slide-in-forward { animation: wizard-slide-in-forward 320ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.wizard-slide-in-back { animation: wizard-slide-in-back 320ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.wizard-pop-in { animation: wizard-pop-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.wizard-overlay-in { animation: wizard-overlay-in 200ms ease-out both; }
+.wizard-progress-pulse { animation: wizard-progress-pulse 2s ease-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   .wizard-slide-in-forward,
@@ -170,5 +210,11 @@ html[dir="rtl"] .leaflet-popup-content-wrapper {
   .wizard-overlay-in,
   .wizard-progress-pulse {
     animation: none;
+  }
+
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

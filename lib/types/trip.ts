@@ -371,6 +371,99 @@ export type TripRecommendationOption =
   | TransitRecommendationOption
   | ActivityRecommendationOption;
 
+export type PackingCategory =
+  | "documents"
+  | "clothes"
+  | "toiletries"
+  | "tech"
+  | "health"
+  | "gear"
+  | "misc";
+
+export interface PackingItem {
+  id: string;
+  name: string;
+  category: PackingCategory;
+  quantity?: number;
+  packed: boolean;
+  /** Owner; missing means shared / household item. */
+  travelerId?: string;
+  /** Marker so reset / template-merge knows what came from a template. */
+  templateId?: string;
+}
+
+export interface PackingList {
+  id: string;
+  title: string;
+  items: PackingItem[];
+  /** Source template applied to this list (if any). */
+  templateId?: string;
+}
+
+export type ExpenseCategory =
+  | "hotels"
+  | "transport"
+  | "food"
+  | "activities"
+  | "shopping"
+  | "insurance"
+  | "other";
+
+export interface ExpenseEntry {
+  id: string;
+  title: string;
+  amount: Money;
+  /** Traveler id of the person who paid. */
+  paidByTravelerId: string;
+  /** Traveler ids the cost is split across (equally). Empty = paid alone. */
+  splitBetween: string[];
+  category?: ExpenseCategory;
+  date: ISODateString;
+  /** Optional link back to an itinerary step. */
+  relatedStepId?: string;
+  notes?: string;
+}
+
+export type CommentTargetType = "trip" | "step" | "recommendation" | "destination";
+
+export interface TripComment {
+  id: string;
+  /** Lowercased email of the author (matches travelers/viewers email). */
+  authorId: string;
+  authorName?: string;
+  createdAt: ISODateString;
+  body: string;
+  targetType: CommentTargetType;
+  targetId: string;
+  resolved?: boolean;
+  /** Threading: id of the parent comment when this is a reply. */
+  parentId?: string;
+  /** Lowercased emails of travelers who reacted thumbs-up (toggle). */
+  reactions?: string[];
+}
+
+export interface RecommendationVote {
+  recommendationId: string;
+  optionId: string;
+  /** Lowercased email of the voter. */
+  travelerId: string;
+  createdAt: ISODateString;
+}
+
+export interface WeatherDay {
+  dateIso: string;
+  tempMaxC: number;
+  tempMinC: number;
+  precipMm?: number;
+  weatherCode: number;
+}
+
+export interface WeatherSnapshot {
+  destinationId: string;
+  updatedAt: ISODateString;
+  daily: WeatherDay[];
+}
+
 export interface Trip {
   id: string;
   title: string;
@@ -401,6 +494,16 @@ export interface Trip {
   /** Live device positions by participant key (typically lowercased email). */
   liveLocations?: Record<string, TripLiveLocation>;
   warnings?: TripWarning[];
+  /** Per-trip packing lists (smart categories, optionally per traveler). */
+  packingLists?: PackingList[];
+  /** Per-expense ledger; rolls up into the Budget screen. */
+  expenses?: ExpenseEntry[];
+  /** Comments on the trip / steps / destinations / recommendations. */
+  comments?: TripComment[];
+  /** Per-option votes on recommendations (collaborative voting). */
+  recommendationVotes?: RecommendationVote[];
+  /** Cached weather snapshots per destination. */
+  weatherCache?: WeatherSnapshot[];
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
