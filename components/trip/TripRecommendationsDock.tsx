@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "@/lib/i18n/context";
 import {
-  approveTripRecommendationOption,
+  addTripRecommendation,
+  approveTripRecommendationOptionDetailed,
   markTripRecommendationSeen,
   removeTripRecommendation,
   skipTripRecommendation,
@@ -435,6 +436,7 @@ export function TripRecommendationsDock({
   const [selectedOptionByRec, setSelectedOptionByRec] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<"approve" | "delete" | "skip" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tightening, setTightening] = useState(false);
 
   useEffect(() => {
     posRef.current = { left: leftPx, top: topPx };
@@ -607,8 +609,50 @@ export function TripRecommendationsDock({
     setBusy("approve");
     setError(null);
     try {
-      const next = approveTripRecommendationOption(trip, current.id, optionId);
+      const approvedOption = (current.options as TripRecommendationOption[]).find((o) => o.id === optionId) ?? null;
+      const detailed = approveTripRecommendationOptionDetailed(trip, current.id, optionId);
+      const next = detailed.trip;
       await onPersist(next);
+
+      // Auto-tighten: follow-up recommendation card for explicit approval.
+      if (approvedOption) {
+        setTightening(true);
+        void (async () => {
+          try {
+            const res = await fetch("/api/chat/tighten-recommendation", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                trip: next,
+                approved: {
+                  tripId: trip.id,
+                  recommendationId: current.id,
+                  optionId,
+                  kind: current.kind,
+                  createdStepId: detailed.createdStepId,
+                  option: {
+                    label: approvedOption.label,
+                    note: approvedOption.note,
+                    ...(current.kind === "activity"
+                      ? { hostStayStepId: (approvedOption as ActivityRecommendationOption).hostStayStepId }
+                      : {}),
+                    interval: approvedOption.interval,
+                    destinations: approvedOption.destinations ?? [],
+                  },
+                },
+              }),
+            });
+            const j = (await res.json().catch(() => ({}))) as { recommendation?: TripRecommendation; error?: string };
+            if (!res.ok || !j.recommendation) throw new Error(j.error || "Tighten failed");
+            await onPersist(addTripRecommendation(next, j.recommendation));
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            setError(`Tighten: ${msg}`);
+          } finally {
+            setTightening(false);
+          }
+        })();
+      }
       setSelectedOptionByRec((prev) => {
         const { [current.id]: _removed, ...rest } = prev;
         void _removed;

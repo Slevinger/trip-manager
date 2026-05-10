@@ -75,9 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   const trip = canonicalFirestoreDataToTrip(raw);
-  const derived = gmailSearchQueryFromTrip(trip);
-  const q =
-    extraQuery.length > 0 ? `${derived} (${extraQuery.replace(/\)/g, "").replace(/\(/g, "")})` : derived;
+  const q = gmailSearchQueryFromTrip(trip, extraQuery);
 
   const credSnap = await userGmailCredentialRef(db, viewerEmail).get();
   if (!credSnap.exists) {

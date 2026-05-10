@@ -236,10 +236,18 @@ export function approveTripRecommendationOption(
   recommendationId: string,
   optionId: string
 ): Trip {
+  return approveTripRecommendationOptionDetailed(trip, recommendationId, optionId).trip;
+}
+
+export function approveTripRecommendationOptionDetailed(
+  trip: Trip,
+  recommendationId: string,
+  optionId: string
+): { trip: Trip; createdStepId: string | null } {
   const rec = findRecommendation(trip, recommendationId);
-  if (!rec) return trip;
+  if (!rec) return { trip, createdStepId: null };
   const option = findOption(rec, optionId);
-  if (!option) return trip;
+  if (!option) return { trip, createdStepId: null };
 
   const seededDestinations = mergeDestinationLists(
     trip.destinations ?? [],
@@ -263,15 +271,18 @@ export function approveTripRecommendationOption(
     );
   } else {
     /** Mismatched kind / interval — refuse silently rather than fabricating a wrong step. */
-    return trip;
+    return { trip, createdStepId: null };
   }
 
   return {
-    ...trip,
-    destinations: next.destinations,
-    steps: normalizeStepOrders([...trip.steps, next.step]),
-    recommendations: (trip.recommendations ?? []).filter((r) => r.id !== recommendationId),
-    updatedAt: new Date().toISOString(),
+    trip: {
+      ...trip,
+      destinations: next.destinations,
+      steps: normalizeStepOrders([...trip.steps, next.step]),
+      recommendations: (trip.recommendations ?? []).filter((r) => r.id !== recommendationId),
+      updatedAt: new Date().toISOString(),
+    },
+    createdStepId: next.step.id,
   };
 }
 

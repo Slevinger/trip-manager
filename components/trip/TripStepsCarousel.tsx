@@ -56,7 +56,6 @@ export function TripStepsCarousel({
 
   const total = steps.length;
   const safeIdx = Math.min(idx, total - 1);
-  const step = steps[safeIdx]!;
   const goPrev = () => setIdx((i) => (i - 1 + total) % total);
   const goNext = () => setIdx((i) => (i + 1) % total);
 
@@ -73,30 +72,46 @@ export function TripStepsCarousel({
         <NavButton dir="next" onClick={goNext} ariaLabel={t("view.stepNext")} />
       </div>
 
-      <div className="px-4 pb-4 pt-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-lg leading-none" aria-hidden>
-            {stepEmoji(step)}
-          </span>
-          <span className="rounded-full bg-zinc-100 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-            {kindLabel(step, t)}
-          </span>
-          {emphasizedStepId === step.id ? (
-            <span className="rounded-full bg-violet-100 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:bg-violet-900/60 dark:text-violet-200">
-              {t("view.nowLabel")}
-            </span>
-          ) : null}
+      <div dir="ltr" className="overflow-hidden">
+        <div
+          className="flex transition-transform duration-300 ease-out motion-reduce:transition-none"
+          style={{ transform: `translate3d(-${safeIdx * 100}%, 0, 0)` }}
+        >
+          {steps.map((s, i) => {
+            const isActive = i === safeIdx;
+            return (
+              <div
+                key={s.id}
+                aria-hidden={!isActive}
+                className="w-full shrink-0 basis-full px-4 pb-4 pt-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-lg leading-none" aria-hidden>
+                    {stepEmoji(s)}
+                  </span>
+                  <span className="rounded-full bg-zinc-100 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {kindLabel(s, t)}
+                  </span>
+                  {emphasizedStepId === s.id ? (
+                    <span className="rounded-full bg-violet-100 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:bg-violet-900/60 dark:text-violet-200">
+                      {t("view.nowLabel")}
+                    </span>
+                  ) : null}
+                </div>
+                <h3 className="mt-2 text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
+                  {s.title.trim() || t("view.untitledStep")}
+                </h3>
+                <p className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                  {formatStepRange(s.startTime, s.endTime, t("view.emDash"))}
+                </p>
+                <p className="mt-0.5 truncate text-sm text-zinc-700 dark:text-zinc-300">
+                  {stepPlaceLine(s, destinations, t)}
+                </p>
+                <StepIntervalsBlock step={s} destinations={destinations} t={t} />
+              </div>
+            );
+          })}
         </div>
-        <h3 className="mt-2 text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
-          {step.title.trim() || t("view.untitledStep")}
-        </h3>
-        <p className="mt-0.5 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-          {formatStepRange(step.startTime, step.endTime, t("view.emDash"))}
-        </p>
-        <p className="mt-0.5 truncate text-sm text-zinc-700 dark:text-zinc-300">
-          {stepPlaceLine(step, destinations, t)}
-        </p>
-        <StepIntervalsBlock step={step} destinations={destinations} t={t} />
       </div>
 
       <div

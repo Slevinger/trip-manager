@@ -109,21 +109,51 @@ function collectTripSearchTokens(trip: Trip): string[] {
   return out;
 }
 
-const DEFAULT_KEYWORD_GROUP =
-  "(flight OR booking OR reservation OR confirmation OR itinerary OR hotel OR ticket OR check-in)";
+const DEFAULT_BOOKING_KEYWORDS = [
+  "flight",
+  "booking",
+  "reservation",
+  "confirmation",
+  "itinerary",
+  "hotel",
+  "ticket",
+  "check-in",
+];
+
+/** Strip parens/quotes/colons that would break the OR group; keep tokens Gmail can match. */
+function sanitizeExtraQuery(extra: string): string[] {
+  return extra
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/[()"':]/g, "").trim())
+    .filter((t) => t.length > 0);
+}
 
 /**
  * Gmail search string from trip window + destination/title tokens (read-only search).
- * Caller may append extra terms from the user.
+ * Date range is the hard constraint; destinations, default booking keywords and any
+ * user-supplied extra terms are OR-ed together as broadening relevance signals so a
+ * booking email that doesn't literally mention the destination still surfaces.
  */
-export function gmailSearchQueryFromTrip(trip: Trip): string {
+export function gmailSearchQueryFromTrip(trip: Trip, extraQuery = ""): string {
   const after = gmailAfterFromIso(trip.startDate);
   const before = gmailBeforeExclusiveFromIso(trip.endDate);
   const datePart =
     after && before ? `after:${after} before:${before}` : after ? `after:${after}` : "";
-  const tokens = collectTripSearchTokens(trip);
-  const keywordPart =
-    tokens.length > 0 ? `(${tokens.slice(0, 8).join(" OR ")})` : DEFAULT_KEYWORD_GROUP;
+
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  const push = (raw: string) => {
+    const k = raw.toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    merged.push(raw);
+  };
+
+  for (const t of collectTripSearchTokens(trip).slice(0, 8)) push(t);
+  for (const t of DEFAULT_BOOKING_KEYWORDS) push(t);
+  for (const t of sanitizeExtraQuery(extraQuery)) push(t);
+
+  const keywordPart = merged.length > 0 ? `(${merged.join(" OR ")})` : "";
   return [datePart, keywordPart].filter(Boolean).join(" ");
 }
 
