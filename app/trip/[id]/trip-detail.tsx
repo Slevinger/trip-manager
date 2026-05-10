@@ -14,6 +14,7 @@ import {
   updateCanonicalTripLiveLocation,
 } from "@/lib/canonicalTripsFirestore";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { Popover } from "@/components/popover/Popover";
 import { TripMapLoadingPlaceholder } from "@/components/trip/TripMapLoadingPlaceholder";
 import { UserMenu } from "@/components/UserMenu";
 import { useI18n } from "@/lib/i18n/context";
@@ -170,7 +171,6 @@ export function TripDetail({ tripId }: { tripId: string }) {
 
   const canUndo = useAppSelector((s) => s.trip.past.length > 0);
   const canRedo = useAppSelector((s) => s.trip.future.length > 0);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [chatDockVisible, setChatDockVisible] = useState(true);
   const [recsDockVisible, setRecsDockVisible] = useState(true);
   const [chatOpenRequest, setChatOpenRequest] = useState<number | undefined>(undefined);
@@ -715,254 +715,149 @@ export function TripDetail({ tripId }: { tripId: string }) {
   /** Chat only on this trip’s loaded doc; Firestore viewers (read-only) never see it. Local trips have no viewer role. */
   const showTripAssistant = trip.id === tripId && (!useFirestore || canManageFirestore);
 
+  const allTripsLink = (
+    <Link
+      href="/"
+      className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+    >
+      {t("trip.allTrips")}
+    </Link>
+  );
+
+  const headerControls = (
+    <div className="flex items-center gap-2">
+      {user ? <UserMenu user={user} /> : null}
+      <Popover
+        id="popover:trip-hamburger"
+        align="end"
+        sideOffset={8}
+        contentClassName="w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+        trigger={({ open, toggle, ref }) => (
+          <button
+            ref={ref as React.Ref<HTMLButtonElement>}
+            type="button"
+            aria-label="Menu"
+            aria-expanded={open}
+            aria-haspopup="menu"
+            onClick={toggle}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white/70 text-zinc-700 shadow-sm hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            <span aria-hidden className="text-base leading-none">
+              ☰
+            </span>
+          </button>
+        )}
+      >
+        {({ close }) => (
+          <div role="menu">
+            <div className="border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                {t("common.language")}
+              </p>
+              <div className="mt-2">
+                <LanguageSwitcher />
+              </div>
+            </div>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!showTripAssistant || chatDockVisible}
+              onClick={() => {
+                setChatDockVisible(true);
+                setChatOpenRequest(Date.now());
+                close();
+              }}
+              className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+            >
+              <span>Chat with agent</span>
+              <span className="text-xs text-zinc-400">💬</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={recsDockVisible}
+              onClick={() => {
+                setRecsDockVisible(true);
+                setRecsOpenRequest(Date.now());
+                close();
+              }}
+              className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+            >
+              <span>Agent suggestions</span>
+              <span className="text-xs text-zinc-400">🔔</span>
+            </button>
+            <div className="border-b border-zinc-100 dark:border-zinc-800" />
+            {canUndo ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  dispatch(undoAction());
+                  close();
+                }}
+                className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+              >
+                <span>Undo</span>
+                <span className="text-xs text-zinc-400">⌘Z</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canRedo}
+              onClick={() => {
+                dispatch(redoAction());
+                close();
+              }}
+              className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
+            >
+              <span>Redo</span>
+              <span className="text-xs text-zinc-400">⇧⌘Z</span>
+            </button>
+          </div>
+        )}
+      </Popover>
+      <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
+        <button
+          type="button"
+          onClick={() => setTab("view")}
+          className={
+            tab === "view"
+              ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
+              : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
+          }
+        >
+          {t("trip.view")}
+        </button>
+        {useFirestore && !canManageFirestore ? null : (
+          <button
+            type="button"
+            onClick={() => setTab("manage")}
+            className={
+              tab === "manage"
+                ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
+                : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
+            }
+          >
+            {t("trip.manage")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {locale === "he" ? (
           <>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <button
-                  type="button"
-                  aria-label="Menu"
-                  aria-expanded={menuOpen}
-                  onClick={() => setMenuOpen((v) => !v)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white/70 text-zinc-700 shadow-sm hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                >
-                  <span aria-hidden className="text-base leading-none">
-                    ☰
-                  </span>
-                </button>
-                {menuOpen ? (
-                  <div
-                    role="menu"
-                    className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                  >
-                    {user ? (
-                      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-50">Account</p>
-                          <p className="truncate text-[10px] text-zinc-500">{(user.email ?? user.uid).trim()}</p>
-                        </div>
-                        <UserMenu user={user} />
-                      </div>
-                    ) : null}
-                    <div className="border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                        {t("common.language")}
-                      </p>
-                      <div className="mt-2">
-                        <LanguageSwitcher />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={!showTripAssistant || chatDockVisible}
-                      onClick={() => {
-                        setChatDockVisible(true);
-                        setChatOpenRequest(Date.now());
-                        setMenuOpen(false);
-                      }}
-                      className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                    >
-                      <span>Chat with agent</span>
-                      <span className="text-xs text-zinc-400">💬</span>
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={recsDockVisible}
-                      onClick={() => {
-                        setRecsDockVisible(true);
-                        setRecsOpenRequest(Date.now());
-                        setMenuOpen(false);
-                      }}
-                      className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                    >
-                      <span>Agent suggestions</span>
-                      <span className="text-xs text-zinc-400">🔔</span>
-                    </button>
-                    <div className="border-b border-zinc-100 dark:border-zinc-800" />
-                    {canUndo ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          dispatch(undoAction());
-                          setMenuOpen(false);
-                        }}
-                        className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                      >
-                        <span>Undo</span>
-                        <span className="text-xs text-zinc-400">⌘Z</span>
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={!canRedo}
-                      onClick={() => {
-                        dispatch(redoAction());
-                        setMenuOpen(false);
-                      }}
-                      className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                    >
-                      <span>Redo</span>
-                      <span className="text-xs text-zinc-400">⇧⌘Z</span>
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
-                <button
-                  type="button"
-                  onClick={() => setTab("view")}
-                  className={
-                    tab === "view"
-                      ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
-                      : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
-                  }
-                >
-                  {t("trip.view")}
-                </button>
-                {useFirestore && !canManageFirestore ? null : (
-                  <button
-                    type="button"
-                    onClick={() => setTab("manage")}
-                    className={
-                      tab === "manage"
-                        ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
-                        : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
-                    }
-                  >
-                    {t("trip.manage")}
-                  </button>
-                )}
-              </div>
-            </div>
-            <Link
-              href="/"
-              className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              {t("trip.allTrips")}
-            </Link>
+            {headerControls}
+            {allTripsLink}
           </>
         ) : (
           <>
-            <Link
-              href="/"
-              className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              {t("trip.allTrips")}
-            </Link>
-            <div className="flex items-center gap-2">
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white/70 text-zinc-700 shadow-sm hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              <span aria-hidden className="text-base leading-none">
-                ☰
-              </span>
-            </button>
-            {menuOpen ? (
-              <div
-                role="menu"
-                className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-              >
-                {user ? (
-                  <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-50">Account</p>
-                      <p className="truncate text-[10px] text-zinc-500">{(user.email ?? user.uid).trim()}</p>
-                    </div>
-                    <UserMenu user={user} />
-                  </div>
-                ) : null}
-                <div className="border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    {t("common.language")}
-                  </p>
-                  <div className="mt-2">
-                    <LanguageSwitcher />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!showTripAssistant || chatDockVisible}
-                  onClick={() => {
-                    setChatDockVisible(true);
-                    setChatOpenRequest(Date.now());
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                >
-                  <span>Chat with agent</span>
-                  <span className="text-xs text-zinc-400">💬</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={recsDockVisible}
-                  onClick={() => {
-                    setRecsDockVisible(true);
-                    setRecsOpenRequest(Date.now());
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                >
-                  <span>Agent suggestions</span>
-                  <span className="text-xs text-zinc-400">🔔</span>
-                </button>
-                <div className="border-b border-zinc-100 dark:border-zinc-800" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!canRedo}
-                  onClick={() => {
-                    dispatch(redoAction());
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-100 dark:hover:bg-zinc-800/60"
-                >
-                  <span>Redo</span>
-                  <span className="text-xs text-zinc-400">⇧⌘Z</span>
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
-            <button
-              type="button"
-              onClick={() => setTab("view")}
-              className={
-                tab === "view"
-                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
-                  : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
-              }
-            >
-              {t("trip.view")}
-            </button>
-            {useFirestore && !canManageFirestore ? null : (
-              <button
-                type="button"
-                onClick={() => setTab("manage")}
-                className={
-                  tab === "manage"
-                    ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold shadow dark:bg-zinc-800"
-                    : "rounded-md px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-400"
-                }
-              >
-                {t("trip.manage")}
-              </button>
-            )}
-          </div>
-        </div>
+            {allTripsLink}
+            {headerControls}
           </>
         )}
       </div>

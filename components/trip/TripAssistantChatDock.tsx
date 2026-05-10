@@ -537,40 +537,47 @@ export function TripAssistantChatDock(props: {
         const where = buildChatMemoryTripWhere(props.trip, contextAtMs);
         // Assistant self-classification (`##general##` / `##specific##`) trailing the reply.
         const requestKind = parseTripAssistantRequestKind(reply) ?? undefined;
+        const fromEmailLower = props.userEmail.trim().toLowerCase();
 
-        // 1) Trip-shared thread: visible to ALL members of the trip. Errors here matter
-        //    (without it the dock falls back to legacy summaries), so surface them.
-        appendSharedTripThreadTurn({
-          tripId: props.trip.id,
-          fromEmailLower: props.userEmail.trim().toLowerCase(),
-          fromDisplayName: props.userDisplayName?.trim() || undefined,
-          userContent: text,
-          agentContent: reply,
-          sentAtMs: contextAtMs,
-          tripContextNote: where.summary,
-          ...(requestKind ? { requestKind } : {}),
-        }).catch((e) => {
-          console.warn("[sharedTripThread] append failed", e);
+        // Persist BOTH the trip-shared thread (visible to all members) and the
+        // speaker's `__global__` queue BEFORE returning, so a quick refresh after
+        // a reply does not drop the chat or the agent's suggestions. The two
+        // writes are independent — fire them in parallel.
+        try {
+          await Promise.all([
+            appendSharedTripThreadTurn({
+              tripId: props.trip.id,
+              fromEmailLower,
+              fromDisplayName: props.userDisplayName?.trim() || undefined,
+              userContent: text,
+              agentContent: reply,
+              sentAtMs: contextAtMs,
+              tripContextNote: where.summary,
+              ...(requestKind ? { requestKind } : {}),
+            }),
+            appendImmutableMemoryQueueTurn(fromEmailLower, {
+              tripId: "__global__",
+              userFromEmail: props.userEmail.trim(),
+              userContent: text,
+              agentContent: reply,
+              sentAtMs: contextAtMs + 2,
+              tripContextNote: where.summary,
+              originTripId: props.trip.id,
+              ...(requestKind ? { requestKind } : {}),
+            }),
+          ]);
+        } catch (e) {
+          console.warn("[chat-persist] append failed", e);
           setError(
             e instanceof Error
-              ? `Could not save to shared thread: ${e.message}`
-              : "Could not save to shared thread"
+              ? `Could not save chat: ${e.message}`
+              : "Could not save chat"
           );
-        });
+        }
 
-        // 2) The speaker's PERSONAL `__global__` memory (cross-trip, never deleted).
-        void appendImmutableMemoryQueueTurn(props.userEmail.trim().toLowerCase(), {
-          tripId: "__global__",
-          userFromEmail: props.userEmail.trim(),
-          userContent: text,
-          agentContent: reply,
-          sentAtMs: contextAtMs + 2,
-          tripContextNote: where.summary,
-          originTripId: props.trip.id,
-          ...(requestKind ? { requestKind } : {}),
-        }).catch(() => {});
-
-        // Best-effort compaction:
+        // Best-effort compaction (fire-and-forget — does not block the UI and the
+        // raw turns above are already durable, so a refresh during compaction is
+        // safe):
         //  - shared trip thread (any member can trigger; server verifies membership).
         //  - the speaker's per-user immutable queue (still hosts `__global__`).
         void (async () => {
