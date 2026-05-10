@@ -17,8 +17,12 @@ import {
   appendImmutableMemoryQueueTurn,
 } from "@/lib/usersFirestore";
 import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
+import {
+  appendTripChatLocal,
+  clearTripChatLocal,
+} from "@/lib/tripChatLocalStore";
 import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
-import type { TripChatMessage } from "@/lib/types/user";
+import type { Email, TripChatMessage } from "@/lib/types/user";
 
 type Role = "user" | "assistant";
 
@@ -386,6 +390,7 @@ export function TripAssistantChatDock(props: {
       });
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(j.error || t("assistant.genericError"));
+      clearTripChatLocal(props.trip.id);
       setLines([]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("assistant.genericError");
@@ -521,6 +526,28 @@ export function TripAssistantChatDock(props: {
         setActiveModel(data.model.trim());
       }
       setLines((prev) => [...prev, { role: "assistant", content: reply }]);
+
+      /** Always persist the turn to localStorage so a refresh on a local trip
+       * (or before Firestore writes complete) doesn't erase the conversation
+       * that produced any agent suggestions. Cloud writes below remain the
+       * source of truth when configured. */
+      const localFromEmail = (props.userEmail?.trim().toLowerCase() || "you") as Email;
+      const userTimeStampIso = new Date(contextAtMs).toISOString();
+      const agentTimeStampIso = new Date(contextAtMs + 1).toISOString();
+      appendTripChatLocal(props.trip.id, [
+        {
+          tripId: props.trip.id,
+          from: localFromEmail,
+          content: text,
+          timeStamp: userTimeStampIso,
+        },
+        {
+          tripId: props.trip.id,
+          from: "agent",
+          content: reply,
+          timeStamp: agentTimeStampIso,
+        },
+      ]);
 
       /** Push parsed structured suggestions onto the trip's recommendations queue.
        * Best-effort: failures surface inline but never throw away the chat reply. */

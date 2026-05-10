@@ -32,6 +32,7 @@ import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { getTripViewPhase, resolveCurrentStepForDashboard } from "@/lib/tripViewPhase";
 import type { Destination, Traveler, Trip, TripRecommendation, TripViewer, UserPreferences } from "@/lib/types/trip";
 import { messagesForTrip } from "@/lib/tripChatMessages";
+import { loadTripChatLocal } from "@/lib/tripChatLocalStore";
 import type {
   ImmutableMemoryQueueEntry,
   SharedTripThreadEntry,
@@ -602,6 +603,21 @@ export function TripDetail({ tripId }: { tripId: string }) {
    * Falls back to the legacy per-user trip transcript when the shared thread is empty
    * (so old trips that never used the shared thread still render their history).
    */
+  /** localStorage fallback: every successful turn is mirrored from the dock,
+   * so a refresh on a local-only trip (or a signed-out viewer) still rehydrates
+   * the conversation that produced any agent suggestions. Reloaded on tripId
+   * change AND whenever the cloud transcripts settle empty (covers the just-
+   * after-refresh window before Firestore subscriptions return). */
+  const [localChatTrip, setLocalChatTrip] = useState<TripChatMessage[]>([]);
+  useEffect(() => {
+    const id = dockTrip?.id;
+    if (!id) {
+      setLocalChatTrip([]);
+      return;
+    }
+    setLocalChatTrip(loadTripChatLocal(id));
+  }, [dockTrip?.id]);
+
   const tripChatMessages = useMemo(() => {
     if (!dockTrip?.id) return [];
     if (sharedThread.loaded) {
@@ -624,12 +640,15 @@ export function TripDetail({ tripId }: { tripId: string }) {
       }
     }
     if (assistantChatDoc.exists) return assistantChatDoc.messages;
-    return messagesForTrip(chatMemory, dockTrip.id);
+    const fromLegacy = messagesForTrip(chatMemory, dockTrip.id);
+    if (fromLegacy.length > 0) return fromLegacy;
+    return localChatTrip;
   }, [
     assistantChatDoc.exists,
     assistantChatDoc.messages,
     chatMemory,
     dockTrip?.id,
+    localChatTrip,
     sharedThread.loaded,
     sharedThread.entries,
   ]);
