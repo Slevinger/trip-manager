@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty";
+import { TripBackToTripsHubLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Skeleton } from "@/components/ui/skeleton";
 import { signInWithGoogle } from "@/lib/googleSignIn";
 
@@ -99,6 +100,7 @@ export function ProfileScreen() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      <TripBackToTripsHubLink />
       <header className="flex items-end gap-4">
         <Avatar className="h-16 w-16">
           {user?.photoURL ? <AvatarImage src={user.photoURL} alt={user.displayName ?? ""} /> : null}

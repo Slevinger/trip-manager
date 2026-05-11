@@ -162,6 +162,7 @@ export const sampleTrip: Trip = {
             status: "reserved",
             bookingUrl: "https://example.com",
           },
+          price: { amount: 12000, currency: "THB" },
         },
       ],
     },
@@ -185,6 +186,7 @@ export const sampleTrip: Trip = {
           endTime: "2026-06-04T16:00:00.000Z",
           fromDestinationId: "dest-bkk",
           toDestinationId: "dest-ko",
+          price: { amount: 1800, currency: "THB" },
         },
       ],
     },
@@ -197,6 +199,7 @@ export const sampleTrip: Trip = {
       endTime: "2026-06-05T11:00:00.000Z",
       destinationId: "dest-snorkel",
       targetDestinationId: "dest-snorkel",
+      hostStayStepId: "st-1",
       stepIntervals: [
         {
           id: "int-ac-1",
@@ -206,6 +209,7 @@ export const sampleTrip: Trip = {
           startTime: "2026-06-05T08:00:00.000Z",
           endTime: "2026-06-05T11:00:00.000Z",
           destinationId: "dest-snorkel",
+          price: { amount: 4500, currency: "THB" },
         },
       ],
     },

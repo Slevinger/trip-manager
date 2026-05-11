@@ -3,6 +3,7 @@
 import { appendStepInterval } from "@/lib/canonicalStepBuilders";
 import {
   useWizardDirection,
+  WIZARD_INPUT_CLASS,
   WIZARD_INPUT_CLASS_LARGE,
   WIZARD_SELECT_CLASS,
   WIZARD_TEXTAREA_CLASS,
@@ -21,10 +22,11 @@ import { intlLocaleForApp } from "@/lib/i18n/messages";
 import { intervalIndexFromFrame, STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardFrame } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
-import type { ActivityStep, ActivityType, Destination, Trip } from "@/lib/types/trip";
+import type { ActivityStep, ActivityType, CurrencyCode, Destination, Trip } from "@/lib/types/trip";
 import { ACTIVITY_TYPES } from "@/components/manage/stepEditorConstants";
 
 const ACTIVITY_INTERVAL_WIZARD_PAGE_COUNT = 2;
+const STEP_PRICE_CURRENCIES: CurrencyCode[] = ["THB", "USD", "EUR", "ILS", "GBP"];
 
 export function ActivityStepIntervalWizardPanel({
   frame,
@@ -33,6 +35,7 @@ export function ActivityStepIntervalWizardPanel({
   patchIntervalAt,
   wizard,
   tripStartIso,
+  tripCurrency,
   trip,
   onAppendDestinations,
 }: {
@@ -42,10 +45,11 @@ export function ActivityStepIntervalWizardPanel({
   patchIntervalAt: (index: number, patch: Record<string, unknown>) => void;
   wizard: WizardStackControls;
   tripStartIso: string;
+  tripCurrency: CurrencyCode;
   trip: Trip;
   onAppendDestinations: (rows: Destination[]) => void;
 }) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const intlLocale = intlLocaleForApp(locale);
   const intervalIndex = Math.min(intervalIndexFromFrame(frame), draft.stepIntervals.length - 1);
   const interval = draft.stepIntervals[intervalIndex];
@@ -153,29 +157,89 @@ export function ActivityStepIntervalWizardPanel({
           <div className="space-y-5">
             <WizardPageHeading
               eyebrow={`Activity slot #${intervalIndex + 1}`}
-              title="Notes"
-              subtitle="Reservation refs, dress code, tips for the rest of the group."
+              title="Notes & price"
+              subtitle="Reservation details and an optional cost for itinerary totals."
               accent="emerald"
             />
-            <WizardField
-              htmlFor="activity-interval-comment"
-              label="Slot notes"
-              optional
-              hint="Picked addresses get appended here automatically."
-            >
-              <textarea
-                id="activity-interval-comment"
-                rows={6}
-                className={WIZARD_TEXTAREA_CLASS}
-                placeholder="e.g., Reservation under Slevinger. Smart casual."
-                value={interval.comment ?? ""}
-                onChange={(e) =>
-                  patchIntervalAt(intervalIndex, {
-                    comment: e.target.value.trim() ? e.target.value : undefined,
-                  })
-                }
-              />
-            </WizardField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <WizardField
+                htmlFor="activity-interval-comment"
+                label="Slot notes"
+                optional
+                hint="Picked addresses get appended here automatically."
+              >
+                <textarea
+                  id="activity-interval-comment"
+                  rows={6}
+                  className={WIZARD_TEXTAREA_CLASS}
+                  placeholder="e.g., Reservation under Slevinger. Smart casual."
+                  value={interval.comment ?? ""}
+                  onChange={(e) =>
+                    patchIntervalAt(intervalIndex, {
+                      comment: e.target.value.trim() ? e.target.value : undefined,
+                    })
+                  }
+                />
+              </WizardField>
+              <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/25">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-emerald-900 dark:text-emerald-200">
+                  {t("manage.stepCostOptional")}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <WizardField
+                    htmlFor="activity-interval-price-amount"
+                    label={t("manage.priceAmountLabel")}
+                    optional
+                    hint={t("manage.intervalPriceItineraryHint")}
+                  >
+                    <input
+                      id="activity-interval-price-amount"
+                      type="number"
+                      min={0}
+                      step="any"
+                      className={WIZARD_INPUT_CLASS}
+                      value={interval.price != null ? String(interval.price.amount) : ""}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        if (raw === "") {
+                          patchIntervalAt(intervalIndex, { price: undefined });
+                          return;
+                        }
+                        const n = Number(raw);
+                        if (!Number.isFinite(n)) return;
+                        patchIntervalAt(intervalIndex, {
+                          price: {
+                            amount: n,
+                            currency: interval.price?.currency ?? tripCurrency,
+                          },
+                        });
+                      }}
+                    />
+                  </WizardField>
+                  <WizardField htmlFor="activity-interval-price-currency" label={t("manage.priceCurrency")}>
+                    <select
+                      id="activity-interval-price-currency"
+                      className={WIZARD_SELECT_CLASS}
+                      value={interval.price?.currency ?? tripCurrency}
+                      onChange={(e) => {
+                        const cur = e.target.value as CurrencyCode;
+                        if (!interval.price) return;
+                        patchIntervalAt(intervalIndex, {
+                          price: { ...interval.price, currency: cur },
+                        });
+                      }}
+                      disabled={!interval.price}
+                    >
+                      {[...new Set([tripCurrency, ...STEP_PRICE_CURRENCIES])].map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </WizardField>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </WizardPage>

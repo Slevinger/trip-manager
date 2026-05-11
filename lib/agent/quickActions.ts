@@ -3,6 +3,7 @@ import {
   CloudSun,
   Coins,
   Compass,
+  ImageIcon,
   ListChecks,
   type LucideIcon,
   Map as MapIcon,
@@ -19,6 +20,8 @@ export interface AgentQuickAction {
   /** Pre-fill text for the chat composer (sent with one click). */
   prompt: string;
   icon: LucideIcon;
+  /** Runs a client-side trip mutation instead of opening chat (overview hero photo). */
+  effect?: "hero-cover";
 }
 
 const COMMON_OVERVIEW: AgentQuickAction[] = [
@@ -39,6 +42,14 @@ const COMMON_OVERVIEW: AgentQuickAction[] = [
     labelKey: "agent.actionBudget",
     prompt: "Estimate how much budget I have left given the current expenses, and call out the biggest line items.",
     icon: Coins,
+  },
+  {
+    id: "hero-cover",
+    labelKey: "agent.actionHeroCover",
+    prompt:
+      "Search the web (like Google) for a scenic wide color photo that matches my trip destinations, then set it as the trip overview background.",
+    icon: ImageIcon,
+    effect: "hero-cover",
   },
 ];
 

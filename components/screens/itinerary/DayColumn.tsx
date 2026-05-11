@@ -19,7 +19,7 @@ import {
   Sparkles,
   Train,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n/context";
 import {
   Accordion,
@@ -30,7 +30,14 @@ import {
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { cn } from "@/lib/ui/cn";
 import { tripInstantMs } from "@/lib/tripViewPhase";
-import type { Trip, TripStep } from "@/lib/types/trip";
+import type { ActivityStep, TransitStep, Trip, TripStep } from "@/lib/types/trip";
+import {
+  activityStepTotalCost,
+  formatMoneyDisplay,
+  stayLinkedActivitiesCost,
+  stayStepLodgingCost,
+  stepDisplayTotalCost,
+} from "@/lib/trip/stepCosts";
 
 interface DayColumnProps {
   dayKey: string;
@@ -148,11 +155,12 @@ function StepCard({
         ("destinationId" in step && d.id === (step as { destinationId?: string }).destinationId)
     );
 
-  const interval = step.stepIntervals?.[0];
-  const isTransit = step.stepType === "transit" && interval && "transitType" in interval;
+  const firstInterval = step.stepIntervals?.[0];
+  const isTransit = step.stepType === "transit" && firstInterval && "transitType" in firstInterval;
+  const stepCost = useMemo(() => stepDisplayTotalCost(step, trip.steps), [step, trip.steps]);
   const TransitIcon =
-    isTransit && interval && "transitType" in interval
-      ? TRANSIT_ICON[(interval as { transitType?: string }).transitType ?? ""]
+    isTransit && firstInterval && "transitType" in firstInterval
+      ? TRANSIT_ICON[(firstInterval as { transitType?: string }).transitType ?? ""]
       : null;
 
   return (
@@ -190,6 +198,11 @@ function StepCard({
                   </span>
                 ) : null}
                 <span className="text-[11px] font-medium text-[var(--color-muted-foreground)]">{timeRange}</span>
+                {stepCost ? (
+                  <span className="text-[11px] font-semibold tabular-nums text-[var(--color-foreground)]">
+                    {formatMoneyDisplay(stepCost)}
+                  </span>
+                ) : null}
               </div>
               <p className="mt-1 line-clamp-2 text-sm font-semibold text-[var(--color-foreground)]">
                 {step.title || t("itinerary.activity")}
@@ -222,7 +235,8 @@ function stepTypeLabelKey(stepType: TripStep["stepType"]) {
 
 function StepDetails({ step, trip }: { step: TripStep; trip: Trip }) {
   const { t } = useI18n();
-  const interval = step.stepIntervals?.[0];
+  const intervals = step.stepIntervals ?? [];
+  const firstInterval = intervals[0];
   const fmt = new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
@@ -232,6 +246,53 @@ function StepDetails({ step, trip }: { step: TripStep; trip: Trip }) {
     "fromStayId" in step ? trip.destinations.find((d) => d.id === step.fromStayId) : null;
   const toDest =
     "toStayId" in step ? trip.destinations.find((d) => d.id === step.toStayId) : null;
+
+  const intervalPriceRows = intervals
+    .map((int, i) => {
+      const p = "price" in int ? int.price : undefined;
+      if (!p) return null;
+      const title = (int.title ?? "").trim() || t("itinerary.intervalCostShort", { index: i + 1 });
+      return (
+        <DetailItem key={int.id} label={t("itinerary.intervalCostShort", { index: i + 1 })}>
+          <span className="text-[var(--color-muted-foreground)]">{title}</span>
+          <span className="mt-0.5 block tabular-nums text-[var(--color-foreground)]">{formatMoneyDisplay(p)}</span>
+        </DetailItem>
+      );
+    })
+    .filter(Boolean);
+
+  const pricedIntervalCount = intervals.filter((i) => "price" in i && i.price).length;
+  const lodgingSubtotal =
+    step.stepType === "stay" && pricedIntervalCount > 1 ? stayStepLodgingCost(step) : null;
+
+  const linkedActs =
+    step.stepType === "stay"
+      ? trip.steps.filter(
+          (s): s is ActivityStep => s.stepType === "activity" && s.hostStayStepId === step.id
+        )
+      : [];
+
+  const linkedSubtotal =
+    linkedActs.length > 0 ? stayLinkedActivitiesCost(step.id, trip.steps) : null;
+
+  const stayMixedLodgingLinked =
+    step.stepType === "stay"
+      ? (() => {
+          const l = stayStepLodgingCost(step);
+          const a = stayLinkedActivitiesCost(step.id, trip.steps);
+          return Boolean(l && a && l.currency !== a.currency);
+        })()
+      : false;
+
+  const linkedActivitiesCurrencyClash =
+    linkedActs.length > 1 &&
+    !linkedSubtotal &&
+    linkedActs.filter((a) => activityStepTotalCost(a)).length > 1;
+
+  const transitManual =
+    step.stepType === "transit" ? (step as TransitStep).totalManualPrice : undefined;
+
+  const stepTotal = stepDisplayTotalCost(step, trip.steps);
 
   return (
     <div className="space-y-3 text-xs text-[var(--color-foreground)]">
@@ -245,27 +306,77 @@ function StepDetails({ step, trip }: { step: TripStep; trip: Trip }) {
             {fromDest.title} → {toDest.title}
           </DetailItem>
         ) : null}
-        {interval && "booking" in interval && interval.booking?.bookingUrl ? (
+        {firstInterval && "booking" in firstInterval && firstInterval.booking?.bookingUrl ? (
           <DetailItem label={t("itinerary.bookingLabel")}>
             <a
-              href={interval.booking.bookingUrl}
+              href={firstInterval.booking.bookingUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[var(--color-brand)] underline"
             >
-              {interval.booking.bookingUrl.replace(/^https?:\/\//, "").slice(0, 40)}
+              {firstInterval.booking.bookingUrl.replace(/^https?:\/\//, "").slice(0, 40)}
             </a>
           </DetailItem>
         ) : null}
-        {interval && "price" in interval && (interval as { price?: { amount?: number } }).price ? (
-          <DetailItem label={t("itinerary.priceLabel")}>
-            {String((interval as { price?: { amount?: number; currency?: string } }).price?.amount ?? "")}{" "}
-            {String((interval as { price?: { currency?: string } }).price?.currency ?? "")}
-          </DetailItem>
-        ) : null}
       </div>
+
+      {intervalPriceRows.length > 0 ? (
+        <div className="flex flex-wrap gap-3 border-t border-[var(--color-border)] pt-3">{intervalPriceRows}</div>
+      ) : null}
+
+      {transitManual ? (
+        <div className="border-t border-[var(--color-border)] pt-3">
+          <DetailItem label={t("itinerary.transitExtraFees")}>{formatMoneyDisplay(transitManual)}</DetailItem>
+        </div>
+      ) : null}
+
+      {step.stepType === "stay" && linkedActs.length > 0 ? (
+        <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
+            {t("itinerary.stayLinkedActivitiesHeading")}
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {linkedActs.map((act) => {
+              const m = activityStepTotalCost(act);
+              return (
+                <DetailItem key={act.id} label={(act.title ?? "").trim() || t("itinerary.activity")}>
+                  {m ? formatMoneyDisplay(m) : "—"}
+                </DetailItem>
+              );
+            })}
+          </div>
+          {linkedSubtotal ? (
+            <DetailItem label={t("itinerary.stayLinkedActivitiesSubtotal")}>
+              {formatMoneyDisplay(linkedSubtotal)}
+            </DetailItem>
+          ) : null}
+        </div>
+      ) : null}
+
+      {lodgingSubtotal ? (
+        <div className="border-t border-[var(--color-border)] pt-3">
+          <DetailItem label={t("itinerary.stayLodgingSubtotal")}>{formatMoneyDisplay(lodgingSubtotal)}</DetailItem>
+        </div>
+      ) : null}
+
+      {stayMixedLodgingLinked || linkedActivitiesCurrencyClash ? (
+        <p className="text-[11px] leading-snug text-[var(--color-muted-foreground)]">
+          {t("itinerary.mixedCurrencyTotals")}
+        </p>
+      ) : null}
+
+      {stepTotal ? (
+        <div className="border-t border-[var(--color-border)] pt-3">
+          <DetailItem label={t("itinerary.stepCostTotal")}>
+            <span className="text-sm font-semibold tabular-nums text-[var(--color-foreground)]">
+              {formatMoneyDisplay(stepTotal)}
+            </span>
+          </DetailItem>
+        </div>
+      ) : null}
+
       {(() => {
-        const notes = (interval as { notes?: string } | undefined)?.notes;
+        const notes = (firstInterval as { notes?: string } | undefined)?.notes;
         if (!notes) return null;
         return (
           <DetailItem label={t("itinerary.notes")}>

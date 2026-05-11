@@ -54,6 +54,8 @@ import type {
 } from "@/lib/types/trip";
 import { ACTIVITY_TYPES, STAY_TYPES, TRANSIT_TYPES } from "@/components/manage/stepEditorConstants";
 
+const STEP_PRICE_CURRENCIES: CurrencyCode[] = ["THB", "USD", "EUR", "ILS", "GBP"];
+
 function formatIntervalRangeShort(startIso: string, endIso: string): string {
   const a = new Date(startIso);
   const b = new Date(endIso);
@@ -1162,6 +1164,120 @@ export function CanonicalStepEditorDialog({
           </>
         ) : null}
 
+        {(draft.stepType === "stay" || draft.stepType === "transit" || draft.stepType === "activity") &&
+        active &&
+        "intervalType" in active ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.priceOptional")}
+              <input
+                type="number"
+                min={0}
+                step="any"
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={active.price != null ? String(active.price.amount) : ""}
+                onChange={(e) => {
+                  const raw = e.target.value.trim();
+                  if (raw === "") {
+                    patchActiveInterval({ price: undefined });
+                    return;
+                  }
+                  const n = Number(raw);
+                  if (!Number.isFinite(n)) return;
+                  patchActiveInterval({
+                    price: {
+                      amount: n,
+                      currency: active.price?.currency ?? tripCurrency,
+                    },
+                  });
+                }}
+              />
+            </label>
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.priceCurrency")}
+              <select
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={active.price?.currency ?? tripCurrency}
+                onChange={(e) => {
+                  const cur = e.target.value as CurrencyCode;
+                  if (active.price) {
+                    patchActiveInterval({ price: { ...active.price, currency: cur } });
+                  }
+                }}
+                disabled={!active.price}
+              >
+                {[...new Set([tripCurrency, ...STEP_PRICE_CURRENCIES])].map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
+        {draft.stepType === "transit" ? (
+          <div className="grid gap-2 sm:grid-cols-2 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.transitStepExtraFees")}
+              <input
+                type="number"
+                min={0}
+                step="any"
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={
+                  (draft as TransitStep).totalManualPrice != null
+                    ? String((draft as TransitStep).totalManualPrice!.amount)
+                    : ""
+                }
+                onChange={(e) => {
+                  const d = draft as TransitStep;
+                  const raw = e.target.value.trim();
+                  if (raw === "") {
+                    setDraft({ ...d, totalManualPrice: undefined });
+                    return;
+                  }
+                  const n = Number(raw);
+                  if (!Number.isFinite(n)) return;
+                  setDraft({
+                    ...d,
+                    totalManualPrice: {
+                      amount: n,
+                      currency: d.totalManualPrice?.currency ?? tripCurrency,
+                    },
+                  });
+                }}
+              />
+            </label>
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              {t("manage.priceCurrency")}
+              <select
+                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                value={(draft as TransitStep).totalManualPrice?.currency ?? tripCurrency}
+                onChange={(e) => {
+                  const d = draft as TransitStep;
+                  const cur = e.target.value as CurrencyCode;
+                  if (!d.totalManualPrice) {
+                    setDraft({ ...d, totalManualPrice: { amount: 0, currency: cur } });
+                    return;
+                  }
+                  setDraft({
+                    ...d,
+                    totalManualPrice: { ...d.totalManualPrice, currency: cur },
+                  });
+                }}
+                disabled={!(draft as TransitStep).totalManualPrice}
+              >
+                {[...new Set([tripCurrency, ...STEP_PRICE_CURRENCIES])].map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
         <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
           {commentLabel}
           <textarea
@@ -1318,6 +1434,7 @@ export function CanonicalStepEditorDialog({
               draft={draft as TransitStep}
               setDraft={setDraft as (next: TransitStep | ((prev: TransitStep) => TransitStep)) => void}
               wizard={wizard}
+              tripCurrency={tripCurrency}
               tripPlaceGrouped={tripPlaceGrouped}
               fromPlace={rowFor((draft as TransitStep).fromStayId)}
               toPlace={rowFor((draft as TransitStep).toStayId)}
@@ -1349,6 +1466,7 @@ export function CanonicalStepEditorDialog({
               patchIntervalAt={patchIntervalAt}
               wizard={wizard}
               tripStartIso={tripStartIso}
+              tripCurrency={tripCurrency}
               trip={overlayTrip()}
               tripPlaceGrouped={tripPlaceGrouped}
               getRow={rowFor}
@@ -1367,6 +1485,7 @@ export function CanonicalStepEditorDialog({
               patchIntervalAt={patchIntervalAt}
               wizard={wizard}
               tripStartIso={tripStartIso}
+              tripCurrency={tripCurrency}
               trip={overlayTrip()}
               onAppendDestinations={appendDestinations}
             />

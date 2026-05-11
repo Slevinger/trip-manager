@@ -16,6 +16,7 @@ import { useFirebaseUser } from "@/lib/auth/useFirebaseUser";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
+import { TripBackToTripLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage, avatarInitials } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -37,15 +38,20 @@ import type {
 } from "@/lib/types/trip";
 
 export function CollabScreen({ tripId }: { tripId: string }) {
-  const { trip, loadState } = useTripData(tripId);
+  const { trip, loadState, persistTrip } = useTripData(tripId);
   if (loadState !== "ok" || !trip) return <TripLoadStateScreen state={loadState} />;
-  return <CollabContent trip={trip} />;
+  return <CollabContent trip={trip} persistTrip={persistTrip} />;
 }
 
-function CollabContent({ trip }: { trip: Trip }) {
+function CollabContent({
+  trip,
+  persistTrip,
+}: {
+  trip: Trip;
+  persistTrip: (next: Trip) => Promise<void>;
+}) {
   const { t } = useI18n();
   const { user } = useFirebaseUser();
-  const { persistTrip } = useTripData(trip.id);
   const userEmail = user?.email?.trim().toLowerCase() ?? "";
   const myDisplayName = user?.displayName?.trim() ?? userEmail.split("@")[0] ?? "You";
 
@@ -103,6 +109,7 @@ function CollabContent({ trip }: { trip: Trip }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      <TripBackToTripLink tripId={trip.id} />
       <header>
         <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-brand)]">
           <MessagesSquare className="h-3.5 w-3.5" /> {trip.title}

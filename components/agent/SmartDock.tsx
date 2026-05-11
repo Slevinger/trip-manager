@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/ui/cn";
 import type { Trip, TripRecommendation, TripRecommendationOption } from "@/lib/types/trip";
+import { fetchTripHeroCoverFromApi } from "@/lib/trip/heroCoverClient";
 
 interface SmartDockProps {
   tripId: string | null;
@@ -187,7 +188,7 @@ function DockPanel({
   screen: ReturnType<typeof activeTripScreen>;
 }) {
   const { t } = useI18n();
-  const { persistTrip, isOwner } = useTripData(tripId);
+  const { persistTrip, isOwner, canManage } = useTripData(tripId);
   const data = useTripAssistantData(trip);
 
   const onAddRecommendations = useCallback(
@@ -275,7 +276,10 @@ function DockPanel({
         <TabsContent value="actions" className="m-0 flex max-h-[55dvh] flex-col overflow-y-auto px-4 pb-4">
           <ActionsTab
             screen={screen}
-            onPick={(prompt) => {
+            trip={trip}
+            canManage={canManage}
+            persistTrip={persistTrip}
+            onPickPrompt={(prompt) => {
               assistant.prepare(prompt);
               onTabChange("chat");
             }}
@@ -557,29 +561,78 @@ function RecommendationCard({
 
 function ActionsTab({
   screen,
-  onPick,
+  trip,
+  canManage,
+  persistTrip,
+  onPickPrompt,
 }: {
   screen: ReturnType<typeof activeTripScreen>;
-  onPick: (prompt: string) => void;
+  trip: Trip;
+  canManage: boolean;
+  persistTrip: (next: Trip) => Promise<void>;
+  onPickPrompt: (prompt: string) => void;
 }) {
   const { t } = useI18n();
   const actions = actionsForScreen(screen);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [heroCoverActionError, setHeroCoverActionError] = useState<string | null>(null);
+
   return (
     <div className="space-y-2">
+      {heroCoverActionError ? (
+        <p className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-danger)]">
+          {heroCoverActionError}
+        </p>
+      ) : null}
       <p className="text-xs text-[var(--color-muted-foreground)]">
         {t("agent.actionsForScreen", { screen: screen ?? "trip" })}
       </p>
       {actions.map((a) => {
         const Icon = a.icon;
+        const heroEffect = a.effect === "hero-cover";
+        const disabled = heroEffect && (!canManage || trip.destinations.length === 0);
         return (
           <button
             key={a.id}
             type="button"
-            onClick={() => onPick(a.prompt)}
-            className="flex w-full items-start gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-muted)]"
+            disabled={Boolean(busyId) || disabled}
+            onClick={() => {
+              if (heroEffect) {
+                if (!canManage || trip.destinations.length === 0) return;
+                setBusyId(a.id);
+                setHeroCoverActionError(null);
+                void (async () => {
+                  try {
+                    const partial = await fetchTripHeroCoverFromApi(trip);
+                    const now = new Date().toISOString();
+                    await persistTrip({
+                      ...trip,
+                      heroCover: { ...partial, updatedAt: now },
+                      updatedAt: now,
+                    });
+                    setHeroCoverActionError(null);
+                  } catch (e) {
+                    const msg =
+                      e instanceof Error && e.message.trim()
+                        ? e.message.trim()
+                        : t("tripHero.heroCoverFailed");
+                    setHeroCoverActionError(msg.length > 280 ? `${msg.slice(0, 280)}…` : msg);
+                  } finally {
+                    setBusyId(null);
+                  }
+                })();
+                return;
+              }
+              onPickPrompt(a.prompt);
+            }}
+            className="flex w-full items-start gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-muted)] disabled:opacity-50"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--color-brand-soft)] text-[var(--color-brand)]">
-              <Icon className="h-4 w-4" />
+              {busyId === a.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Icon className="h-4 w-4" />
+              )}
             </span>
             <div className="min-w-0">
               <p className="text-sm font-medium text-[var(--color-foreground)]">{t(a.labelKey)}</p>
@@ -587,7 +640,7 @@ function ActionsTab({
                 {a.prompt}
               </p>
             </div>
-            <Wand2 className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
+            <Wand2 className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
           </button>
         );
       })}

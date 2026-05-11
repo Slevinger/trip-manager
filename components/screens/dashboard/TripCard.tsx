@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
+import { useEffect, useState } from "react";
 import {
   CalendarRange,
   ListChecks,
@@ -20,6 +21,7 @@ import {
   msUntilTripStart,
   tripInstantMs,
 } from "@/lib/tripViewPhase";
+import { heroCoverImageSrc } from "@/lib/trip/heroCoverDisplayUrl";
 import { useTripWeather, weatherCodeIcon } from "@/lib/weather/useTripWeather";
 import type { Trip, Traveler, TripViewer } from "@/lib/types/trip";
 
@@ -59,6 +61,16 @@ export function TripCard({ trip }: { trip: Trip }) {
         ? "bg-gradient-aurora"
         : "bg-gradient-brand";
 
+  const coverUrl = trip.heroCover?.url?.trim();
+  const proxiedCoverSrc = coverUrl ? heroCoverImageSrc(coverUrl) : "";
+  const [cardImgSrc, setCardImgSrc] = useState(() => proxiedCoverSrc || coverUrl || "");
+  const [cardImageFailed, setCardImageFailed] = useState(false);
+
+  useEffect(() => {
+    setCardImgSrc(proxiedCoverSrc || coverUrl || "");
+    setCardImageFailed(false);
+  }, [coverUrl, proxiedCoverSrc]);
+
   const countdownLabel =
     phase === "during"
       ? t("dashboard.inProgressLabel")
@@ -80,26 +92,71 @@ export function TripCard({ trip }: { trip: Trip }) {
     >
       <Link
         href={`/trip/${trip.id}`}
-        className={cn("block px-5 pb-4 pt-5 text-white", gradient)}
+        className={cn(
+          "relative isolate block overflow-hidden px-5 pb-4 pt-5 text-white",
+          (!coverUrl || cardImageFailed) && gradient,
+          coverUrl && !cardImageFailed && "min-h-[148px]"
+        )}
       >
-        <div className="flex items-center justify-between gap-2">
-          <Badge tone="outline" className="border-white/40 bg-white/15 text-white">
-            {countdownLabel}
-          </Badge>
-          {weather.daily && weather.daily[0] ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold">
-              <span aria-hidden>{weatherCodeIcon(weather.daily[0].weatherCode)}</span>
-              {Math.round(weather.daily[0].tempMaxC)}°
-            </span>
-          ) : weather.loading ? (
-            <Skeleton className="h-6 w-12 rounded-full bg-white/20" />
+        {coverUrl && !cardImageFailed ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element -- same remote hero as trip overview */}
+            <img
+              src={cardImgSrc}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={() => {
+                if (coverUrl && cardImgSrc !== coverUrl) {
+                  setCardImgSrc(coverUrl);
+                  return;
+                }
+                setCardImageFailed(true);
+              }}
+              className="pointer-events-none absolute inset-0 z-0 size-full min-h-full min-w-full object-cover object-center"
+            />
+            <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-t from-black/60 via-black/35 to-black/20" />
+          </>
+        ) : (
+          <div className="pointer-events-none absolute inset-0 z-0 opacity-25 [background-image:radial-gradient(at_20%_-10%,rgba(255,255,255,0.55)_0%,transparent_45%),radial-gradient(at_80%_120%,rgba(255,255,255,0.4)_0%,transparent_50%)]" />
+        )}
+        <div className="relative z-[2]">
+          <div className="flex items-center justify-between gap-2">
+            <Badge tone="outline" className="border-white/40 bg-white/15 text-white">
+              {countdownLabel}
+            </Badge>
+            {(() => {
+              const day0 = trip.startDate.slice(0, 10);
+              const w0 =
+                weather.daily?.find((d) => d.dateIso.slice(0, 10) === day0) ??
+                weather.tripHistorical?.daily.find((d) => d.dateIso.slice(0, 10) === day0);
+              if (w0 && Number.isFinite(w0.tempMaxC)) {
+                return (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold"
+                    title={
+                      weather.weatherRange?.mode === "nearby_preview"
+                        ? t("dashboard.weatherNearbyPreview")
+                        : undefined
+                    }
+                  >
+                    <span aria-hidden>{weatherCodeIcon(w0.weatherCode)}</span>
+                    {Math.round(w0.tempMaxC)}°
+                  </span>
+                );
+              }
+              return weather.loading ? (
+                <Skeleton className="h-6 w-12 rounded-full bg-white/20" />
+              ) : null;
+            })()}
+          </div>
+          <h3 className="mt-3 line-clamp-1 text-2xl font-semibold tracking-tight">{trip.title}</h3>
+          <p className="mt-1 text-xs text-white/85">{formatRange(trip.startDate, trip.endDate)}</p>
+          {trip.description ? (
+            <p className="mt-2 line-clamp-2 text-sm text-white/80">{trip.description}</p>
           ) : null}
         </div>
-        <h3 className="mt-3 line-clamp-1 text-2xl font-semibold tracking-tight">{trip.title}</h3>
-        <p className="mt-1 text-xs text-white/85">{formatRange(trip.startDate, trip.endDate)}</p>
-        {trip.description ? (
-          <p className="mt-2 line-clamp-2 text-sm text-white/80">{trip.description}</p>
-        ) : null}
       </Link>
 
       <div className="px-5 py-4">

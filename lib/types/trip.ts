@@ -464,6 +464,20 @@ export interface WeatherSnapshot {
   daily: WeatherDay[];
 }
 
+/** Scenic hero background for trip overview; chosen from destinations (API + optional LLM query). */
+export interface TripHeroCover {
+  url: string;
+  destinationLabel?: string;
+  query?: string;
+  photographerName?: string;
+  photoPageUrl?: string;
+  licenseNote?: string;
+  updatedAt: ISODateString;
+}
+
+/** Server/API payload before `updatedAt` is set on save. */
+export type TripHeroCoverPersistPayload = Omit<TripHeroCover, "updatedAt">;
+
 export interface Trip {
   id: string;
   title: string;
@@ -504,6 +518,8 @@ export interface Trip {
   recommendationVotes?: RecommendationVote[];
   /** Cached weather snapshots per destination. */
   weatherCache?: WeatherSnapshot[];
+  /** Auto-filled scenic photo for overview hero (destinations-based). */
+  heroCover?: TripHeroCover;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }

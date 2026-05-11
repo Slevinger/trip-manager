@@ -7,6 +7,7 @@ import { isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import { stepIntervalEmoji } from "@/lib/stepIntervalUi";
 import { destinationFromList } from "@/lib/tripDestinationRegistry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
+import { formatMoneyDisplay, stepDisplayTotalCost } from "@/lib/trip/stepCosts";
 import type { Destination, Trip, TripStep } from "@/lib/types/trip";
 
 function stepEmoji(step: TripStep): string {
@@ -270,6 +271,11 @@ export function CanonicalStepList({
                                 {hint}
                               </span>
                             ) : null}
+                            {"price" in int && int.price ? (
+                              <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
+                                {formatMoneyDisplay(int.price)}
+                              </span>
+                            ) : null}
                           </li>
                         );
                       })}
@@ -310,6 +316,15 @@ export function CanonicalStepList({
                     </div>
                   </>
                 )}
+                {(() => {
+                  const cost = stepDisplayTotalCost(s, trip.steps);
+                  if (!cost) return null;
+                  return (
+                    <p className="mt-1.5 text-xs font-semibold tabular-nums text-zinc-800 dark:text-zinc-100">
+                      {t("itinerary.stepCostTotal")}: {formatMoneyDisplay(cost)}
+                    </p>
+                  );
+                })()}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 <div className="flex items-center gap-2">

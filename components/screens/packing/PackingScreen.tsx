@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  ArrowLeft,
   Briefcase,
   Heart,
   ListChecks,
@@ -17,6 +15,7 @@ import {
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
+import { TripBackToTripLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,14 +59,19 @@ const CATEGORY_ICON: Record<PackingCategory, typeof Briefcase> = {
 };
 
 export function PackingScreen({ tripId }: { tripId: string }) {
-  const { trip, loadState } = useTripData(tripId);
+  const { trip, loadState, persistTrip } = useTripData(tripId);
   if (loadState !== "ok" || !trip) return <TripLoadStateScreen state={loadState} />;
-  return <PackingContent trip={trip} />;
+  return <PackingContent trip={trip} persistTrip={persistTrip} />;
 }
 
-function PackingContent({ trip }: { trip: Trip }) {
+function PackingContent({
+  trip,
+  persistTrip,
+}: {
+  trip: Trip;
+  persistTrip: (next: Trip) => Promise<void>;
+}) {
   const { t } = useI18n();
-  const { persistTrip } = useTripData(trip.id);
   const [travelerFilter, setTravelerFilter] = useState<string | "all" | "shared">("all");
 
   const list = trip.packingLists?.[0] ?? null;
@@ -139,13 +143,7 @@ function PackingContent({ trip }: { trip: Trip }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
-      <Link
-        href={`/trip/${trip.id}`}
-        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-muted-foreground)] shadow-sm transition-colors hover:border-[var(--color-brand)] hover:text-[var(--color-foreground)]"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-        <span>{t("shell.backToTrip")}</span>
-      </Link>
+      <TripBackToTripLink tripId={trip.id} />
 
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>

@@ -9,7 +9,7 @@ import {
 } from "@/lib/canonicalStepBuilders";
 import { useI18n } from "@/lib/i18n/context";
 import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
-import type { Destination, TransitStep, TransitStepInterval } from "@/lib/types/trip";
+import type { CurrencyCode, Destination, TransitStep, TransitStepInterval } from "@/lib/types/trip";
 import { STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
 
@@ -30,6 +30,7 @@ import {
 
 const TRANSIT_STEP_WIZARD_PAGE_COUNT = 2;
 const OTHER_OPTION_VALUE = "__other__";
+const STEP_PRICE_CURRENCIES: CurrencyCode[] = ["THB", "USD", "EUR", "ILS", "GBP"];
 
 export function TransitStepWizardPanel({
   draft,
@@ -41,11 +42,13 @@ export function TransitStepWizardPanel({
   setFromPlace,
   setToPlace,
   onRegisterNewDestination,
+  tripCurrency,
 }: {
   draft: TransitStep;
   setDraft: (next: TransitStep | ((prev: TransitStep) => TransitStep)) => void;
   wizard: WizardStackControls;
   tripPlaceGrouped: TripGroupedPlacePicks;
+  tripCurrency: CurrencyCode;
   fromPlace: Destination;
   toPlace: Destination;
   setFromPlace: (d: Destination) => void;
@@ -214,6 +217,65 @@ export function TransitStepWizardPanel({
                 onChange={(e) => setDraft({ ...draft, notes: textToNotes(e.target.value) })}
               />
             </WizardField>
+
+            <div className="grid gap-4 sm:grid-cols-2 rounded-2xl border border-zinc-200 bg-zinc-50/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <WizardField
+                htmlFor="transit-step-extra-fees"
+                label={t("manage.transitStepExtraFees")}
+                optional
+                hint={t("manage.transitStepExtraFeesWizardHint")}
+              >
+                <input
+                  id="transit-step-extra-fees"
+                  type="number"
+                  min={0}
+                  step="any"
+                  className={WIZARD_INPUT_CLASS}
+                  value={draft.totalManualPrice != null ? String(draft.totalManualPrice.amount) : ""}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    if (raw === "") {
+                      setDraft({ ...draft, totalManualPrice: undefined });
+                      return;
+                    }
+                    const n = Number(raw);
+                    if (!Number.isFinite(n)) return;
+                    setDraft({
+                      ...draft,
+                      totalManualPrice: {
+                        amount: n,
+                        currency: draft.totalManualPrice?.currency ?? tripCurrency,
+                      },
+                    });
+                  }}
+                />
+              </WizardField>
+              <WizardField htmlFor="transit-step-extra-fees-currency" label={t("manage.priceCurrency")}>
+                <select
+                  id="transit-step-extra-fees-currency"
+                  className={WIZARD_SELECT_CLASS}
+                  value={draft.totalManualPrice?.currency ?? tripCurrency}
+                  onChange={(e) => {
+                    const cur = e.target.value as CurrencyCode;
+                    if (!draft.totalManualPrice) {
+                      setDraft({ ...draft, totalManualPrice: { amount: 0, currency: cur } });
+                      return;
+                    }
+                    setDraft({
+                      ...draft,
+                      totalManualPrice: { ...draft.totalManualPrice, currency: cur },
+                    });
+                  }}
+                  disabled={!draft.totalManualPrice}
+                >
+                  {[...new Set([tripCurrency, ...STEP_PRICE_CURRENCIES])].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </WizardField>
+            </div>
           </div>
         )}
       </WizardPage>

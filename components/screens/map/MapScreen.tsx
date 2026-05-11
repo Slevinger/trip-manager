@@ -1,12 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, MapPin, Search, Sparkles, X } from "lucide-react";
+import { MapPin, Search, Sparkles, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
+import { TripBackToTripLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -166,13 +166,7 @@ function MapContent({ trip }: { trip: Trip }) {
 
   return (
     <div className="mx-auto box-border min-h-0 min-w-0 max-w-full space-y-4 px-4 py-6 lg:max-w-[120rem] lg:px-8">
-      <Link
-        href={`/trip/${trip.id}`}
-        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-muted-foreground)] shadow-sm transition-colors hover:border-[var(--color-brand)] hover:text-[var(--color-foreground)]"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-        <span>{t("shell.backToTrip")}</span>
-      </Link>
+      <TripBackToTripLink tripId={trip.id} />
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
       <aside

@@ -1,6 +1,7 @@
 "use client";
 
 import type { User } from "firebase/auth";
+import { Redo2, Undo2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/context";
 import { TripDocumentUploads } from "@/components/TripDocumentUploads";
@@ -29,6 +30,10 @@ export function ManageTripWorkspace({
   user,
   profilePreferences,
   dirty,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: {
   trip: Trip;
   onTripChange: (next: Trip) => void;
@@ -42,6 +47,10 @@ export function ManageTripWorkspace({
   profilePreferences?: UserPreferences | null;
   /** True when the draft diverges from the persisted trip; gates the Save button. */
   dirty: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }) {
   const { t } = useI18n();
   const [saving, setSaving] = useState(false);
@@ -360,6 +369,28 @@ export function ManageTripWorkspace({
               {t("manage.saveWritesTo", { target: saveTarget })}
               {!user ? ` ${t("manage.saveSignInCloud")}` : null}
             </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              disabled={!canUndo}
+              onClick={onUndo}
+              title={t("manage.undoTooltip")}
+              aria-label={t("manage.undo")}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <Undo2 className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              disabled={!canRedo}
+              onClick={onRedo}
+              title={t("manage.redoTooltip")}
+              aria-label={t("manage.redo")}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <Redo2 className="h-4 w-4" aria-hidden />
+            </button>
           </div>
           <button
             type="button"

@@ -29,6 +29,7 @@ import { intervalIndexFromFrame, STEP_WIZARD_IDS } from "@/lib/wizardStack/types
 import type { WizardFrame } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
 import type {
+  CurrencyCode,
   Destination,
   TransitStep,
   TransitStepInterval,
@@ -38,6 +39,7 @@ import type {
 import { TRANSIT_TYPES } from "@/components/manage/stepEditorConstants";
 
 const TRANSIT_INTERVAL_WIZARD_PAGE_COUNT = 2;
+const STEP_PRICE_CURRENCIES: CurrencyCode[] = ["THB", "USD", "EUR", "ILS", "GBP"];
 
 export function TransitStepIntervalWizardPanel({
   frame,
@@ -46,6 +48,7 @@ export function TransitStepIntervalWizardPanel({
   patchIntervalAt,
   wizard,
   tripStartIso,
+  tripCurrency,
   trip,
   tripPlaceGrouped,
   getRow,
@@ -58,13 +61,14 @@ export function TransitStepIntervalWizardPanel({
   patchIntervalAt: (index: number, patch: Record<string, unknown>) => void;
   wizard: WizardStackControls;
   tripStartIso: string;
+  tripCurrency: CurrencyCode;
   trip: Trip;
   tripPlaceGrouped: TripGroupedPlacePicks;
   getRow: (id: string | undefined) => Destination;
   setRow: (id: string, row: Destination) => void;
   onAppendDestinations: (rows: Destination[]) => void;
 }) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const intlLocale = intlLocaleForApp(locale);
   const intervalIndex = Math.min(intervalIndexFromFrame(frame), draft.stepIntervals.length - 1);
   const interval = draft.stepIntervals[intervalIndex];
@@ -217,6 +221,60 @@ export function TransitStepIntervalWizardPanel({
                 ))}
               </select>
             </WizardField>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <WizardField
+                htmlFor="transit-interval-price-amount"
+                label={t("manage.priceOptional")}
+                optional
+                hint={t("manage.intervalPriceItineraryHint")}
+              >
+                <input
+                  id="transit-interval-price-amount"
+                  type="number"
+                  min={0}
+                  step="any"
+                  className={WIZARD_INPUT_CLASS}
+                  value={interval.price != null ? String(interval.price.amount) : ""}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    if (raw === "") {
+                      patchIntervalAt(intervalIndex, { price: undefined });
+                      return;
+                    }
+                    const n = Number(raw);
+                    if (!Number.isFinite(n)) return;
+                    patchIntervalAt(intervalIndex, {
+                      price: {
+                        amount: n,
+                        currency: interval.price?.currency ?? tripCurrency,
+                      },
+                    });
+                  }}
+                />
+              </WizardField>
+              <WizardField htmlFor="transit-interval-price-currency" label={t("manage.priceCurrency")}>
+                <select
+                  id="transit-interval-price-currency"
+                  className={WIZARD_SELECT_CLASS}
+                  value={interval.price?.currency ?? tripCurrency}
+                  onChange={(e) => {
+                    const cur = e.target.value as CurrencyCode;
+                    if (!interval.price) return;
+                    patchIntervalAt(intervalIndex, {
+                      price: { ...interval.price, currency: cur },
+                    });
+                  }}
+                  disabled={!interval.price}
+                >
+                  {[...new Set([tripCurrency, ...STEP_PRICE_CURRENCIES])].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </WizardField>
+            </div>
           </div>
         ) : (
           <div className="space-y-5">

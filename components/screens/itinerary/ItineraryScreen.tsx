@@ -20,6 +20,7 @@ import { CalendarRange, GripVertical } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
+import { TripBackToTripLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty";
 import { InlineAgentSuggestions } from "@/components/agent/InlineAgentSuggestions";
@@ -29,14 +30,21 @@ import { DayColumn } from "./DayColumn";
 import { useTripWeather, weatherCodeIcon } from "@/lib/weather/useTripWeather";
 
 export function ItineraryScreen({ tripId }: { tripId: string }) {
-  const { trip, loadState } = useTripData(tripId);
+  const { trip, loadState, persistTrip, canManage } = useTripData(tripId);
   if (loadState !== "ok" || !trip) return <TripLoadStateScreen state={loadState} />;
-  return <ItineraryContent trip={trip} />;
+  return <ItineraryContent trip={trip} persistTrip={persistTrip} canManage={canManage} />;
 }
 
-function ItineraryContent({ trip }: { trip: Trip }) {
+function ItineraryContent({
+  trip,
+  persistTrip,
+  canManage,
+}: {
+  trip: Trip;
+  persistTrip: (next: Trip) => Promise<void>;
+  canManage: boolean;
+}) {
   const { t } = useI18n();
-  const { persistTrip, canManage } = useTripData(trip.id);
   const [overlayId, setOverlayId] = useState<string | null>(null);
   const weather = useTripWeather(trip);
 
@@ -77,6 +85,7 @@ function ItineraryContent({ trip }: { trip: Trip }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      <TripBackToTripLink tripId={trip.id} />
       <header>
         <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-brand)]">
           <CalendarRange className="h-3.5 w-3.5" /> {trip.title}
@@ -93,6 +102,10 @@ function ItineraryContent({ trip }: { trip: Trip }) {
       </header>
 
       <InlineAgentSuggestions trip={trip} kind="activity" />
+
+      {weather.weatherRange?.mode === "nearby_preview" && weather.daily && weather.daily.length > 0 ? (
+        <p className="text-[11px] leading-snug text-[var(--color-muted-foreground)]">{t("dashboard.weatherNearbyPreview")}</p>
+      ) : null}
 
       {totalSteps === 0 ? (
         <Card>
@@ -115,7 +128,10 @@ function ItineraryContent({ trip }: { trip: Trip }) {
           <motion.div layout className="space-y-6">
             {dayKeys.map((day, idx) => {
               const items = grouped.get(day) ?? [];
-              const w = weather.daily?.find((d) => d.dateIso === day);
+              const dayIso = day.slice(0, 10);
+              const w =
+                (weather.tripHistorical?.daily ?? []).find((d) => d.dateIso.slice(0, 10) === dayIso) ??
+                weather.daily?.find((d) => d.dateIso.slice(0, 10) === dayIso);
               const chip = w ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-muted-foreground)]">
                   <span aria-hidden>{weatherCodeIcon(w.weatherCode)}</span>

@@ -12,6 +12,7 @@ import {
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
+import { TripBackToTripLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,14 +49,19 @@ const CATEGORY_KEYS: Record<ExpenseCategory, MessageKey> = {
 };
 
 export function BudgetScreen({ tripId }: { tripId: string }) {
-  const { trip, loadState } = useTripData(tripId);
+  const { trip, loadState, persistTrip } = useTripData(tripId);
   if (loadState !== "ok" || !trip) return <TripLoadStateScreen state={loadState} />;
-  return <BudgetContent trip={trip} />;
+  return <BudgetContent trip={trip} persistTrip={persistTrip} />;
 }
 
-function BudgetContent({ trip }: { trip: Trip }) {
+function BudgetContent({
+  trip,
+  persistTrip,
+}: {
+  trip: Trip;
+  persistTrip: (next: Trip) => Promise<void>;
+}) {
   const { t } = useI18n();
-  const { persistTrip } = useTripData(trip.id);
 
   const total = useMemo(() => totalSpent(trip), [trip]);
   const byCat = useMemo(() => spendByCategory(trip), [trip]);
@@ -89,6 +95,7 @@ function BudgetContent({ trip }: { trip: Trip }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      <TripBackToTripLink tripId={trip.id} />
       <header>
         <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-brand)]">
           <Wallet className="h-3.5 w-3.5" /> {trip.title}

@@ -35,8 +35,17 @@ export async function fetchOpenMeteoDaily(args: {
   if (args.endDateIso) url.searchParams.set("end_date", args.endDateIso.slice(0, 10));
 
   const res = await fetch(url.toString(), { next: { revalidate: 1800 } });
-  if (!res.ok) throw new Error(`open-meteo ${res.status}`);
-  const json = (await res.json()) as OpenMeteoDailyResponse;
+  const json = (await res.json()) as OpenMeteoDailyResponse & {
+    error?: boolean;
+    reason?: string;
+  };
+  if (!res.ok) {
+    const hint = json.reason ? `: ${json.reason}` : "";
+    throw new Error(`open-meteo ${res.status}${hint}`);
+  }
+  if (json.error === true) {
+    throw new Error(json.reason ?? "open-meteo rejected request");
+  }
   const time = json.daily?.time ?? [];
   const tmax = json.daily?.temperature_2m_max ?? [];
   const tmin = json.daily?.temperature_2m_min ?? [];
