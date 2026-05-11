@@ -137,6 +137,7 @@ function FloatingTrigger({
               transition={{ duration: 0.18 }}
               className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] lg:hidden"
               onClick={() => onOpenChange(false)}
+              onWheel={(e) => e.stopPropagation()}
             />
             <motion.div
               initial={{ opacity: 0, y: 24, scale: 0.96 }}
@@ -146,7 +147,7 @@ function FloatingTrigger({
               role="dialog"
               aria-modal="true"
               aria-label={t("agent.title")}
-              className="fixed bottom-24 left-3 right-3 z-50 mx-auto flex max-h-[78dvh] w-auto max-w-md flex-col overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-float)] lg:start-auto lg:end-6 lg:mx-0 lg:w-[28rem] lg:max-w-none"
+              className="fixed bottom-24 left-3 right-3 z-50 mx-auto flex max-h-[78dvh] min-h-0 w-auto max-w-md flex-col overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-float)] lg:start-auto lg:end-6 lg:mx-0 lg:w-[28rem] lg:max-w-none"
             >
               {children}
             </motion.div>
@@ -219,7 +220,7 @@ function DockPanel({
 
   return (
     <>
-      <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-gradient-aurora p-4 text-white">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-gradient-aurora p-4 text-white">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] opacity-80">
             {t("agent.title")}
@@ -245,8 +246,12 @@ function DockPanel({
         </IconButton>
       </header>
 
-      <Tabs value={tab} onValueChange={(v) => onTabChange(v as typeof tab)} className="flex-1 overflow-hidden">
-        <div className="px-4 pt-3">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => onTabChange(v as typeof tab)}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
+        <div className="shrink-0 px-4 pt-3">
           <TabsList className="w-full">
             <TabsTrigger value="chat" className="flex-1">
               {t("agent.tabChat")}
@@ -265,15 +270,21 @@ function DockPanel({
           </TabsList>
         </div>
 
-        <TabsContent value="chat" className="m-0 flex flex-1 flex-col overflow-hidden">
+        <TabsContent value="chat" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
           <ChatTab assistant={assistant} screen={screen} />
         </TabsContent>
 
-        <TabsContent value="suggestions" className="m-0 flex max-h-[55dvh] flex-col overflow-y-auto px-4 pb-4">
+        <TabsContent
+          value="suggestions"
+          className="m-0 flex max-h-[55dvh] min-h-0 flex-col overflow-y-auto px-4 pb-4 data-[state=inactive]:hidden"
+        >
           <SuggestionsTab trip={trip} persistTrip={persistTrip} />
         </TabsContent>
 
-        <TabsContent value="actions" className="m-0 flex max-h-[55dvh] flex-col overflow-y-auto px-4 pb-4">
+        <TabsContent
+          value="actions"
+          className="m-0 flex max-h-[55dvh] min-h-0 flex-col overflow-y-auto px-4 pb-4 data-[state=inactive]:hidden"
+        >
           <ActionsTab
             screen={screen}
             trip={trip}
@@ -323,8 +334,11 @@ function ChatTab({
   const actions = actionsForScreen(screen);
 
   return (
-    <div className="flex flex-1 flex-col">
-      <div ref={listRef} className="flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        ref={listRef}
+        className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-y-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
+      >
         {assistant.lines.length === 0 && !assistant.loading ? (
           <p className="rounded-2xl bg-[var(--color-surface-muted)] px-3 py-3 text-sm text-[var(--color-muted-foreground)]">
             {t("agent.empty")}
@@ -357,7 +371,7 @@ function ChatTab({
       </div>
 
       {actions.length > 0 ? (
-        <div className="border-t border-[var(--color-border)] px-4 py-2">
+        <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2">
           <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
             {t("agent.actionsForScreen", { screen: screen ?? "trip" })}
           </p>
@@ -383,7 +397,7 @@ function ChatTab({
 
       <form
         onSubmit={onSubmit}
-        className="flex items-end gap-2 border-t border-[var(--color-border)] p-3"
+        className="flex shrink-0 items-end gap-2 border-t border-[var(--color-border)] p-3"
       >
         <Textarea
           value={input}
