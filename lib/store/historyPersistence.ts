@@ -51,3 +51,25 @@ export function persistTripHistoryDebounced(
   }, delayMs);
 }
 
+/**
+ * Removes persisted undo/redo for a trip from `localStorage` and cancels any in-flight
+ * debounced write for that trip. Does **not** change Redux `past`/`future` — in-memory
+ * undo keeps working until reload (when history is re-hydrated from storage again).
+ */
+export function clearTripHistoryLocalStorage(tripId: string): void {
+  const id = tripId.trim();
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(getHistoryStorageKey(id));
+  } catch {
+    /* ignore */
+  }
+  if (latest?.tripId === id) {
+    if (pending !== null) {
+      window.clearTimeout(pending);
+      pending = null;
+    }
+    latest = null;
+  }
+}
+

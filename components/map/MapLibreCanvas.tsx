@@ -9,15 +9,16 @@ import Map, {
   type MapRef,
 } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Bed, MapPin, Sparkles } from "lucide-react";
+import { Bed, Bus, MapPin, MapPinned, Sparkles } from "lucide-react";
 import { cn } from "@/lib/ui/cn";
+import type { MapDestinationPinCategory } from "@/lib/trip/mapDestinationPinCategory";
 
 export interface MapPin {
   id: string;
   lat: number;
   lon: number;
   title: string;
-  category: "stay" | "activity" | "destination" | "nearby";
+  category: MapDestinationPinCategory | "nearby";
   selected?: boolean;
   onClick?: () => void;
 }
@@ -263,15 +264,29 @@ export function MapLibreCanvas({
 
 function PinView({ pin, onPress }: { pin: MapPin; onPress?: () => void }) {
   const Icon =
-    pin.category === "stay" ? Bed : pin.category === "activity" ? Sparkles : MapPin;
+    pin.category === "hotel"
+      ? Bed
+      : pin.category === "transit"
+        ? Bus
+        : pin.category === "activity"
+          ? Sparkles
+          : pin.category === "nearby"
+            ? MapPin
+            : MapPinned;
   const color =
-    pin.category === "stay"
+    pin.category === "hotel"
       ? "#7c3aed"
-      : pin.category === "activity"
-        ? "#10b981"
-        : pin.category === "nearby"
-          ? "#f97316"
-          : "#0ea5e9";
+      : pin.category === "transit"
+        ? "#0ea5e9"
+        : pin.category === "activity"
+          ? "#10b981"
+          : pin.category === "stayArea"
+            ? "#0e7490"
+            : pin.category === "nearby"
+              ? "#f97316"
+              : pin.category === "place"
+                ? "#0369a1"
+                : "#0369a1";
   return (
     <button
       type="button"

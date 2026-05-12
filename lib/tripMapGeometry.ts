@@ -528,35 +528,15 @@ function sameLatLng(a: LatLng, b: LatLng): boolean {
   return a.lat === b.lat && a.lng === b.lng;
 }
 
+/** Transit legs on the map come only from {@link TransitStep#stepIntervals} rows with `intervalType: "transit"` (see {@link transitIntervalsToMapEdges}). */
 export function collectTransitMapEdges(
   sortedSteps: TripStep[],
   destinations: Destination[]
 ): TransitMapEdge[] {
   const out: TransitMapEdge[] = [];
-  for (let i = 0; i < sortedSteps.length; i++) {
-    const s = sortedSteps[i]!;
+  for (const s of sortedSteps) {
     if (s.stepType !== "transit") continue;
-    const explicit = transitIntervalsToMapEdges(s, destinations);
-    if (explicit.length > 0) {
-      out.push(...explicit);
-      continue;
-    }
-    const from = walkExitAnchor(sortedSteps, i - 1, destinations);
-    const to = walkEntryAnchor(sortedSteps, i + 1, destinations);
-    if (!from || !to || sameLatLng(from, to)) continue;
-    const tr = s as TransitStep;
-    out.push({
-      stepId: tr.id,
-      intervalId: `inferred-${tr.id}`,
-      title: (tr.title || "Transit").trim() || "Transit",
-      from,
-      to,
-      startTime: tr.startTime,
-      endTime: tr.endTime ?? tr.startTime,
-      fromPlaceLabel: stepMapExitPlaceLabel(sortedSteps[i - 1], destinations),
-      toPlaceLabel: stepMapEntryPlaceLabel(sortedSteps[i + 1], destinations),
-      inferred: true,
-    });
+    out.push(...transitIntervalsToMapEdges(s as TransitStep, destinations));
   }
   return out;
 }

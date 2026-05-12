@@ -16,8 +16,11 @@ import { EmptyState } from "@/components/ui/empty";
 import { Switch } from "@/components/ui/switch";
 import { IconButton } from "@/components/ui/icon-button";
 import { coordsFromDestination } from "@/lib/tripDestinationGeo";
+import { destinationMapPinCategory, type MapDestinationPinCategory } from "@/lib/trip/mapDestinationPinCategory";
+import { transitIntervalsToMapEdges } from "@/lib/tripMapGeometry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
-import type { Destination, Trip } from "@/lib/types/trip";
+import type { MessageKey } from "@/lib/i18n/messages";
+import type { TransitStep, Trip } from "@/lib/types/trip";
 import type { PlaceSearchHit } from "@/lib/places/types";
 import type { MapPin as MapPinType, MapRouteSegment } from "@/components/map/MapLibreCanvas";
 
@@ -25,6 +28,29 @@ const MapLibreCanvas = dynamic(
   () => import("@/components/map/MapLibreCanvas").then((m) => ({ default: m.MapLibreCanvas })),
   { ssr: false, loading: () => <Skeleton className="h-full w-full rounded-3xl" /> }
 );
+
+const PIN_KIND_LABEL: Record<MapDestinationPinCategory, MessageKey> = {
+  hotel: "mapview.pinKind.hotel",
+  transit: "mapview.pinKind.transit",
+  stayArea: "mapview.pinKind.area",
+  activity: "mapview.pinKind.activity",
+  place: "mapview.pinKind.place",
+};
+
+function pinKindBadgeTone(cat: MapDestinationPinCategory): "brand" | "mint" | "sky" | "amber" | "neutral" {
+  switch (cat) {
+    case "hotel":
+      return "brand";
+    case "activity":
+      return "mint";
+    case "transit":
+      return "sky";
+    case "stayArea":
+      return "amber";
+    default:
+      return "neutral";
+  }
+}
 
 export function MapScreen({ tripId }: { tripId: string }) {
   const { trip, loadState } = useTripData(tripId);
@@ -50,7 +76,7 @@ function MapContent({ trip }: { trip: Trip }) {
     for (const d of trip.destinations) {
       const c = coordsFromDestination(d);
       if (!c) continue;
-      const category = inferCategory(d, trip);
+      const category = destinationMapPinCategory(trip, d.id);
       pins.push({
         id: `dest:${d.id}`,
         lat: c.lat,
@@ -94,27 +120,21 @@ function MapContent({ trip }: { trip: Trip }) {
     if (!showRoutes) return [];
     const sorted = sortTripStepsByStartTime(trip.steps);
     const segments: MapRouteSegment[] = [];
-    let prev: { lat: number; lon: number } | null = null;
     for (const step of sorted) {
-      const dest = trip.destinations.find((d) => d.id === step.targetDestinationId);
-      const c = dest ? coordsFromDestination(dest) : null;
-      if (!c) continue;
-      if (prev) {
+      if (step.stepType !== "transit") continue;
+      const tr = step as TransitStep;
+      if (!tr.stepIntervals.some((int) => int.intervalType === "transit")) continue;
+      const edges = transitIntervalsToMapEdges(tr, trip.destinations);
+      for (const e of edges) {
         segments.push({
-          id: `${prev.lat}-${prev.lon}-${c.lat}-${c.lng}`,
+          id: `transit:${tr.id}:${e.intervalId}`,
           coordinates: [
-            [prev.lon, prev.lat],
-            [c.lng, c.lat],
+            [e.from.lng, e.from.lat],
+            [e.to.lng, e.to.lat],
           ],
-          color:
-            step.stepType === "transit"
-              ? "#0ea5e9"
-              : step.stepType === "stay"
-                ? "#7c3aed"
-                : "#10b981",
+          color: "#0ea5e9",
         });
       }
-      prev = { lat: c.lat, lon: c.lng };
     }
     return segments;
   }, [trip, showRoutes]);
@@ -189,7 +209,7 @@ function MapContent({ trip }: { trip: Trip }) {
             ) : (
               <ul className="space-y-1.5">
                 {placesWithCoords.map((d) => {
-                  const cat = inferCategory(d, trip);
+                  const cat = destinationMapPinCategory(trip, d.id);
                   const tone =
                     cat === "stay" ? "brand" : cat === "activity" ? "mint" : "sky";
                   return (
@@ -331,15 +351,13 @@ function MapContent({ trip }: { trip: Trip }) {
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {pinSelection.kind === "destination" && selectedDestination ? (
                         <Badge
-                          tone={
-                            inferCategory(selectedDestination, trip) === "stay"
-                              ? "brand"
-                              : inferCategory(selectedDestination, trip) === "activity"
-                                ? "mint"
-                                : "sky"
-                          }
+                          tone={pinKindBadgeTone(
+                            destinationMapPinCategory(trip, selectedDestination.id)
+                          )}
                         >
-                          {inferCategory(selectedDestination, trip)}
+                          {t(
+                            PIN_KIND_LABEL[destinationMapPinCategory(trip, selectedDestination.id)]
+                          )}
                         </Badge>
                       ) : (
                         <Badge tone="coral">{t("mapview.nearby")}</Badge>
@@ -378,14 +396,4 @@ function MapContent({ trip }: { trip: Trip }) {
       </div>
     </div>
   );
-}
-
-function inferCategory(dest: Destination, trip: Trip): "stay" | "activity" | "destination" {
-  for (const step of trip.steps) {
-    if (step.targetDestinationId === dest.id) {
-      if (step.stepType === "stay") return "stay";
-      if (step.stepType === "activity") return "activity";
-    }
-  }
-  return "destination";
 }

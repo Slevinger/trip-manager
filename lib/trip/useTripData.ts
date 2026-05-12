@@ -17,6 +17,7 @@ import {
   setManageDraft as setManageDraftAction,
   setTrip as setTripAction,
 } from "@/lib/store/tripSlice";
+import { clearTripHistoryLocalStorage } from "@/lib/store/historyPersistence";
 import { clearManageDraftLocal } from "@/lib/trip/manageDraftLocalCache";
 import { getTrip, putTrip } from "@/lib/tripLocalStore";
 import type { Trip } from "@/lib/types/trip";
@@ -211,14 +212,18 @@ export function useTripData(tripId: string): UseTripDataResult {
           payload: normalized,
           meta: { history: "skip" },
         });
-        clearManageDraftLocal(tripId.trim());
+        const tid = tripId.trim();
+        clearManageDraftLocal(tid);
+        clearTripHistoryLocalStorage(tid);
         return;
       }
       putTrip(normalized);
       const saved = getTrip(tripId) ?? normalized;
       dispatch({ type: setTripAction.type, payload: saved, meta: { history: "skip" } });
       dispatch({ type: setManageDraftAction.type, payload: saved, meta: { history: "skip" } });
-      clearManageDraftLocal(tripId.trim());
+      const tid = tripId.trim();
+      clearManageDraftLocal(tid);
+      clearTripHistoryLocalStorage(tid);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setSaveError(msg);
