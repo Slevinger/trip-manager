@@ -10,10 +10,11 @@ const pill =
 
 /** `/trip/[id]/…` sub-routes → trip overview hub */
 export function TripBackToTripLink({ tripId }: { tripId: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const rtl = locale === "he";
   return (
-    <Link href={`/trip/${tripId}`} className={pill}>
-      <ArrowLeft className="h-3.5 w-3.5 shrink-0" aria-hidden />
+    <Link href={`/trip/${tripId}`} className={cn(pill, rtl && "flex-row-reverse")}>
+      <ArrowLeft className={cn("h-3.5 w-3.5 shrink-0", rtl && "rotate-180")} aria-hidden />
       <span>{t("shell.backToTrip")}</span>
     </Link>
   );
@@ -21,10 +22,11 @@ export function TripBackToTripLink({ tripId }: { tripId: string }) {
 
 /** Trip overview & profile → dashboard trip list */
 export function TripBackToTripsHubLink({ className }: { className?: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const rtl = locale === "he";
   return (
-    <Link href="/" className={cn(pill, className)}>
-      <ArrowLeft className="h-3.5 w-3.5 shrink-0" aria-hidden />
+    <Link href="/" className={cn(pill, rtl && "flex-row-reverse", className)}>
+      <ArrowLeft className={cn("h-3.5 w-3.5 shrink-0", rtl && "rotate-180")} aria-hidden />
       <span>{t("shell.allTrips")}</span>
     </Link>
   );

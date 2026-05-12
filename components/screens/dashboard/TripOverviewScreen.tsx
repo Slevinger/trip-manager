@@ -33,27 +33,14 @@ import { EmptyState } from "@/components/ui/empty";
 import { InlineAgentSuggestions } from "@/components/agent/InlineAgentSuggestions";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
 import { TripBackToTripsHubLink } from "@/components/screens/_shared/TripSubpageBackLink";
+import { formatTripHeroDateRangeLine } from "@/lib/i18n/formatTripHeroDateRange";
 import {
   formatDurationMs,
   getTripViewPhase,
   msUntilTripStart,
-  tripInstantMs,
   tripTotalDurationMs,
 } from "@/lib/tripViewPhase";
 import type { Traveler, Trip, TripViewer } from "@/lib/types/trip";
-
-function formatRange(startIso: string, endIso: string): string {
-  const a = tripInstantMs(startIso);
-  const b = tripInstantMs(endIso);
-  if (a == null || b == null) return "—";
-  const fmt = new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  return `${fmt.format(new Date(a))} → ${fmt.format(new Date(b))}`;
-}
 
 type TripWeatherRow = {
   dateIso: string;
@@ -138,7 +125,7 @@ function TripOverviewContent({
   persistTrip: (next: Trip) => Promise<void>;
   canManage: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const nowMs = Date.now();
   const phase = getTripViewPhase(trip, nowMs);
   const untilStart = msUntilTripStart(trip, nowMs);
@@ -238,6 +225,11 @@ function TripOverviewContent({
         ? "bg-gradient-aurora"
         : "bg-gradient-brand";
 
+  const heroDateLine = useMemo(
+    () => formatTripHeroDateRangeLine(trip.startDate, trip.endDate, locale, t),
+    [trip.startDate, trip.endDate, locale, t]
+  );
+
   const heroLabel =
     phase === "during"
       ? t("tripHero.runningTitle")
@@ -317,19 +309,7 @@ function TripOverviewContent({
           <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight sm:text-4xl">
             {trip.title}
           </h1>
-          <p className="mt-1 text-sm text-white/85">
-            {t("tripHero.dates", {
-              start: new Date(trip.startDate).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              }),
-              end: new Date(trip.endDate).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }),
-            })}
-          </p>
+          <p className="mt-1 text-sm text-white/85">{heroDateLine}</p>
           {trip.description ? (
             <p className="mt-3 max-w-2xl text-sm text-white/85">{trip.description}</p>
           ) : null}
@@ -458,7 +438,7 @@ function TripOverviewContent({
                 {weather.error ? (
                   <p className="text-[11px] text-[var(--color-danger)]">{weather.error}</p>
                 ) : null}
-                <TripWeatherMarquee rows={tripWeatherRows} />
+                <TripWeatherMarquee rows={tripWeatherRows} proxyYear={proxyYear ?? null} />
                 {weather.seasonalOutlook ? (
                   <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
                     <p className="font-semibold text-[var(--color-foreground)]">
@@ -629,7 +609,9 @@ function HeroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TripWeatherMarquee({ rows }: { rows: TripWeatherRow[] }) {
+function TripWeatherMarquee({ rows, proxyYear }: { rows: TripWeatherRow[]; proxyYear: number | null }) {
+  const { t } = useI18n();
+  const noneHint = t("dashboard.weatherSourceNoneHint");
   const parentRef = useRef<HTMLDivElement>(null);
   const fmt = useMemo(
     () => new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }),
@@ -640,7 +622,7 @@ function TripWeatherMarquee({ rows }: { rows: TripWeatherRow[] }) {
     count: rows.length,
     horizontal: true,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 80,
+    estimateSize: () => 108,
     gap: 8,
     overscan: 6,
     enabled: rows.length > 0,
@@ -651,7 +633,7 @@ function TripWeatherMarquee({ rows }: { rows: TripWeatherRow[] }) {
   return (
     <div
       ref={parentRef}
-      className="relative min-h-[5.75rem] min-w-0 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch]"
+      className="relative min-h-[6.5rem] min-w-0 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch]"
       style={{ touchAction: "pan-x" }}
       role="list"
     >
@@ -659,12 +641,21 @@ function TripWeatherMarquee({ rows }: { rows: TripWeatherRow[] }) {
         className="relative isolate"
         style={{
           width: virtualizer.getTotalSize(),
-          height: "5.75rem",
+          height: "6.5rem",
         }}
       >
         {virtualizer.getVirtualItems().map((vi) => {
           const d = rows[vi.index];
+          const dateLabel = fmt.format(new Date(`${d.dateIso}T12:00:00.000Z`));
           const has = d.source !== "none" && Number.isFinite(d.tempMaxC) && Number.isFinite(d.tempMinC);
+          const yearStr =
+            proxyYear != null && Number.isFinite(proxyYear) ? String(proxyYear) : "—";
+          const badgeTitle =
+            d.source === "forecast"
+              ? t("dashboard.weatherSourceForecastHint")
+              : d.source === "historical"
+                ? t("dashboard.weatherSourceTypicalHint", { year: yearStr })
+                : noneHint;
           return (
             <div
               key={vi.key}
@@ -674,16 +665,49 @@ function TripWeatherMarquee({ rows }: { rows: TripWeatherRow[] }) {
               className="absolute left-0 top-0 flex h-full items-stretch py-0.5"
               style={{ transform: `translateX(${vi.start}px)` }}
             >
-              <div className="flex min-w-[4.75rem] shrink-0 flex-col items-center justify-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-2 py-2 text-center text-xs sm:min-w-20">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-                  {fmt.format(new Date(`${d.dateIso}T12:00:00.000Z`))}
-                </span>
-                <span aria-hidden className="text-2xl leading-none">
-                  {weatherCodeIcon(has ? d.weatherCode : undefined)}
-                </span>
-                <span className="font-semibold text-[var(--color-foreground)]">
-                  {has ? `${Math.round(d.tempMaxC)}° / ${Math.round(d.tempMinC)}°` : "—"}
-                </span>
+              <div className="flex h-full w-[6rem] min-w-[6rem] max-w-[6.75rem] shrink-0 flex-col items-stretch rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-2 py-1.5 text-center text-xs">
+                <div className="flex h-8 min-w-0 shrink-0 items-center justify-center px-0.5">
+                  <span
+                    title={dateLabel}
+                    className="block w-full truncate whitespace-nowrap text-center text-[10px] font-semibold uppercase leading-tight tracking-wider text-[var(--color-muted-foreground)]"
+                  >
+                    {dateLabel}
+                  </span>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-0.5">
+                  <span aria-hidden className="text-2xl leading-none">
+                    {weatherCodeIcon(has ? d.weatherCode : undefined)}
+                  </span>
+                  <span className="shrink-0 font-semibold text-[var(--color-foreground)]">
+                    {has ? `${Math.round(d.tempMaxC)}° / ${Math.round(d.tempMinC)}°` : "—"}
+                  </span>
+                </div>
+                <div className="flex min-h-[1.375rem] shrink-0 items-center justify-center pt-0.5">
+                  {has ? (
+                    <span
+                      title={badgeTitle}
+                      aria-label={badgeTitle}
+                      className={cn(
+                        "max-w-full cursor-default truncate rounded-full px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide",
+                        d.source === "forecast"
+                          ? "bg-sky-500/15 text-sky-900 dark:text-sky-200"
+                          : "bg-amber-500/20 text-amber-950 dark:text-amber-100"
+                      )}
+                    >
+                      {d.source === "forecast"
+                        ? t("dashboard.weatherSourceForecast")
+                        : t("dashboard.weatherSourceTypical")}
+                    </span>
+                  ) : (
+                    <span
+                      title={noneHint}
+                      aria-label={noneHint}
+                      className="max-w-full cursor-default truncate text-[8px] font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      {t("dashboard.weatherSourceNone")}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           );

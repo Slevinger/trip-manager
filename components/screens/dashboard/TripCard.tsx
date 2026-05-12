@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarRange,
   ListChecks,
@@ -11,38 +11,21 @@ import {
   Wallet,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
+import { formatTripHeroDateRangeLine } from "@/lib/i18n/formatTripHeroDateRange";
 import { Avatar, AvatarFallback, AvatarImage, avatarInitials } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/ui/cn";
-import {
-  getTripViewPhase,
-  msUntilTripStart,
-  tripInstantMs,
-} from "@/lib/tripViewPhase";
+import { getTripViewPhase, msUntilTripStart } from "@/lib/tripViewPhase";
 import { heroCoverImageSrc } from "@/lib/trip/heroCoverDisplayUrl";
 import { useTripWeather, weatherCodeIcon } from "@/lib/weather/useTripWeather";
 import type { Trip, Traveler, TripViewer } from "@/lib/types/trip";
 
 const HOUR_MS = 3600 * 1000;
 
-function formatRange(startIso: string, endIso: string): string {
-  const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-  const yearFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-  const a = tripInstantMs(startIso);
-  const b = tripInstantMs(endIso);
-  if (a == null || b == null) return "—";
-  const aDate = new Date(a);
-  const bDate = new Date(b);
-  if (aDate.getFullYear() !== bDate.getFullYear()) {
-    return `${yearFmt.format(aDate)} → ${yearFmt.format(bDate)}`;
-  }
-  return `${fmt.format(aDate)} → ${yearFmt.format(bDate)}`;
-}
-
 export function TripCard({ trip }: { trip: Trip }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const reduce = useReducedMotion();
   const nowMs = Date.now();
   const phase = getTripViewPhase(trip, nowMs);
@@ -70,6 +53,11 @@ export function TripCard({ trip }: { trip: Trip }) {
     setCardImgSrc(proxiedCoverSrc || coverUrl || "");
     setCardImageFailed(false);
   }, [coverUrl, proxiedCoverSrc]);
+
+  const heroDateLine = useMemo(
+    () => formatTripHeroDateRangeLine(trip.startDate, trip.endDate, locale, t),
+    [trip.startDate, trip.endDate, locale, t]
+  );
 
   const countdownLabel =
     phase === "during"
@@ -152,7 +140,7 @@ export function TripCard({ trip }: { trip: Trip }) {
             })()}
           </div>
           <h3 className="mt-3 line-clamp-1 text-2xl font-semibold tracking-tight">{trip.title}</h3>
-          <p className="mt-1 text-xs text-white/85">{formatRange(trip.startDate, trip.endDate)}</p>
+          <p className="mt-1 text-xs text-white/85">{heroDateLine}</p>
           {trip.description ? (
             <p className="mt-2 line-clamp-2 text-sm text-white/80">{trip.description}</p>
           ) : null}

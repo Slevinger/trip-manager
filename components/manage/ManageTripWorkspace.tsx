@@ -14,6 +14,7 @@ import {
 } from "@/lib/tripDestinationRegistry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import type { Destination, Trip, TripStep, UserPreferences } from "@/lib/types/trip";
+import { cn } from "@/lib/ui/cn";
 import { CanonicalStepEditorDialog } from "./CanonicalStepEditorDialog";
 import { CanonicalStepList } from "./CanonicalStepList";
 import { ManageTripForm } from "./ManageTripForm";
@@ -52,7 +53,8 @@ export function ManageTripWorkspace({
   onUndo: () => void;
   onRedo: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const rtlIcons = locale === "he";
   const [saving, setSaving] = useState(false);
   const pendingInsertAfterId = useRef<string | null>(null);
   const [editor, setEditor] = useState<{
@@ -379,7 +381,7 @@ export function ManageTripWorkspace({
               aria-label={t("manage.undo")}
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              <Undo2 className="h-4 w-4" aria-hidden />
+              <Undo2 className={cn("h-4 w-4", rtlIcons && "-scale-x-100")} aria-hidden />
             </button>
             <button
               type="button"
@@ -389,7 +391,7 @@ export function ManageTripWorkspace({
               aria-label={t("manage.redo")}
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              <Redo2 className="h-4 w-4" aria-hidden />
+              <Redo2 className={cn("h-4 w-4", rtlIcons && "-scale-x-100")} aria-hidden />
             </button>
           </div>
           <button
