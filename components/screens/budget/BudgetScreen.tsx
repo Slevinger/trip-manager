@@ -22,14 +22,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, avatarInitials } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/ui/empty";
 import {
-  computeBalances,
-  cumulativeSpend,
-  nextExpenseId,
-  settleBalances,
-  spendByCategory,
-  spendByDay,
-  totalSpent,
-} from "@/lib/expenses/settlement";
+  cumulativeItinerarySpend,
+  spendByCategoryFromItinerary,
+  spendByDayFromItinerary,
+  tripItineraryTotalAmount,
+} from "@/lib/expenses/itinerarySpend";
+import { computeBalances, nextExpenseId, settleBalances } from "@/lib/expenses/settlement";
 import type { ExpenseCategory, ExpenseEntry, Trip } from "@/lib/types/trip";
 import type { MessageKey } from "@/lib/i18n/messages";
 
@@ -63,10 +61,11 @@ function BudgetContent({
 }) {
   const { t } = useI18n();
 
-  const total = useMemo(() => totalSpent(trip), [trip]);
-  const byCat = useMemo(() => spendByCategory(trip), [trip]);
-  const byDay = useMemo(() => spendByDay(trip), [trip]);
-  const cumulative = useMemo(() => cumulativeSpend(trip), [trip]);
+  const total = useMemo(() => tripItineraryTotalAmount(trip), [trip]);
+  const byCat = useMemo(() => spendByCategoryFromItinerary(trip), [trip]);
+  const byDay = useMemo(() => spendByDayFromItinerary(trip), [trip]);
+  const cumulative = useMemo(() => cumulativeItinerarySpend(trip), [trip]);
+  const hasItinerarySpend = total > 0;
   const settlements = useMemo(() => settleBalances(trip), [trip]);
   const balances = useMemo(() => computeBalances(trip), [trip]);
 
@@ -125,11 +124,11 @@ function BudgetContent({
         />
       </div>
 
-      {(trip.expenses ?? []).length === 0 ? (
+      {!hasItinerarySpend ? (
         <EmptyState
           icon={<Wallet className="h-7 w-7" />}
-          title={t("budget.noExpenses")}
-          description={t("budget.subheading")}
+          title={t("budget.noItinerarySpend")}
+          description={t("budget.itinerarySpendHint")}
         />
       ) : (
         <Charts
