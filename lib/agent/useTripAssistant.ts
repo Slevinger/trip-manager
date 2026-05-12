@@ -11,11 +11,9 @@ import {
   parseTripAssistantRequestKind,
   tripAssistantNeedsGlobalContext,
 } from "@/lib/tripAssistantRequestKind";
-import { appendImmutableMemoryQueueTurn } from "@/lib/usersFirestore";
 import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
-import { appendTripChatLocal } from "@/lib/tripChatLocalStore";
 import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
-import type { Email, TripChatMessage } from "@/lib/types/user";
+import type { TripChatMessage } from "@/lib/types/user";
 
 export type ChatRole = "user" | "assistant";
 
@@ -302,24 +300,6 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         }
         setLines((prev) => [...prev, { role: "assistant", content: reply }]);
 
-        const localFromEmail = (opts.userEmail?.trim().toLowerCase() || "you") as Email;
-        const userTimeStampIso = new Date(contextAtMs).toISOString();
-        const agentTimeStampIso = new Date(contextAtMs + 1).toISOString();
-        appendTripChatLocal(opts.trip.id, [
-          {
-            tripId: opts.trip.id,
-            from: localFromEmail,
-            content: text,
-            timeStamp: userTimeStampIso,
-          },
-          {
-            tripId: opts.trip.id,
-            from: "agent",
-            content: reply,
-            timeStamp: agentTimeStampIso,
-          },
-        ]);
-
         if (Array.isArray(data.suggestions) && data.suggestions.length > 0 && opts.onAddRecommendations) {
           try {
             await opts.onAddRecommendations(opts.trip, data.suggestions);
@@ -345,16 +325,6 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
                 tripContextNote: where.summary,
                 ...(requestKind ? { requestKind } : {}),
               }),
-              appendImmutableMemoryQueueTurn(fromEmailLower, {
-                tripId: "__global__",
-                userFromEmail: opts.userEmail.trim(),
-                userContent: text,
-                agentContent: reply,
-                sentAtMs: contextAtMs + 2,
-                tripContextNote: where.summary,
-                originTripId: opts.trip.id,
-                ...(requestKind ? { requestKind } : {}),
-              }),
             ]);
           } catch (e) {
             console.warn("[chat-persist] append failed", e);
@@ -370,10 +340,6 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
                   method: "POST",
                   headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                   body: JSON.stringify({ tripId: opts.trip.id }),
-                }).catch(() => {}),
-                fetch("/api/chat/immutable-memory-compact", {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${token}` },
                 }).catch(() => {}),
               ]);
             } catch {

@@ -17,6 +17,7 @@ import {
   setManageDraft as setManageDraftAction,
   setTrip as setTripAction,
 } from "@/lib/store/tripSlice";
+import { clearManageDraftLocal } from "@/lib/trip/manageDraftLocalCache";
 import { getTrip, putTrip } from "@/lib/tripLocalStore";
 import type { Trip } from "@/lib/types/trip";
 
@@ -101,6 +102,7 @@ export function useTripData(tripId: string): UseTripDataResult {
       const local = getTrip(tripId);
       if (!local) {
         dispatch({ type: setTripAction.type, payload: null, meta: { history: "skip" } });
+        dispatch({ type: setManageDraftAction.type, payload: null, meta: { history: "skip" } });
         dispatch({ type: setFirestoreTripAccess.type, payload: null, meta: { history: "skip" } });
         setLoadState("missing");
         return;
@@ -128,6 +130,7 @@ export function useTripData(tripId: string): UseTripDataResult {
         if (cancelled || gen !== subscriptionGen) return;
         if (!u) {
           dispatch({ type: setTripAction.type, payload: null, meta: { history: "skip" } });
+          dispatch({ type: setManageDraftAction.type, payload: null, meta: { history: "skip" } });
           dispatch({ type: setFirestoreTripAccess.type, payload: null, meta: { history: "skip" } });
           setLoadState("needs_auth");
           return;
@@ -136,6 +139,7 @@ export function useTripData(tripId: string): UseTripDataResult {
         if (cancelled || gen !== subscriptionGen) return;
         if (!google) {
           dispatch({ type: setTripAction.type, payload: null, meta: { history: "skip" } });
+          dispatch({ type: setManageDraftAction.type, payload: null, meta: { history: "skip" } });
           dispatch({ type: setFirestoreTripAccess.type, payload: null, meta: { history: "skip" } });
           setLoadState("needs_google");
           return;
@@ -150,6 +154,7 @@ export function useTripData(tripId: string): UseTripDataResult {
             (t, access) => {
               if (!t) {
                 dispatch({ type: setTripAction.type, payload: null, meta: { history: "skip" } });
+                dispatch({ type: setManageDraftAction.type, payload: null, meta: { history: "skip" } });
                 dispatch({ type: setFirestoreTripAccess.type, payload: null, meta: { history: "skip" } });
                 setLoadState("missing");
                 return;
@@ -173,6 +178,7 @@ export function useTripData(tripId: string): UseTripDataResult {
                   : "";
               if (code.includes("permission-denied")) {
                 dispatch({ type: setTripAction.type, payload: null, meta: { history: "skip" } });
+                dispatch({ type: setManageDraftAction.type, payload: null, meta: { history: "skip" } });
                 dispatch({ type: setFirestoreTripAccess.type, payload: null, meta: { history: "skip" } });
                 setLoadState("access_denied");
                 return;
@@ -205,12 +211,14 @@ export function useTripData(tripId: string): UseTripDataResult {
           payload: normalized,
           meta: { history: "skip" },
         });
+        clearManageDraftLocal(tripId.trim());
         return;
       }
       putTrip(normalized);
       const saved = getTrip(tripId) ?? normalized;
       dispatch({ type: setTripAction.type, payload: saved, meta: { history: "skip" } });
       dispatch({ type: setManageDraftAction.type, payload: saved, meta: { history: "skip" } });
+      clearManageDraftLocal(tripId.trim());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setSaveError(msg);

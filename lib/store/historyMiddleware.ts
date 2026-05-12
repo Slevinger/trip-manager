@@ -27,35 +27,9 @@ function randomId() {
 export const historyMiddleware: Middleware<{}, HistoryRootState> = (api) => (next) => (action) => {
   const prevState = api.getState();
 
-  // Skip recording for initialization and explicit skip meta.
   const meta = (action as any)?.meta;
   const skip = meta?.history === "skip";
   const type = (action as any)?.type as string | undefined;
-
-  const result = next(action);
-
-  if (!type || skip) return result;
-  if (type === "trip/undo" || type === "trip/redo" || type === "trip/pushHistory" || type === "trip/hydrateHistory")
-    return result;
-
-  const nextState = api.getState();
-
-  const activeTripId = nextState.trip.activeTripId;
-  const prevTrip = prevState.trip.trip;
-  const nextTrip = nextState.trip.trip;
-  const prevDraft = prevState.trip.draft;
-  const nextDraft = nextState.trip.draft;
-
-  // Opportunistically set activeTripId from trip payload if not set yet.
-  if (!activeTripId && (nextTrip?.id || nextDraft?.id)) {
-    api.dispatch(setActiveTripId(nextTrip?.id ?? nextDraft?.id ?? null));
-  }
-
-  // Hydrate history once when a trip becomes active.
-  const nowActive = api.getState().trip.activeTripId;
-  if (nowActive && prevState.trip.activeTripId !== nowActive) {
-    api.dispatch({ type: hydrateHistory.type, payload: loadTripHistory(nowActive), meta: { history: "skip" } });
-  }
 
   const computeAndPush = (
     scope: "trip" | "draft",
@@ -91,21 +65,62 @@ export const historyMiddleware: Middleware<{}, HistoryRootState> = (api) => (nex
     computeAndPush("draft", before, after, `${lastActionType} (debounced)`);
   };
 
-  // Record trip changes
+  // Skipped canonical updates (Firestore, persist) still need any in-flight debounced
+  // draft burst committed *before* the reducer runs; otherwise the timer fires after
+  // save and appends a stale diff to `past`.
+  if (skip && (type === "trip/setTrip" || type === "trip/setManageDraft")) {
+    flushPendingDraft();
+  }
+
+  const result = next(action);
+
+  if (!type || skip) return result;
+  if (type === "trip/undo" || type === "trip/redo" || type === "trip/pushHistory" || type === "trip/hydrateHistory")
+    return result;
+
+  const nextState = api.getState();
+
+  const activeTripId = nextState.trip.activeTripId;
+  const prevTrip = prevState.trip.trip;
+  const nextTrip = nextState.trip.trip;
+  const prevDraft = prevState.trip.draft;
+  const nextDraft = nextState.trip.draft;
+
+  if (!activeTripId && (nextTrip?.id || nextDraft?.id)) {
+    api.dispatch(setActiveTripId(nextTrip?.id ?? nextDraft?.id ?? null));
+  }
+
+  const nowActive = api.getState().trip.activeTripId;
+  if (nowActive && prevState.trip.activeTripId !== nowActive) {
+    api.dispatch({ type: hydrateHistory.type, payload: loadTripHistory(nowActive), meta: { history: "skip" } });
+  }
+
   if (prevTrip !== nextTrip) {
-    // If the canonical trip changes, flush any pending draft burst first so undo order is intuitive.
     flushPendingDraft();
     computeAndPush("trip", prevTrip, nextTrip, type);
   }
-  // Record draft changes
+
   if (prevDraft !== nextDraft) {
+    const draftAlignedToCanonical =
+      nextDraft != null && nextTrip != null && nextDraft === nextTrip;
+
+    if (draftAlignedToCanonical) {
+      flushPendingDraft();
+      if (type === "trip/setTrip") {
+        return result;
+      }
+      if (type === "trip/setManageDraft") {
+        computeAndPush("draft", prevDraft, nextDraft, type);
+        return result;
+      }
+    }
+
     const tripIdForDraft = nextState.trip.activeTripId ?? nextDraft?.id ?? nextTrip?.id;
     if (!tripIdForDraft || typeof window === "undefined") {
       computeAndPush("draft", prevDraft, nextDraft, type);
       return result;
     }
 
-    // Debounce draft changes: coalesce rapid typing into one history entry.
     if (pendingDraft && pendingDraft.tripId === tripIdForDraft) {
       window.clearTimeout(pendingDraft.timeoutId);
       pendingDraft.after = nextDraft;
@@ -129,4 +144,3 @@ export const historyMiddleware: Middleware<{}, HistoryRootState> = (api) => (nex
 
   return result;
 };
-

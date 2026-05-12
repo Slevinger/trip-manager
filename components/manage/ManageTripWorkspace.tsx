@@ -181,7 +181,7 @@ export function ManageTripWorkspace({
 
   return (
     <div className="relative">
-      <div className="space-y-6 pb-28">
+      <div className="space-y-6 pb-36 lg:pb-28">
         <div className="sticky top-0 z-10 -mx-4 flex justify-center border-b border-zinc-200/70 bg-white/85 px-4 py-2 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/85">
           <div
             role="tablist"
@@ -331,10 +331,10 @@ export function ManageTripWorkspace({
           (dirty && !saveDisabled
             ? "border-amber-300/70 bg-amber-50/95 dark:border-amber-500/30 dark:bg-amber-500/10 "
             : "border-zinc-200 bg-white/95 dark:border-zinc-800 dark:bg-zinc-950/95 ") +
-          "sticky bottom-0 z-30 -mx-4 mt-2 flex flex-col gap-2 border-t px-4 py-3 shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.08)] backdrop-blur-md dark:shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.35)]"
+          "fixed inset-x-0 bottom-[calc(4.5rem+max(env(safe-area-inset-bottom),0.5rem))] z-[45] flex flex-col gap-2 border-t py-3 shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.08)] backdrop-blur-md dark:shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.35)] lg:bottom-0"
         }
-        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
+        <div className="mx-auto w-full max-w-6xl px-4">
         {saveError ? (
           <p className="text-xs font-medium text-red-600 dark:text-red-400">{saveError}</p>
         ) : null}
@@ -441,6 +441,7 @@ export function ManageTripWorkspace({
             )}
             <span>{saving ? t("manage.saveSaving") : t("manage.saveTrip")}</span>
           </button>
+        </div>
         </div>
       </div>
 

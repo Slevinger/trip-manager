@@ -7,9 +7,10 @@ import type { ReactNode } from "react";
 export function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   const reduce = useReducedMotion();
-  const initial = reduce ? false : { opacity: 0, y: 8 };
-  const animate = reduce ? { opacity: 1 } : { opacity: 1, y: 0 };
-  const exit = reduce ? { opacity: 0 } : { opacity: 0, y: -8 };
+  // No translate `y`: a transformed ancestor breaks `position: fixed` (e.g. manage save bar).
+  const initial = reduce ? false : { opacity: 0 };
+  const animate = { opacity: 1 };
+  const exit = { opacity: 0 };
 
   return (
     <AnimatePresence mode="wait" initial={false}>

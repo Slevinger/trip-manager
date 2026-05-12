@@ -42,8 +42,21 @@ const tripSlice = createSlice({
       state.future = action.payload.future;
     },
     setTrip(state, action: PayloadAction<Trip | null>) {
-      state.trip = action.payload;
-      if (!action.payload) state.firestoreTripAccess = null;
+      const next = action.payload;
+      const prevTrip = state.trip;
+      if (!next) {
+        state.trip = null;
+        state.firestoreTripAccess = null;
+        state.draft = null;
+        return;
+      }
+      const draftStillMirroredCanonical =
+        state.draft !== null && prevTrip !== null && state.draft === prevTrip;
+      state.trip = next;
+      // Seed draft on first load / trip switch; keep unsaved draft if it diverged from the prior canonical trip.
+      if (state.draft === null || state.draft.id !== next.id || draftStillMirroredCanonical) {
+        state.draft = next;
+      }
     },
     setFirestoreTripAccess(state, action: PayloadAction<FirestoreTripAccess | null>) {
       state.firestoreTripAccess = action.payload;
