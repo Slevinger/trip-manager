@@ -1,17 +1,24 @@
 import type { ExpenseEntry, Trip } from "@/lib/types/trip";
+import type { FxMultipliersToTarget } from "@/lib/fx/moneyInTargetCurrency";
+import { moneyAmountInTargetCurrency } from "@/lib/fx/moneyInTargetCurrency";
 
 /**
  * Per-traveler net balance: positive = others owe them, negative = they owe.
  * Numeric stable to 2 decimal places to avoid float drift.
+ *
+ * @param fx When set, each expense amount is converted into {@link Trip#currency}
+ * before splitting; when omitted, raw numeric amounts are used (legacy single-currency behaviour).
  */
-export function computeBalances(trip: Trip): Record<string, number> {
+export function computeBalances(trip: Trip, fx?: FxMultipliersToTarget | null): Record<string, number> {
   const expenses = trip.expenses ?? [];
+  const target = (trip.currency ?? "").trim().toUpperCase() || "USD";
   const balances: Record<string, number> = {};
   for (const t of trip.travelers) balances[t.id] = 0;
   for (const e of expenses) {
     const splitIds = e.splitBetween.length > 0 ? e.splitBetween : [e.paidByTravelerId];
-    const share = e.amount.amount / splitIds.length;
-    balances[e.paidByTravelerId] = (balances[e.paidByTravelerId] ?? 0) + e.amount.amount;
+    const amt = moneyAmountInTargetCurrency(e.amount, target, fx);
+    const share = amt / splitIds.length;
+    balances[e.paidByTravelerId] = (balances[e.paidByTravelerId] ?? 0) + amt;
     for (const id of splitIds) {
       balances[id] = (balances[id] ?? 0) - share;
     }
@@ -33,8 +40,8 @@ export interface Settlement {
  * Greedy settlement: at each step the largest debtor pays down the largest
  * creditor. Yields at most `n - 1` transfers for `n` people.
  */
-export function settleBalances(trip: Trip): Settlement[] {
-  const balances = computeBalances(trip);
+export function settleBalances(trip: Trip, fx?: FxMultipliersToTarget | null): Settlement[] {
+  const balances = computeBalances(trip, fx);
   const currency = trip.currency || "USD";
   const owed = Object.entries(balances)
     .map(([id, amount]) => ({ id, amount }))

@@ -10,6 +10,9 @@ import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { formatMoneyDisplay, stepDisplayTotalCost } from "@/lib/trip/stepCosts";
 import type { Destination, Trip, TripStep } from "@/lib/types/trip";
 
+const REORDER_LONG_PRESS_MS = 450;
+const REORDER_CANCEL_MOVE_PX = 12;
+
 function stepEmoji(step: TripStep): string {
   if (step.stepType === "stay") return "🏨";
   if (step.stepType === "activity") return "📍";
@@ -108,8 +111,20 @@ export function CanonicalStepList({
   const [deleteConfirmStepId, setDeleteConfirmStepId] = useState<string | null>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const dragSnapshot = useRef<TripStep[]>([]);
+  const stepsRef = useRef<TripStep[]>([]);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDragRef = useRef<{
+    stepId: string;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    pointerId: number;
+  } | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
 
   const steps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
+  stepsRef.current = steps;
   const isDragging = draggingId !== null;
   const draggingStep = draggingId ? steps.find((s) => s.id === draggingId) ?? null : null;
   const visibleSteps = isDragging ? steps.filter((s) => s.id !== draggingId) : steps;
@@ -130,12 +145,88 @@ export function CanonicalStepList({
   function clearDragState() {
     setDraggingId(null);
     setDropIndex(null);
+    dropIndexRef.current = null;
     setDragPos(null);
     dragSnapshot.current = [];
   }
 
+  function cancelPendingLongPress() {
+    if (longPressTimerRef.current != null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    pendingDragRef.current = null;
+  }
+
+  useEffect(() => () => cancelPendingLongPress(), []);
+
+  function beginReorderDrag(stepId: string, clientX: number, clientY: number) {
+    dragSnapshot.current = stepsRef.current;
+    setDraggingId(stepId);
+    setDragPos({ x: clientX, y: clientY });
+    const idx = calcDropIndex(clientY, stepId);
+    dropIndexRef.current = idx;
+    setDropIndex(idx);
+  }
+
+  function scheduleLongPressReorder(e: React.PointerEvent<HTMLButtonElement>, stepId: string) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    cancelPendingLongPress();
+
+    const pointerId = e.pointerId;
+    pendingDragRef.current = {
+      stepId,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      pointerId,
+    };
+
+    let cleaned = false;
+    const cleanupWaitListeners = () => {
+      if (cleaned) return;
+      cleaned = true;
+      window.removeEventListener("pointermove", onMoveWhileWaiting);
+      window.removeEventListener("pointerup", onUpWhileWaiting);
+      window.removeEventListener("pointercancel", onUpWhileWaiting);
+    };
+
+    const onMoveWhileWaiting = (ev: PointerEvent) => {
+      if (pendingDragRef.current?.pointerId !== ev.pointerId) return;
+      pendingDragRef.current.lastX = ev.clientX;
+      pendingDragRef.current.lastY = ev.clientY;
+      const dx = ev.clientX - pendingDragRef.current.startX;
+      const dy = ev.clientY - pendingDragRef.current.startY;
+      if (dx * dx + dy * dy > REORDER_CANCEL_MOVE_PX * REORDER_CANCEL_MOVE_PX) {
+        cleanupWaitListeners();
+        cancelPendingLongPress();
+      }
+    };
+
+    const onUpWhileWaiting = (ev: PointerEvent) => {
+      if (pendingDragRef.current?.pointerId !== ev.pointerId) return;
+      cleanupWaitListeners();
+      cancelPendingLongPress();
+    };
+
+    window.addEventListener("pointermove", onMoveWhileWaiting);
+    window.addEventListener("pointerup", onUpWhileWaiting);
+    window.addEventListener("pointercancel", onUpWhileWaiting);
+
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      cleanupWaitListeners();
+      const p = pendingDragRef.current;
+      pendingDragRef.current = null;
+      if (!p || p.pointerId !== pointerId) return;
+      beginReorderDrag(p.stepId, p.lastX, p.lastY);
+    }, REORDER_LONG_PRESS_MS);
+  }
+
   function calcDropIndex(pointerY: number, currentDraggingId: string): number {
-    const ordered = steps.filter((s) => s.id !== currentDraggingId);
+    const ordered = stepsRef.current.filter((s) => s.id !== currentDraggingId);
     for (let i = 0; i < ordered.length; i++) {
       const el = cardRefs.current.get(ordered[i].id);
       if (!el) continue;
@@ -146,32 +237,32 @@ export function CanonicalStepList({
     return ordered.length;
   }
 
-  function startPointerDrag(e: React.PointerEvent<HTMLButtonElement>, stepId: string) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    dragSnapshot.current = steps;
-    setDraggingId(stepId);
-    setDragPos({ x: e.clientX, y: e.clientY });
-    setDropIndex(calcDropIndex(e.clientY, stepId));
-  }
-
   useEffect(() => {
     if (!draggingId) return;
+    const id = draggingId;
     const onMove = (e: PointerEvent) => {
       setDragPos({ x: e.clientX, y: e.clientY });
-      setDropIndex(calcDropIndex(e.clientY, draggingId));
+      const idx = calcDropIndex(e.clientY, id);
+      dropIndexRef.current = idx;
+      setDropIndex(idx);
     };
     const onUp = () => {
-      if (dropIndex !== null) commitReorderAt(dropIndex);
+      const idx = dropIndexRef.current;
+      if (idx !== null) commitReorderAt(idx);
+      clearDragState();
+    };
+    const onCancel = () => {
       clearDragState();
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointercancel", onCancel, { once: true });
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
     };
-  }, [draggingId, dropIndex, steps]);
+  }, [draggingId]);
 
   function formatRange(step: TripStep): string {
     const a = isoToDatetimeLocalValue(step.startTime).replace("T", " ");
@@ -220,7 +311,7 @@ export function CanonicalStepList({
                     type="button"
                     className="mr-2 cursor-grab touch-none text-zinc-400 active:cursor-grabbing"
                     title={t("manage.listDragReorderTitle")}
-                    onPointerDown={(e) => startPointerDrag(e, s.id)}
+                    onPointerDown={(e) => scheduleLongPressReorder(e, s.id)}
                     aria-label={t("manage.listDragStepAria")}
                   >
                     ⋮⋮

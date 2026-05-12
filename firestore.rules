@@ -456,5 +456,14 @@ service cloud.firestore {
       allow delete: if signedIn() &&
         resource.data.ownerUid == request.auth.uid;
     }
+
+    /**
+     * USD-base ECB FX cache (one doc per calendar day, field `rates`). Written only by Admin API
+     * (`/api/fx/rates`); clients may read for offline-friendly reuse.
+     */
+    match /fxRatesDaily/{date} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
   }
 }

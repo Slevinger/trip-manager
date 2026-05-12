@@ -28,6 +28,9 @@ import {
   tripItineraryTotalAmount,
 } from "@/lib/expenses/itinerarySpend";
 import { computeBalances, nextExpenseId, settleBalances } from "@/lib/expenses/settlement";
+import { collectTripMoneyCurrenciesExceptTarget } from "@/lib/fx/collectTripMoneyCurrencies";
+import { moneyAmountInTargetCurrency } from "@/lib/fx/moneyInTargetCurrency";
+import { useTripFxMultipliers } from "@/lib/fx/useTripFxMultipliers";
 import type { ExpenseCategory, ExpenseEntry, Trip } from "@/lib/types/trip";
 import type { MessageKey } from "@/lib/i18n/messages";
 
@@ -61,17 +64,62 @@ function BudgetContent({
 }) {
   const { t } = useI18n();
 
-  const total = useMemo(() => tripItineraryTotalAmount(trip), [trip]);
-  const byCat = useMemo(() => spendByCategoryFromItinerary(trip), [trip]);
-  const byDay = useMemo(() => spendByDayFromItinerary(trip), [trip]);
-  const cumulative = useMemo(() => cumulativeItinerarySpend(trip), [trip]);
-  const hasItinerarySpend = total > 0;
-  const settlements = useMemo(() => settleBalances(trip), [trip]);
-  const balances = useMemo(() => computeBalances(trip), [trip]);
+  const targetCur = useMemo(() => (trip.currency ?? "").trim().toUpperCase() || "USD", [trip.currency]);
+  const fxSources = useMemo(() => collectTripMoneyCurrenciesExceptTarget(trip, targetCur), [trip, targetCur]);
+  const needsFx = fxSources.length > 0;
+  const { multipliers, loading: fxLoading, error: fxError, rateDate } = useTripFxMultipliers(
+    targetCur,
+    fxSources,
+    needsFx
+  );
 
-  const totalBudget = trip.budget?.totalBudget?.amount ?? null;
-  const remaining = totalBudget != null ? totalBudget - total : null;
-  const pct = totalBudget && totalBudget > 0 ? Math.min(100, (total / totalBudget) * 100) : 0;
+  const fxReady = !needsFx || multipliers != null;
+  const fxArg = !needsFx ? undefined : multipliers ?? undefined;
+
+  const total = useMemo(() => {
+    if (!fxReady) return null;
+    return tripItineraryTotalAmount(trip, fxArg);
+  }, [trip, fxReady, fxArg]);
+
+  const byCat = useMemo(() => {
+    if (!fxReady) return {};
+    return spendByCategoryFromItinerary(trip, fxArg);
+  }, [trip, fxReady, fxArg]);
+
+  const byDay = useMemo(() => {
+    if (!fxReady) return [];
+    return spendByDayFromItinerary(trip, fxArg);
+  }, [trip, fxReady, fxArg]);
+
+  const cumulative = useMemo(() => {
+    if (!fxReady) return [];
+    return cumulativeItinerarySpend(trip, fxArg);
+  }, [trip, fxReady, fxArg]);
+
+  const hasItinerarySpend = total != null && total > 0;
+
+  const balances = useMemo(() => {
+    if (!fxReady && needsFx) {
+      return Object.fromEntries((trip.travelers ?? []).map((tr) => [tr.id, 0]));
+    }
+    return computeBalances(trip, fxArg);
+  }, [trip, fxReady, needsFx, fxArg]);
+
+  const settlements = useMemo(() => {
+    if (!fxReady && needsFx) return [];
+    return settleBalances(trip, fxArg);
+  }, [trip, fxReady, needsFx, fxArg]);
+
+  const totalBudget = useMemo(() => {
+    const raw = trip.budget?.totalBudget;
+    if (raw == null || !Number.isFinite(raw.amount)) return null;
+    if (!fxReady) return null;
+    return moneyAmountInTargetCurrency(raw, targetCur, fxArg);
+  }, [trip, targetCur, fxReady, fxArg]);
+
+  const remaining = totalBudget != null && total != null ? totalBudget - total : null;
+  const pct =
+    totalBudget != null && totalBudget > 0 && total != null ? Math.min(100, (total / totalBudget) * 100) : 0;
 
   async function addExpense(input: Omit<ExpenseEntry, "id">) {
     const id = nextExpenseId(trip.expenses ?? []);
@@ -103,28 +151,49 @@ function BudgetContent({
           {t("budget.heading")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">{t("budget.subheading")}</p>
+        {rateDate && needsFx && fxReady && !fxError ? (
+          <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">{t("budget.fxRatesNote", { date: rateDate })}</p>
+        ) : null}
       </header>
 
       <div className="grid gap-4 md:grid-cols-3">
         <SummaryCard
           label={t("budget.spent")}
-          amount={`${formatMoney(total, trip.currency)}`}
+          amount={
+            fxError && needsFx
+              ? t("budget.fxError")
+              : total == null && needsFx
+                ? t("budget.fxLoading")
+                : formatMoney(total ?? 0, trip.currency)
+          }
           tone="brand"
         />
         <SummaryCard
           label={t("budget.totalBudget")}
-          amount={totalBudget != null ? formatMoney(totalBudget, trip.currency) : t("budget.noBudget")}
+          amount={
+            totalBudget == null && trip.budget?.totalBudget != null && needsFx && !fxReady
+              ? t("budget.fxLoading")
+              : totalBudget != null
+                ? formatMoney(totalBudget, trip.currency)
+                : t("budget.noBudget")
+          }
           tone="sky"
         />
         <SummaryCard
           label={t("budget.remaining")}
           amount={remaining != null ? formatMoney(remaining, trip.currency) : "—"}
           tone={remaining != null && remaining < 0 ? "rose" : "mint"}
-          progressValue={totalBudget ? pct : undefined}
+          progressValue={totalBudget != null && total != null && totalBudget > 0 ? pct : undefined}
         />
       </div>
 
-      {!hasItinerarySpend ? (
+      {fxError && needsFx ? (
+        <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-100">
+          {fxError}
+        </p>
+      ) : !fxReady && needsFx ? (
+        <Skeleton className="h-72 w-full rounded-3xl" />
+      ) : !hasItinerarySpend ? (
         <EmptyState
           icon={<Wallet className="h-7 w-7" />}
           title={t("budget.noItinerarySpend")}
