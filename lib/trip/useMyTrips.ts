@@ -51,7 +51,8 @@ export function useMyTrips(): MyTripsState {
       setNeedsGoogle(false);
       return;
     }
-    if (!user) {
+    const authUser = user;
+    if (!authUser?.uid) {
       setTrips([]);
       setLoading(false);
       setNeedsSignIn(true);
@@ -63,7 +64,7 @@ export function useMyTrips(): MyTripsState {
     let unsub: (() => void) | undefined;
     setLoading(true);
     void (async () => {
-      const google = await sessionIsGoogleSignIn(user);
+      const google = await sessionIsGoogleSignIn(authUser);
       if (cancelled) return;
       if (!google) {
         setNeedsGoogle(true);
@@ -75,7 +76,7 @@ export function useMyTrips(): MyTripsState {
       setNeedsGoogle(false);
       setNeedsSignIn(false);
       unsub = subscribeMyCanonicalTrips(
-        user,
+        authUser,
         (list) => {
           setTrips(list);
           setLoading(false);
@@ -83,14 +84,15 @@ export function useMyTrips(): MyTripsState {
         (e) => {
           setError(e.message);
           setLoading(false);
-        }
+        },
+        0
       );
     })();
     return () => {
       cancelled = true;
       unsub?.();
     };
-  }, [ready, useFirestore, user, refreshKey]);
+  }, [ready, useFirestore, user?.uid, refreshKey]);
 
   async function saveTrip(trip: Trip): Promise<void> {
     setError(null);

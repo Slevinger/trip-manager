@@ -32,11 +32,6 @@ export function writeTripLiveLocationShareEnabled(tripId: string, enabled: boole
   }
 }
 
-function travelerMayShareLiveLocation(trip: Trip, emailLower: string): boolean {
-  const e = emailLower.trim().toLowerCase();
-  return trip.travelers.some((t) => t.email?.trim().toLowerCase() === e);
-}
-
 const WRITE_THROTTLE_MS = 45_000;
 
 /**
@@ -72,15 +67,27 @@ export function useTripLiveLocationTelemetry(
     return () => window.removeEventListener(TRIP_LIVE_LOCATION_STORAGE_EVENT, onEvt);
   }, [tripId]);
 
+  /** Stable while traveler emails unchanged — avoids re-subscribing geolocation on every Firestore trip snapshot. */
+  const travelerEmailsFingerprint = useMemo(
+    () =>
+      (trip?.travelers ?? [])
+        .map((tr) => (tr.email ?? "").trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join("\0"),
+    [trip]
+  );
+
   const eligible = useMemo(() => {
     const em = opts.userEmail?.trim().toLowerCase();
-    if (!em || !trip) return false;
-    return travelerMayShareLiveLocation(trip, em);
-  }, [opts.userEmail, trip]);
+    if (!em) return false;
+    const emails = travelerEmailsFingerprint.split("\0").filter(Boolean);
+    return emails.includes(em);
+  }, [opts.userEmail, travelerEmailsFingerprint]);
 
   useEffect(() => {
     pingRef.current = null;
-    if (!shareEnabled || !eligible || !opts.useFirestore || !tripId?.trim() || !trip || !opts.userEmail?.trim()) {
+    if (!shareEnabled || !eligible || !opts.useFirestore || !tripId?.trim() || !opts.userEmail?.trim()) {
       return;
     }
     const db = getDb();
@@ -125,7 +132,7 @@ export function useTripLiveLocationTelemetry(
       pingRef.current = null;
       void clearCanonicalTripLiveLocation(db, tid, key).catch(() => {});
     };
-  }, [shareEnabled, eligible, opts.useFirestore, opts.userEmail, opts.userDisplayName, trip, tripId, pingRef]);
+  }, [shareEnabled, eligible, opts.useFirestore, opts.userEmail, opts.userDisplayName, tripId, pingRef]);
 
   return { shareEnabled };
 }
