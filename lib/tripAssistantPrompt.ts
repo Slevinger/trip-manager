@@ -26,6 +26,8 @@ export function buildTripAssistantSystemPrompt(
     profilePreferences?: UserPreferences | null;
     /** Trip-assistant Anthropic branch only: `web_search` tool is attached this request. */
     anthropicWebSearchEnabled?: boolean;
+    /** Optional traveler GPS context (synced + optional fresh ping). */
+    travelerLocationContextAppendix?: string;
   }
 ): string {
   const phase = getTripViewPhase(trip, opts.nowMs);
@@ -77,6 +79,7 @@ export function buildTripAssistantSystemPrompt(
       destinations: trip.destinations,
       travelers: trip.travelers,
       viewers: trip.viewers ?? [],
+      liveLocations: trip.liveLocations ?? {},
       steps: sorted,
       tasks: trip.tasks ?? [],
       documents: trip.documents ?? [],
@@ -90,6 +93,7 @@ export function buildTripAssistantSystemPrompt(
     "**Language:** Reply in the **same language as the user’s latest message** by default. Only switch languages when the user explicitly asks you to. Keep proper nouns and place names as they appear in the trip data when helpful.",
     "**Formatting:** Use normal Markdown when helpful: put **each list item on its own line** starting with `- ` (blank line before a list if it follows a paragraph). Never cram multiple `-` items into one run-on line.",
     "Finish every reply with proper sentence endings (period / question mark); do not stop mid‑sentence.",
+    "When `liveLocations` in the trip JSON is non-empty, those are voluntary last-known device coordinates for participants (not continuous surveillance). Use them for nearby suggestions or “where is everyone” style questions.",
     "Be accurate to the trip data below; if something is unknown, say so briefly and suggest a next step.",
     "**Thread vs trip JSON:** Older messages may have been merged into one long assistant note. Use that note for prior web facts and chat-only context. For itinerary layout, steps, and dates, treat the trip JSON below as source of truth (the note must not be relied on for current schedule state).",
     "**NEVER copy the format of memory notes.** Any assistant turn that begins with `[TRIP_MEMORY_NOTE`, `[GLOBAL_MEMORY_NOTE`, or contains headers like `LEGEND:`, `FROM_WEB_OR_VERIFIED:`, `CHAT_ONLY_MEMORY:`, `OPEN_LOOSE_ENDS:` is a compressed memory dump for your context only. Read it silently. Your reply must be a normal conversational answer (prose + optional bullet list) and **must not** contain any of those headers or that structured layout.",
@@ -122,5 +126,8 @@ export function buildTripAssistantSystemPrompt(
     "",
     buildTripRecommendationSchemaPrompt(),
     TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION,
+    ...(opts.travelerLocationContextAppendix?.trim()
+      ? [opts.travelerLocationContextAppendix.trim()]
+      : []),
   ].join("\n");
 }

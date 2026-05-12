@@ -16,6 +16,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { useTripAssistantData } from "@/lib/agent/useTripAssistantData";
 import { useTripAssistant } from "@/lib/agent/useTripAssistant";
+import { useTripAgentViewerPingRefOptional } from "@/lib/agent/tripAgentViewerPingContext";
 import { actionsForScreen } from "@/lib/agent/quickActions";
 import {
   addTripRecommendation,
@@ -203,6 +204,8 @@ function DockPanel({
     [persistTrip]
   );
 
+  const viewerPingRef = useTripAgentViewerPingRefOptional();
+
   const assistant = useTripAssistant({
     trip,
     profilePreferences: data.profilePreferences,
@@ -213,6 +216,7 @@ function DockPanel({
     isTripOwner: isOwner,
     canPersistMemory: data.canPersistMemory,
     onAddRecommendations,
+    ...(viewerPingRef ? { viewerPingRef } : {}),
   });
 
   const recommendations = trip.recommendations ?? [];

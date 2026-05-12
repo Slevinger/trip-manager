@@ -20,7 +20,7 @@ import { destinationMapPinCategory, type MapDestinationPinCategory } from "@/lib
 import { transitIntervalsToMapEdges } from "@/lib/tripMapGeometry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import type { MessageKey } from "@/lib/i18n/messages";
-import type { TransitStep, Trip } from "@/lib/types/trip";
+import type { TransitStep, Trip, TripLiveLocation } from "@/lib/types/trip";
 import type { PlaceSearchHit } from "@/lib/places/types";
 import type { MapPin as MapPinType, MapRouteSegment } from "@/components/map/MapLibreCanvas";
 
@@ -61,7 +61,19 @@ export function MapScreen({ tripId }: { tripId: string }) {
 type MapPinSelection =
   | { kind: "destination"; id: string }
   | { kind: "nearby"; hit: PlaceSearchHit }
+  | { kind: "traveler"; key: string }
   | null;
+
+function liveTravelerLabel(trip: Trip, participantKey: string, loc: TripLiveLocation): string {
+  const name = loc.name?.trim();
+  if (name) return name;
+  const k = participantKey.trim().toLowerCase();
+  const tr = trip.travelers.find((x) => x.email?.trim().toLowerCase() === k);
+  if (tr?.name?.trim()) return tr.name.trim();
+  const vw = trip.viewers?.find((x) => x.email?.trim().toLowerCase() === k);
+  if (vw?.name?.trim()) return vw.name.trim();
+  return participantKey.includes("@") ? participantKey.split("@")[0]! : participantKey;
+}
 
 function MapContent({ trip }: { trip: Trip }) {
   const { t } = useI18n();
@@ -98,6 +110,21 @@ function MapContent({ trip }: { trip: Trip }) {
         onClick: () => setPinSelection({ kind: "nearby", hit }),
       });
     }
+    const live = trip.liveLocations ?? {};
+    for (const [key, raw] of Object.entries(live)) {
+      const loc = raw as TripLiveLocation;
+      if (!loc || typeof loc.lat !== "number" || typeof loc.lon !== "number") continue;
+      if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lon)) continue;
+      pins.push({
+        id: `live:${key}`,
+        lat: loc.lat,
+        lon: loc.lon,
+        title: liveTravelerLabel(trip, key, loc),
+        category: "traveler",
+        selected: pinSelection?.kind === "traveler" && pinSelection.key === key,
+        onClick: () => setPinSelection({ kind: "traveler", key }),
+      });
+    }
     return pins;
   }, [trip, pinSelection, searchHits]);
 
@@ -108,8 +135,13 @@ function MapContent({ trip }: { trip: Trip }) {
       const c = d ? coordsFromDestination(d) : null;
       return c ? { lat: c.lat, lon: c.lng } : null;
     }
+    if (pinSelection.kind === "traveler") {
+      const loc = trip.liveLocations?.[pinSelection.key];
+      if (!loc || typeof loc.lat !== "number" || typeof loc.lon !== "number") return null;
+      return { lat: loc.lat, lon: loc.lon };
+    }
     return { lat: pinSelection.hit.lat, lon: pinSelection.hit.lng };
-  }, [pinSelection, trip.destinations]);
+  }, [pinSelection, trip.destinations, trip.liveLocations]);
 
   const selectedDestination =
     pinSelection?.kind === "destination"
@@ -211,7 +243,11 @@ function MapContent({ trip }: { trip: Trip }) {
                 {placesWithCoords.map((d) => {
                   const cat = destinationMapPinCategory(trip, d.id);
                   const tone =
-                    cat === "stay" ? "brand" : cat === "activity" ? "mint" : "sky";
+                    cat === "hotel" || cat === "stayArea"
+                      ? "brand"
+                      : cat === "activity"
+                        ? "mint"
+                        : "sky";
                   return (
                     <li key={d.id}>
                       <button
@@ -308,7 +344,7 @@ function MapContent({ trip }: { trip: Trip }) {
       </aside>
 
       <section className="relative order-1 h-[min(78dvh,32rem)] min-h-[16rem] min-w-0 overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-soft)] lg:order-none lg:h-[80vh] lg:min-h-[28rem]">
-        {placesWithCoords.length === 0 && searchHits.length === 0 ? (
+        {pinned.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <EmptyState
               icon={<MapPin className="h-7 w-7" />}
@@ -337,7 +373,15 @@ function MapContent({ trip }: { trip: Trip }) {
                     <p className="truncate text-sm font-semibold text-[var(--color-foreground)]">
                       {pinSelection.kind === "destination"
                         ? selectedDestination?.title ?? t("mapview.places")
-                        : pinSelection.hit.title || pinSelection.hit.label}
+                        : pinSelection.kind === "traveler"
+                          ? trip.liveLocations?.[pinSelection.key]
+                            ? liveTravelerLabel(
+                                trip,
+                                pinSelection.key,
+                                trip.liveLocations[pinSelection.key]!
+                              )
+                            : t("mapview.pinKind.traveler")
+                          : pinSelection.hit.title || pinSelection.hit.label}
                     </p>
                     {pinSelection.kind === "destination" && selectedDestination?.location ? (
                       <p className="mt-0.5 line-clamp-2 text-xs text-[var(--color-muted-foreground)]">
@@ -346,6 +390,27 @@ function MapContent({ trip }: { trip: Trip }) {
                     ) : pinSelection.kind === "nearby" ? (
                       <p className="mt-0.5 line-clamp-2 text-xs text-[var(--color-muted-foreground)]">
                         {pinSelection.hit.description || pinSelection.hit.label}
+                      </p>
+                    ) : pinSelection.kind === "traveler" && trip.liveLocations?.[pinSelection.key] ? (
+                      <p className="mt-0.5 line-clamp-3 text-xs text-[var(--color-muted-foreground)]">
+                        {(() => {
+                          const loc = trip.liveLocations[pinSelection.key]!;
+                          const t0 = Date.parse(loc.updatedAt);
+                          const min = Number.isFinite(t0)
+                            ? Math.max(0, Math.round((Date.now() - t0) / 60_000))
+                            : NaN;
+                          const when = !Number.isFinite(t0)
+                            ? loc.updatedAt
+                            : min < 1
+                              ? t("collab.justNow")
+                              : min < 60
+                                ? t("collab.minutesAgo", { minutes: min })
+                                : new Date(t0).toLocaleString(undefined, {
+                                    dateStyle: "short",
+                                    timeStyle: "short",
+                                  });
+                          return `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)} — ${t("mapview.liveTravelerHint")} — ${t("mapview.liveTravelerUpdated", { when })}`;
+                        })()}
                       </p>
                     ) : null}
                     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -359,6 +424,8 @@ function MapContent({ trip }: { trip: Trip }) {
                             PIN_KIND_LABEL[destinationMapPinCategory(trip, selectedDestination.id)]
                           )}
                         </Badge>
+                      ) : pinSelection.kind === "traveler" ? (
+                        <Badge tone="coral">{t("mapview.pinKind.traveler")}</Badge>
                       ) : (
                         <Badge tone="coral">{t("mapview.nearby")}</Badge>
                       )}

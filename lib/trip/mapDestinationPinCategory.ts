@@ -2,6 +2,7 @@ import type {
   ActivityStep,
   ActivityStepInterval,
   StayStep,
+  StayStepInterval,
   TransitStep,
   TransitStepInterval,
   Trip,

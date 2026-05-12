@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   CheckCircle2,
   CornerDownRight,
   Heart,
+  MapPin,
   MessagesSquare,
   Send,
   ThumbsUp,
@@ -30,6 +31,12 @@ import {
   toggleCommentReaction,
 } from "@/lib/comments/tripComments";
 import { toggleRecommendationVote, votesForOption } from "@/lib/tripRecommendations";
+import { Switch } from "@/components/ui/switch";
+import {
+  readTripLiveLocationShareEnabled,
+  TRIP_LIVE_LOCATION_STORAGE_EVENT,
+  writeTripLiveLocationShareEnabled,
+} from "@/lib/trip/useTripLiveLocationTelemetry";
 import type {
   Trip,
   TripComment,
@@ -51,7 +58,7 @@ function CollabContent({
   persistTrip: (next: Trip) => Promise<void>;
 }) {
   const { t } = useI18n();
-  const { user } = useFirebaseUser();
+  const { user, useFirestore } = useFirebaseUser();
   const userEmail = user?.email?.trim().toLowerCase() ?? "";
   const myDisplayName = user?.displayName?.trim() ?? userEmail.split("@")[0] ?? "You";
 
@@ -208,6 +215,8 @@ function CollabContent({
             </CardContent>
           </Card>
 
+          <LiveLocationSharePanel trip={trip} userEmail={userEmail} useFirestore={useFirestore} />
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -221,6 +230,68 @@ function CollabContent({
         </div>
       </div>
     </div>
+  );
+}
+
+function LiveLocationSharePanel({
+  trip,
+  userEmail,
+  useFirestore,
+}: {
+  trip: Trip;
+  userEmail: string;
+  useFirestore: boolean;
+}) {
+  const { t } = useI18n();
+  const canTraveler = useMemo(
+    () =>
+      Boolean(
+        userEmail &&
+          trip.travelers.some((tr) => tr.email?.trim().toLowerCase() === userEmail.toLowerCase())
+      ),
+    [trip.travelers, userEmail]
+  );
+  const [shareOn, setShareOn] = useState(() => readTripLiveLocationShareEnabled(trip.id));
+
+  useEffect(() => {
+    const sync = () => setShareOn(readTripLiveLocationShareEnabled(trip.id));
+    const onEvt = (e: Event) => {
+      const d = (e as CustomEvent<{ tripId?: string }>).detail;
+      if (d?.tripId === trip.id) sync();
+    };
+    window.addEventListener(TRIP_LIVE_LOCATION_STORAGE_EVENT, onEvt);
+    return () => window.removeEventListener(TRIP_LIVE_LOCATION_STORAGE_EVENT, onEvt);
+  }, [trip.id]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MapPin className="h-4 w-4 text-[var(--color-brand)]" /> {t("collab.shareLiveLocation")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!userEmail ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">{t("collab.shareLiveLocationNotTraveler")}</p>
+        ) : !canTraveler ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">{t("collab.shareLiveLocationNotTraveler")}</p>
+        ) : !useFirestore ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">{t("collab.shareLiveLocationNeedsFirestore")}</p>
+        ) : (
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-[var(--color-muted-foreground)]">{t("collab.shareLiveLocationHelp")}</p>
+            <Switch
+              checked={shareOn}
+              onCheckedChange={(v) => {
+                writeTripLiveLocationShareEnabled(trip.id, v);
+                setShareOn(v);
+              }}
+              aria-label={t("collab.shareLiveLocation")}
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

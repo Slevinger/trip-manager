@@ -70,7 +70,10 @@ function formatTranscriptForEvolve(lines: TripMemoryEvolveTurn[]): string {
 }
 
 /**
- * POST JSON: `{ "messages": [ { "role": "user"|"assistant", "content": "..." }, ... ] }`
+ * POST JSON:
+ * - `messages`: `[ { "role": "user"|"assistant", "content": "..." }, ... ]`
+ * - Optional `travelerLocationContextAppendix` (string, max 8k): traveler GPS context for the model.
+ *
  * Returns `{ "summary": "..." }` — one compressed note (not a live reply).
  * Itinerary context is not injected here; the live trip payload is sent separately on assistant turns.
  */
@@ -166,9 +169,12 @@ export async function POST(req: NextRequest) {
 
   const userBlock = formatTranscriptForEvolve(turnMessages).slice(0, 200_000);
   const languageOverride = detectLanguageOverrideFromLatestUser(turnMessages);
+  const appendixRaw = typeof body.travelerLocationContextAppendix === "string" ? body.travelerLocationContextAppendix : "";
+  const appendix = appendixRaw.trim().slice(0, 8000);
   const systemWithLanguageOverride =
     TRIP_MEMORY_EVOLVE_SYSTEM +
-    `\n\n### Language override (server-detected)\nLatest user message appears to be in: ${languageOverride}.\nWrite ALL section prose in ${languageOverride}.\nKeep the section headers exactly as shown (LEGEND:, FROM_WEB_OR_VERIFIED:, CHAT_ONLY_MEMORY:, OPEN_LOOSE_ENDS:). URLs and proper nouns must remain unchanged.`;
+    `\n\n### Language override (server-detected)\nLatest user message appears to be in: ${languageOverride}.\nWrite ALL section prose in ${languageOverride}.\nKeep the section headers exactly as shown (LEGEND:, FROM_WEB_OR_VERIFIED:, CHAT_ONLY_MEMORY:, OPEN_LOOSE_ENDS:). URLs and proper nouns must remain unchanged.` +
+    (appendix ? `\n\n${appendix}` : "");
 
   if (provider === "anthropic") {
     const key = anthropicKey()!;

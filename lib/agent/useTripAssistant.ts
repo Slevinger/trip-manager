@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { agentEvolve } from "@/lib/agentEvolve";
 import { buildChatMemoryTripWhere } from "@/lib/chatMemoryTripContext";
 import { getClientAuth } from "@/lib/firebase";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/tripAssistantRequestKind";
 import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
 import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
+import type { ViewerDevicePing } from "@/lib/tripTravelerLocationContext";
 import type { TripChatMessage } from "@/lib/types/user";
 
 export type ChatRole = "user" | "assistant";
@@ -72,6 +73,8 @@ export interface UseTripAssistantOptions {
   isTripOwner?: boolean;
   canPersistMemory: boolean;
   onAddRecommendations?: (trip: Trip, recommendations: TripRecommendation[]) => Promise<void>;
+  /** Latest device GPS ping for agent requests (optional). */
+  viewerPingRef?: MutableRefObject<ViewerDevicePing | null>;
 }
 
 export interface UseTripAssistantResult {
@@ -142,6 +145,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         tripId: opts.trip.id,
         userEmailLower: em.toLowerCase(),
         tripChatMessages: opts.tripChatMessages ?? [],
+        trip: opts.trip,
+        viewerDevicePing: opts.viewerPingRef?.current ?? null,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("assistant.genericError");
@@ -151,9 +156,10 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
     }
   }, [
     opts.canPersistMemory,
-    opts.trip.id,
+    opts.trip,
     opts.tripChatMessages,
     opts.userEmail,
+    opts.viewerPingRef,
     persistedTripMessageCount,
     t,
   ]);
@@ -267,6 +273,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           content: l.content,
         }));
 
+        const ping = opts.viewerPingRef?.current ?? null;
         const res = await fetch("/api/chat/trip-assistant", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -276,6 +283,12 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
             preferences: opts.profilePreferences ?? undefined,
             contextAtMs,
             messages: apiMessages,
+            ...(ping
+              ? {
+                  viewerDevicePing: ping,
+                  viewerEmailLower: opts.userEmail?.trim().toLowerCase() ?? undefined,
+                }
+              : {}),
           }),
         });
         const data = (await res.json().catch(() => ({}))) as {
@@ -371,6 +384,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
       opts.tripChatMessages,
       opts.userDisplayName,
       opts.userEmail,
+      opts.viewerPingRef,
       persistedTripMessageCount,
       t,
     ]

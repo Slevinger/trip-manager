@@ -573,7 +573,9 @@ const en = {
   "mapview.pinKind.area": "Stay area",
   "mapview.pinKind.activity": "Activity",
   "mapview.pinKind.place": "Place",
-
+  "mapview.pinKind.traveler": "Live traveler",
+  "mapview.liveTravelerHint": "Shared location while location sharing is on.",
+  "mapview.liveTravelerUpdated": "Last update: {when}",
   "budget.heading": "Budget",
   "budget.subheading": "Track expenses, split fairly, see where it goes.",
   "budget.spent": "Spent",
@@ -655,7 +657,11 @@ const en = {
   "collab.online": "Online",
   "collab.justNow": "just now",
   "collab.minutesAgo": "{minutes}m ago",
-
+  "collab.shareLiveLocation": "Share my live location",
+  "collab.shareLiveLocationHelp":
+    "Session-only: updates Firestore for collaborators and includes coordinates in travel-agent requests while this trip is open. Turn off anytime.",
+  "collab.shareLiveLocationNotTraveler": "Only travelers listed on this trip can share live location.",
+  "collab.shareLiveLocationNeedsFirestore": "Sign in with Google (Firestore) to share location.",
   "stats.heading": "Your traveler stats",
   "stats.subheading": "Where you've been, where you're heading.",
   "stats.tripsCount": "Trips",
@@ -1261,6 +1267,9 @@ const he: Record<MessageKey, string> = {
   "mapview.pinKind.area": "מרכז שהייה",
   "mapview.pinKind.activity": "פעילות",
   "mapview.pinKind.place": "מקום",
+  "mapview.pinKind.traveler": "מטייל חי",
+  "mapview.liveTravelerHint": "מיקום משותף כששיתוף המיקום דולק.",
+  "mapview.liveTravelerUpdated": "עדכון אחרון: {when}",
 
   "budget.heading": "תקציב",
   "budget.subheading": "מעקב הוצאות, חלוקה הוגנת, ראייה לאן הכל הולך.",
@@ -1343,6 +1352,11 @@ const he: Record<MessageKey, string> = {
   "collab.online": "מחובר",
   "collab.justNow": "עכשיו",
   "collab.minutesAgo": "לפני {minutes} דקות",
+  "collab.shareLiveLocation": "שיתוף המיקום החי שלי",
+  "collab.shareLiveLocationHelp":
+    "למסך זה בלבד: מעדכן את Firestore לשותפים ומוסיף קואורדינטות לבקשות לסוכן הטיולים כשהטיול פתוח. אפשר לכבות בכל עת.",
+  "collab.shareLiveLocationNotTraveler": "רק מטיילים ברשימת הטיול יכולים לשתף מיקום חי.",
+  "collab.shareLiveLocationNeedsFirestore": "התחברו עם Google (Firestore) כדי לשתף מיקום.",
 
   "stats.heading": "סטטיסטיקות הטיולים שלכם",
   "stats.subheading": "איפה הייתם ולאן אתם בדרך.",
@@ -1955,6 +1969,9 @@ const ru: Record<MessageKey, string> = {
   "mapview.pinKind.area": "Зона проживания",
   "mapview.pinKind.activity": "Активность",
   "mapview.pinKind.place": "Место",
+  "mapview.pinKind.traveler": "Путешественник (live)",
+  "mapview.liveTravelerHint": "Общая геопозиция, пока включена передача координат.",
+  "mapview.liveTravelerUpdated": "Последнее обновление: {when}",
 
   "budget.heading": "Бюджет",
   "budget.subheading": "Учёт расходов, честное деление, аналитика по тратам.",
@@ -2037,6 +2054,11 @@ const ru: Record<MessageKey, string> = {
   "collab.online": "Онлайн",
   "collab.justNow": "только что",
   "collab.minutesAgo": "{minutes} мин назад",
+  "collab.shareLiveLocation": "Делиться геопозицией",
+  "collab.shareLiveLocationHelp":
+    "Только на эту сессию: обновляет Firestore для группы и добавляет координаты в запросы к ассистенту, пока открыт этот трип. Можно выключить в любой момент.",
+  "collab.shareLiveLocationNotTraveler": "Делиться геопозицией могут только участники из списка путешественников.",
+  "collab.shareLiveLocationNeedsFirestore": "Войдите через Google (Firestore), чтобы делиться геопозицией.",
 
   "stats.heading": "Ваша статистика путешествий",
   "stats.subheading": "Где вы были и куда направляетесь.",

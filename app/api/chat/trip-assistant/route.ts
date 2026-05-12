@@ -20,6 +20,10 @@ import type { Trip, UserPreferences } from "@/lib/types/trip";
 import { formatAssistantReplyForMarkdown } from "@/lib/formatAssistantReplyMarkdown";
 import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 import { TRIP_ASSISTANT_OPENAI_MESSAGE_HISTORY_CAP } from "@/lib/tripChatEvolveGate";
+import {
+  buildTravelerLocationContextAppendix,
+  parseViewerDevicePing,
+} from "@/lib/tripTravelerLocationContext";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -321,6 +325,17 @@ export async function POST(req: NextRequest) {
       : Date.now();
   const preferences = parsePreferences(body.preferences);
 
+  const viewerPing = parseViewerDevicePing(body.viewerDevicePing, contextAtMs);
+  const viewerEm =
+    typeof body.viewerEmailLower === "string"
+      ? body.viewerEmailLower.trim().toLowerCase().slice(0, 220)
+      : null;
+  const travelerLocationAppendix = buildTravelerLocationContextAppendix(tripForPrompt, {
+    nowMs: contextAtMs,
+    viewerDevicePing: viewerPing,
+    viewerEmailLower: viewerEm,
+  }).trim();
+
   const turnMessages: { role: "user" | "assistant"; content: string }[] = [];
   for (const m of rawMessages) {
     if (!isRecord(m)) continue;
@@ -384,6 +399,7 @@ export async function POST(req: NextRequest) {
           nowMs: contextAtMs,
           profilePreferences: preferences,
           anthropicWebSearchEnabled: false,
+          travelerLocationContextAppendix: travelerLocationAppendix || undefined,
         }) + TRIP_ASSISTANT_WEB_REFINE_APPENDIX;
 
       const refined = await completeTripAssistantAnthropic({
@@ -443,6 +459,7 @@ export async function POST(req: NextRequest) {
     nowMs: contextAtMs,
     profilePreferences: preferences,
     anthropicWebSearchEnabled: anthropicWebUses > 0,
+    travelerLocationContextAppendix: travelerLocationAppendix || undefined,
   });
 
   if (provider === "anthropic") {

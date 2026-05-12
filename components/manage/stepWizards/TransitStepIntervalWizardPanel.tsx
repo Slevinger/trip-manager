@@ -298,7 +298,7 @@ export function TransitStepIntervalWizardPanel({
                 value={interval.comment ?? ""}
                 onChange={(e) =>
                   patchIntervalAt(intervalIndex, {
-                    comment: e.target.value.trim() ? e.target.value : undefined,
+                    comment: e.target.value === "" ? undefined : e.target.value,
                   })
                 }
               />

@@ -9,7 +9,7 @@ import Map, {
   type MapRef,
 } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Bed, Bus, MapPin, MapPinned, Sparkles } from "lucide-react";
+import { Bed, Bus, MapPin, MapPinned, Sparkles, Users } from "lucide-react";
 import { cn } from "@/lib/ui/cn";
 import type { MapDestinationPinCategory } from "@/lib/trip/mapDestinationPinCategory";
 
@@ -18,7 +18,7 @@ export interface MapPin {
   lat: number;
   lon: number;
   title: string;
-  category: MapDestinationPinCategory | "nearby";
+  category: MapDestinationPinCategory | "nearby" | "traveler";
   selected?: boolean;
   onClick?: () => void;
 }
@@ -252,7 +252,7 @@ export function MapLibreCanvas({
             longitude={p.lon}
             latitude={p.lat}
             anchor="bottom"
-            style={{ zIndex: p.selected ? 2 : 1 }}
+            style={{ zIndex: p.selected ? 4 : p.category === "traveler" ? 3 : 1 }}
           >
             <PinView pin={p} onPress={() => p.onClick?.()} />
           </Marker>
@@ -270,9 +270,11 @@ function PinView({ pin, onPress }: { pin: MapPin; onPress?: () => void }) {
         ? Bus
         : pin.category === "activity"
           ? Sparkles
-          : pin.category === "nearby"
-            ? MapPin
-            : MapPinned;
+          : pin.category === "traveler"
+            ? Users
+            : pin.category === "nearby"
+              ? MapPin
+              : MapPinned;
   const color =
     pin.category === "hotel"
       ? "#7c3aed"
@@ -282,11 +284,13 @@ function PinView({ pin, onPress }: { pin: MapPin; onPress?: () => void }) {
           ? "#10b981"
           : pin.category === "stayArea"
             ? "#0e7490"
-            : pin.category === "nearby"
-              ? "#f97316"
-              : pin.category === "place"
-                ? "#0369a1"
-                : "#0369a1";
+            : pin.category === "traveler"
+              ? "#e11d48"
+              : pin.category === "nearby"
+                ? "#f97316"
+                : pin.category === "place"
+                  ? "#0369a1"
+                  : "#0369a1";
   return (
     <button
       type="button"
