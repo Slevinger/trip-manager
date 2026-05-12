@@ -23,11 +23,11 @@ export function TopBar({ tripId, tripTitle, user }: TopBarProps) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-surface)]/80 backdrop-blur">
-      <div className="flex h-14 items-center gap-2 px-4 sm:gap-3 lg:px-6">
-        <div className="flex min-w-0 flex-1 items-center gap-2 lg:hidden">
+      <div className="flex h-14 min-w-0 items-center gap-2 px-4 sm:gap-3 lg:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden pe-1 sm:gap-2 lg:hidden">
           <Link
             href={tripId ? `/trip/${tripId}` : "/"}
-            className="flex min-w-0 items-center gap-2"
+            className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2"
             aria-label={tripId ? t("shell.tripHomeAria") : t("shell.appHomeAria")}
           >
             <span
@@ -44,7 +44,7 @@ export function TopBar({ tripId, tripTitle, user }: TopBarProps) {
               onClick={() => router.push("/")}
               aria-label={t("shell.leaveTripAria")}
               className={cn(
-                "inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)]/80 px-2.5 py-1.5 text-xs font-semibold tracking-tight text-[var(--color-foreground)] shadow-sm backdrop-blur-sm transition-colors hover:border-[var(--color-brand)]/35 hover:bg-[var(--color-brand-soft)]",
+                "inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)]/80 px-2 py-1.5 text-xs font-semibold tracking-tight text-[var(--color-foreground)] shadow-sm backdrop-blur-sm transition-colors hover:border-[var(--color-brand)]/35 hover:bg-[var(--color-brand-soft)] sm:px-2.5",
                 rtlChevron && "flex-row-reverse"
               )}
             >
@@ -52,7 +52,7 @@ export function TopBar({ tripId, tripTitle, user }: TopBarProps) {
                 className={cn("h-3.5 w-3.5 shrink-0 opacity-80", rtlChevron && "rotate-180")}
                 aria-hidden
               />
-              <span>{t("shell.leaveTrip")}</span>
+              <span className="hidden max-w-[7.5rem] truncate sm:inline">{t("shell.leaveTrip")}</span>
             </button>
           ) : null}
         </div>
@@ -89,7 +89,7 @@ export function TopBar({ tripId, tripTitle, user }: TopBarProps) {
           ) : null}
         </nav>
 
-        <div className="ms-auto flex shrink-0 items-center gap-2">
+        <div className="ms-auto flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
           <LanguageSwitcher />
           <ThemeToggle />
           <UserAvatarMenu user={user} />
