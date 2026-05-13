@@ -149,6 +149,8 @@ const en = {
   "assistant.forgetting": "Clearing…",
   "assistant.suggestionsFailed":
     "Couldn't queue the suggestions returned by the assistant.",
+  "assistant.persistFailed":
+    "The reply showed up, but saving this chat turn to the shared trip thread failed — a refresh may drop it. Reason:",
 
   "common.remove": "Remove",
   "common.edit": "Edit",
@@ -456,6 +458,8 @@ const en = {
   "recs.optionsLabel": "Pick one of {count} options",
   "recs.optionFallback": "Option {index}",
   "recs.linkedStay": "Linked stay",
+  "recs.addsToStep": "Adds to: {stepTitle}",
+  "recs.tighten": "Refine",
   "recs.readOnlyHint":
     "Read-only access: ask the trip owner or a traveler to approve or delete this recommendation.",
   "recs.errorGeneric": "Could not update recommendations.",
@@ -718,6 +722,8 @@ const en = {
   "agent.tabActions": "Actions",
   "agent.placeholder": "Ask about pacing, packing, or pick a quick action…",
   "agent.send": "Send",
+  "agent.stop": "Stop",
+  "agent.clearChat": "Clear chat",
   "agent.thinking": "Thinking…",
   "agent.empty": "Ask a question, or pick a quick action below.",
   "agent.suggestionsEmpty": "No active suggestions right now.",
@@ -734,6 +740,9 @@ const en = {
   "agent.closeLabel": "Close Travel Agent",
   "agent.inlineHeading": "Travel agent picks for you",
   "agent.inlineCta": "Open agent",
+  "agent.audiencePrivate": "Private",
+  "agent.audienceAll": "All",
+  "agent.audienceTo": "To",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -879,6 +888,8 @@ const he: Record<MessageKey, string> = {
   "assistant.forgetting": "מוחק…",
   "assistant.suggestionsFailed":
     "לא ניתן להוסיף את ההמלצות שהעוזר החזיר לתור.",
+  "assistant.persistFailed":
+    "התשובה הוצגה, אבל שמירת השיחה המשותפת לטיול נכשלה — רענון עלול למחוק את התור הזה. סיבה:",
 
   "common.remove": "הסרה",
   "common.edit": "עריכה",
@@ -1183,6 +1194,8 @@ const he: Record<MessageKey, string> = {
   "recs.optionsLabel": "בחרו אחת מתוך {count} אפשרויות",
   "recs.optionFallback": "אפשרות {index}",
   "recs.linkedStay": "שהייה מקושרת",
+  "recs.addsToStep": "נוסף ל: {stepTitle}",
+  "recs.tighten": "עדן",
   "recs.readOnlyHint":
     "גישה לקריאה בלבד: בקשו מבעל/ת הטיול או ממטייל/ת לאשר או למחוק את ההמלצה.",
   "recs.errorGeneric": "לא ניתן לעדכן את ההמלצות.",
@@ -1446,6 +1459,8 @@ const he: Record<MessageKey, string> = {
   "agent.tabActions": "פעולות",
   "agent.placeholder": "שאלו על קצב, אריזה, או בחרו פעולה מהירה…",
   "agent.send": "שליחה",
+  "agent.stop": "עצור",
+  "agent.clearChat": "נקה שיחה",
   "agent.thinking": "חושב…",
   "agent.empty": "שאלו שאלה או בחרו פעולה מהירה למטה.",
   "agent.suggestionsEmpty": "אין הצעות פעילות כעת.",
@@ -1462,6 +1477,9 @@ const he: Record<MessageKey, string> = {
   "agent.closeLabel": "סגירת סוכן הנסיעות",
   "agent.inlineHeading": "הצעות סוכן הנסיעות עבורכם",
   "agent.inlineCta": "פתח סוכן",
+  "agent.audiencePrivate": "פרטי",
+  "agent.audienceAll": "לכולם",
+  "agent.audienceTo": "אל",
 };
 
 const ru: Record<MessageKey, string> = {
@@ -1611,6 +1629,8 @@ const ru: Record<MessageKey, string> = {
   "assistant.forgetting": "Удаление…",
   "assistant.suggestionsFailed":
     "Не удалось добавить предложения помощника в очередь.",
+  "assistant.persistFailed":
+    "Ответ отобразился, но сохранить этот ход в общий чат поездки не удалось — после обновления страницы он может пропасть. Причина:",
 
   "common.remove": "Удалить",
   "common.edit": "Правка",
@@ -1917,6 +1937,8 @@ const ru: Record<MessageKey, string> = {
   "recs.optionsLabel": "Выберите один из {count} вариантов",
   "recs.optionFallback": "Вариант {index}",
   "recs.linkedStay": "Привязано к проживанию",
+  "recs.addsToStep": "Добавить в шаг: {stepTitle}",
+  "recs.tighten": "Уточнить",
   "recs.readOnlyHint":
     "Доступ только на чтение: попросите владельца или участника поездки принять или удалить рекомендацию.",
   "recs.errorGeneric": "Не удалось обновить рекомендации.",
@@ -2181,6 +2203,8 @@ const ru: Record<MessageKey, string> = {
   "agent.tabActions": "Действия",
   "agent.placeholder": "Спросите про темп, сборы или выберите быстрое действие…",
   "agent.send": "Отправить",
+  "agent.stop": "Стоп",
+  "agent.clearChat": "Очистить чат",
   "agent.thinking": "Думает…",
   "agent.empty": "Задайте вопрос или выберите быстрое действие ниже.",
   "agent.suggestionsEmpty": "Сейчас нет активных идей.",
@@ -2197,6 +2221,9 @@ const ru: Record<MessageKey, string> = {
   "agent.closeLabel": "Закрыть Travel Agent",
   "agent.inlineHeading": "Идеи агента специально для вас",
   "agent.inlineCta": "Открыть агента",
+  "agent.audiencePrivate": "Приватно",
+  "agent.audienceAll": "Всем",
+  "agent.audienceTo": "Кому",
 };
 
 export const translations = { en, he, ru } as const;

@@ -8,6 +8,7 @@ import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import { capEvolveSummaryChars, TRIP_MEMORY_EVOLVE_SYSTEM } from "@/lib/tripMemoryEvolvePrompt";
 import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 import { canonicalTripDocReadableByUser } from "@/lib/canonicalTripsFirestore";
+import { notifySharedTripThreadUpdated } from "@/lib/tripSharedThreadPusherServer";
 
 /**
  * Compaction for the shared per-trip assistant thread (`trips/{tripId}/assistantThread`).
@@ -312,6 +313,8 @@ export async function POST(req: NextRequest) {
   }
   batch.set(tripRef, { lastAssistantThreadCompactionAtMs: now, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await batch.commit();
+
+  void notifySharedTripThreadUpdated(tripId).catch(() => {});
 
   return NextResponse.json({
     ok: true,

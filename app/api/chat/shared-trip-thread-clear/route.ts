@@ -4,6 +4,7 @@ import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { notifySharedTripThreadUpdated } from "@/lib/tripSharedThreadPusherServer";
 
 /**
  * Owner-only "Forget" for the shared trip thread. Marks every entry inactive (we never
@@ -113,6 +114,8 @@ export async function POST(req: NextRequest) {
     { lastAssistantThreadClearedAtMs: now, updatedAt: FieldValue.serverTimestamp() },
     { merge: true }
   );
+
+  void notifySharedTripThreadUpdated(tripId).catch(() => {});
 
   return NextResponse.json({ ok: true, cleared: written });
 }

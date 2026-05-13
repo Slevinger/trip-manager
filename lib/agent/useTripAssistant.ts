@@ -9,7 +9,9 @@ import { refuseRedundantTripMemoryEvolve } from "@/lib/tripChatEvolveGate";
 import { messagesForTrip } from "@/lib/tripChatMessages";
 import {
   parseTripAssistantRequestKind,
+  stripTripAssistantRequestKindMarker,
   tripAssistantNeedsGlobalContext,
+  tripAssistantUserWantsStructuredTripProposals,
 } from "@/lib/tripAssistantRequestKind";
 import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
 import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
@@ -32,10 +34,16 @@ function isMemoryNoteRow(m: TripChatMessage): boolean {
 export function tripMessagesToLines(msgs: TripChatMessage[]): ChatLine[] {
   return msgs
     .filter((m) => !isMemoryNoteRow(m))
-    .map((m) => ({
-      role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
-      content: m.content,
-    }));
+    .map((m) => {
+      const isAgent = m.from === "agent";
+      const content = isAgent
+        ? stripTripAssistantRequestKindMarker(m.content).trim() || m.content
+        : m.content;
+      return {
+        role: isAgent ? ("assistant" as const) : ("user" as const),
+        content,
+      };
+    });
 }
 
 function memoryNoteAssistantTurn(scope: "trip" | "global", combinedNote: string): ChatLine {
@@ -57,10 +65,38 @@ function partitionMemoryNotes(msgs: TripChatMessage[]): { notes: string; lines: 
     }
     lines.push({
       role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
-      content: m.content,
+      content:
+        m.from === "agent"
+          ? stripTripAssistantRequestKindMarker(m.content).trim() || m.content
+          : m.content,
     });
   }
   return { notes: notes.join("\n\n---\n\n"), lines };
+}
+
+/**
+ * Parses audience tags from the raw user input:
+ * - `@private` → `visibleTo = [fromEmail]`; tag stripped from text sent to the LLM.
+ * - `@all` → no restriction; tag stripped.
+ * - `@mention` → kept in text; stored as `directedTo` for display (visible to all).
+ */
+function parseAudienceTags(
+  raw: string,
+  fromEmail: string
+): { cleanText: string; visibleTo?: string[]; directedTo?: string } {
+  let text = raw;
+  let visibleTo: string[] | undefined;
+
+  if (/@private\b/i.test(text)) {
+    visibleTo = [fromEmail.toLowerCase()];
+    text = text.replace(/@private\b\s*/gi, "").trim();
+  }
+  text = text.replace(/@all\b\s*/gi, "").trim();
+
+  const mentionMatch = text.match(/@([A-Za-z0-9_.-]+)/);
+  const directedTo = mentionMatch ? mentionMatch[0] : undefined;
+
+  return { cleanText: text, visibleTo, directedTo };
 }
 
 export interface UseTripAssistantOptions {
@@ -87,6 +123,9 @@ export interface UseTripAssistantResult {
   activeModel: string | null;
   canEvolve: boolean;
   send: (text: string) => Promise<void>;
+  /** Abort the in-flight request. The user's last message is removed from the
+   * thread and restored to the input via `pendingDraft`. */
+  stop: () => void;
   evolve: () => Promise<void>;
   forget: () => Promise<void>;
   /** Pre-fill the input with text (e.g. from a quick-action). */
@@ -108,6 +147,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   const [pendingDraft, setPendingDraft] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  /** While >0, skip syncing `lines` from Firestore so a transient listener error or stale snapshot does not drop the optimistic user/assistant pair. */
+  const pendingPersistRef = useRef(0);
 
   const memorySyncKey = useMemo(
     () =>
@@ -121,6 +162,11 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   tripChatMessagesRef.current = opts.tripChatMessages ?? [];
 
   useEffect(() => {
+    pendingPersistRef.current = 0;
+  }, [opts.trip.id]);
+
+  useEffect(() => {
+    if (pendingPersistRef.current > 0) return;
     setLines(tripMessagesToLines(tripChatMessagesRef.current ?? []));
   }, [memorySyncKey, opts.trip.id]);
 
@@ -217,8 +263,18 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
       }
 
       setError(null);
+
+      // Parse @private / @all / @mention tags before touching any state.
+      const fromEmailLowerForAudience = opts.userEmail?.trim().toLowerCase() ?? "";
+      const { cleanText, visibleTo: turnVisibleTo, directedTo: turnDirectedTo } = parseAudienceTags(
+        text,
+        fromEmailLowerForAudience
+      );
+
       const userLine: ChatLine = { role: "user", content: text };
       const nextLines: ChatLine[] = [...lines, userLine];
+      const willPersist = Boolean(opts.canPersistMemory && opts.userEmail?.trim());
+      if (willPersist) pendingPersistRef.current += 1;
       setLines(nextLines);
       setLoading(true);
       const contextAtMs = Date.now();
@@ -229,6 +285,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
       try {
         const lastAssistantReply =
           [...lines].reverse().find((l) => l.role === "assistant")?.content ?? null;
+        let classifiedMessageKind: "general" | "specific" | "suggestions" | undefined;
         let attachGlobal: boolean;
         try {
           const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
@@ -236,21 +293,33 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
             headers: { "Content-Type": "application/json" },
             signal: controller.signal,
             body: JSON.stringify({
-              latestUserText: text,
+              latestUserText: cleanText,
               tripTitle: opts.trip.title ?? "",
               recentTurns: nextLines.slice(-6).map((l) => ({ role: l.role, content: l.content })),
             }),
           });
           if (classifyRes.ok) {
             const j = (await classifyRes.json().catch(() => ({}))) as {
-              kind?: "general" | "specific";
+              kind?: "general" | "specific" | "suggestions";
             };
+            if (j.kind === "general" || j.kind === "specific" || j.kind === "suggestions") {
+              classifiedMessageKind = j.kind;
+            }
             attachGlobal = j.kind === "general";
           } else {
             attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
           }
         } catch {
           attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
+        }
+
+        if (classifiedMessageKind !== "general") {
+          if (
+            (classifiedMessageKind === "specific" || classifiedMessageKind === undefined) &&
+            tripAssistantUserWantsStructuredTripProposals(text)
+          ) {
+            classifiedMessageKind = "suggestions";
+          }
         }
 
         const globalParts = attachGlobal
@@ -268,7 +337,15 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           ? [memoryNoteAssistantTurn("trip", tripParts.notes)]
           : [];
 
-        const apiMessages = [...globalAsLines, ...tripMemoryLine, ...nextLines].map((l) => ({
+        // Replace the last user line with cleanText so @private/@all tags don't reach the LLM.
+        const llmLines: ChatLine[] =
+          cleanText !== text
+            ? [
+                ...nextLines.slice(0, -1),
+                { role: "user" as const, content: cleanText },
+              ]
+            : nextLines;
+        const apiMessages = [...globalAsLines, ...tripMemoryLine, ...llmLines].map((l) => ({
           role: l.role as "user" | "assistant",
           content: l.content,
         }));
@@ -278,11 +355,14 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({
+            body: JSON.stringify({
             trip: opts.trip,
             preferences: opts.profilePreferences ?? undefined,
             contextAtMs,
             messages: apiMessages,
+            ...(classifiedMessageKind === "suggestions"
+              ? { classifiedMessageKind: "suggestions" as const }
+              : {}),
             ...(ping
               ? {
                   viewerDevicePing: ping,
@@ -298,6 +378,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           provider?: "openai" | "anthropic";
           model?: string;
           suggestions?: TripRecommendation[];
+          requestKind?: "general" | "specific" | "suggestions";
         };
         if (!res.ok) {
           const head = data.error?.trim() || `Request failed (${res.status})`;
@@ -305,26 +386,45 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           throw new Error(tail ? `${head}\n${tail.slice(0, 400)}` : head);
         }
         const reply = (data.reply ?? "").trim() || "(No reply)";
+        const requestKind =
+          data.requestKind === "general" ||
+          data.requestKind === "specific" ||
+          data.requestKind === "suggestions"
+            ? data.requestKind
+            : parseTripAssistantRequestKind(reply) ?? undefined;
         if (data.provider === "openai" || data.provider === "anthropic") {
           setLlmBackend(data.provider);
         }
         if (typeof data.model === "string" && data.model.trim()) {
           setActiveModel(data.model.trim());
         }
-        setLines((prev) => [...prev, { role: "assistant", content: reply }]);
 
-        if (Array.isArray(data.suggestions) && data.suggestions.length > 0 && opts.onAddRecommendations) {
+        const rawSuggestions =
+          Array.isArray(data.suggestions) && data.suggestions.length > 0 ? data.suggestions : [];
+        // Stamp private suggestions so only the sender sees them until approved.
+        const suggestions: TripRecommendation[] =
+          turnVisibleTo && turnVisibleTo.length > 0
+            ? rawSuggestions.map((s) => ({ ...s, visibleTo: turnVisibleTo }))
+            : rawSuggestions;
+
+        if (suggestions.length > 0 && opts.onAddRecommendations) {
           try {
-            await opts.onAddRecommendations(opts.trip, data.suggestions);
+            await opts.onAddRecommendations(opts.trip, suggestions);
           } catch (err) {
             const msg = err instanceof Error ? err.message : t("recs.errorGeneric");
             setError(`${t("assistant.suggestionsFailed")} ${msg}`);
+            setLines((prev) => prev.slice(0, -1));
+            return;
           }
         }
 
+        setLines((prev) => [...prev, { role: "assistant", content: reply }]);
+
+        const recommendationsJson =
+          suggestions.length > 0 ? JSON.stringify(suggestions).slice(0, 25000) : undefined;
+
         if (opts.canPersistMemory && opts.userEmail?.trim()) {
           const where = buildChatMemoryTripWhere(opts.trip, contextAtMs);
-          const requestKind = parseTripAssistantRequestKind(reply) ?? undefined;
           const fromEmailLower = opts.userEmail.trim().toLowerCase();
           try {
             await Promise.all([
@@ -337,10 +437,18 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
                 sentAtMs: contextAtMs,
                 tripContextNote: where.summary,
                 ...(requestKind ? { requestKind } : {}),
+                ...(recommendationsJson ? { recommendationsJson } : {}),
+                ...(turnVisibleTo ? { visibleTo: turnVisibleTo } : {}),
+                ...(turnDirectedTo ? { directedTo: turnDirectedTo } : {}),
               }),
             ]);
           } catch (e) {
-            console.warn("[chat-persist] append failed", e);
+            const detail = e instanceof Error ? e.message.trim() : "";
+            setError(
+              detail
+                ? `${t("assistant.persistFailed")} ${detail.slice(0, 280)}`
+                : t("assistant.persistFailed")
+            );
           }
 
           void (async () => {
@@ -361,11 +469,17 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           })();
         }
       } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (err instanceof DOMException && err.name === "AbortError") {
+          // Restore the user's message to the input and remove it from the thread.
+          setLines((prev) => prev.slice(0, -1));
+          setPendingDraft(text);
+          return;
+        }
         const msg = err instanceof Error ? err.message : t("assistant.genericError");
         setError(msg);
         setLines((prev) => prev.slice(0, -1));
       } finally {
+        if (willPersist) pendingPersistRef.current -= 1;
         if (abortRef.current === controller) abortRef.current = null;
         setLoading(false);
       }
@@ -392,6 +506,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
 
   const prepare = useCallback((text: string) => setPendingDraft(text), []);
   const consumeDraft = useCallback(() => setPendingDraft(null), []);
+  const stop = useCallback(() => abortRef.current?.abort(), []);
 
   return {
     lines,
@@ -403,6 +518,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
     activeModel,
     canEvolve,
     send,
+    stop,
     evolve,
     forget,
     prepare,

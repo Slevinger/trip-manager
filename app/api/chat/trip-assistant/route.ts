@@ -4,6 +4,13 @@ import {
   TRIP_ASSISTANT_WEB_REFINE_APPENDIX,
 } from "@/lib/tripAssistantPrompt";
 import { extractTripSuggestionsFromReply } from "@/lib/tripAssistantSuggestionSchema";
+import {
+  parseTripAssistantRequestKind,
+  stripTripAssistantRequestKindMarker,
+  TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX,
+  EXPAND_OPTIONS_RETRY_APPENDIX,
+  type TripAssistantRequestKind,
+} from "@/lib/tripAssistantRequestKind";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import {
   normalizeTripAssistantTurnsForWebTool,
@@ -82,6 +89,16 @@ type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return x != null && typeof x === "object" && !Array.isArray(x);
+}
+
+/** Strip `trip-suggestions` fence first (caller); then strip trailing `##…##` for clients. */
+function finalizeTripAssistantReply(cleanedReply: string): {
+  markdownInput: string;
+  requestKind: ReturnType<typeof parseTripAssistantRequestKind>;
+} {
+  const requestKind = parseTripAssistantRequestKind(cleanedReply);
+  const markdownInput = stripTripAssistantRequestKindMarker(cleanedReply);
+  return { markdownInput, requestKind };
 }
 
 const OPENAI_BILLING_URL = "https://platform.openai.com/account/billing";
@@ -455,12 +472,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const systemContent = buildTripAssistantSystemPrompt(tripForPrompt, {
+  const rawClassified = body.classifiedMessageKind;
+  const classifiedMessageKind: TripAssistantRequestKind | undefined =
+    rawClassified === "general" || rawClassified === "specific" || rawClassified === "suggestions"
+      ? rawClassified
+      : undefined;
+
+  let systemContent = buildTripAssistantSystemPrompt(tripForPrompt, {
     nowMs: contextAtMs,
     profilePreferences: preferences,
     anthropicWebSearchEnabled: anthropicWebUses > 0,
     travelerLocationContextAppendix: travelerLocationAppendix || undefined,
   });
+  if (classifiedMessageKind === "suggestions") {
+    systemContent += TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX;
+  }
 
   if (provider === "anthropic") {
     const key = anthropicKey()!;
@@ -502,10 +528,42 @@ export async function POST(req: NextRequest) {
 
     /** Pull any `trip-suggestions` JSON block out of the raw reply BEFORE markdown
      * normalization — the parser tolerates the original fence formatting. */
-    const { cleanedReply, suggestions } = extractTripSuggestionsFromReply(result.text);
-    const text = formatAssistantReplyForMarkdown(cleanedReply);
+    let { cleanedReply, suggestions } = extractTripSuggestionsFromReply(result.text);
+
+    // One-shot retry when the turn was classified as suggestions but every recommendation
+    // was dropped by the ≥3-options validator.
+    if (classifiedMessageKind === "suggestions" && suggestions.length === 0) {
+      const retryResult = await completeTripAssistantAnthropic({
+        apiKey: key,
+        model: anthropicModel(),
+        system: systemContent + EXPAND_OPTIONS_RETRY_APPENDIX,
+        turns: anthropicApiTurns,
+        maxOutputTokens: 4096,
+        temperature: 0.55,
+      });
+      if (retryResult.ok) {
+        try {
+          await recordLlmUsageUsd({
+            provider: "anthropic",
+            model: anthropicModel(),
+            inputTokens: retryResult.usage.inputTokens,
+            outputTokens: retryResult.usage.outputTokens,
+          });
+        } catch (e) {
+          console.warn("[llmMonthlyBudget] record failed after suggestions retry", e);
+        }
+        const retry = extractTripSuggestionsFromReply(retryResult.text);
+        if (retry.suggestions.length > 0) {
+          suggestions = retry.suggestions;
+        }
+      }
+    }
+
+    const { markdownInput, requestKind } = finalizeTripAssistantReply(cleanedReply);
+    const text = formatAssistantReplyForMarkdown(markdownInput);
     return NextResponse.json({
       reply: text,
+      ...(requestKind ? { requestKind } : {}),
       ...(suggestions.length > 0 ? { suggestions } : {}),
       provider: "anthropic" as const,
       model: anthropicModel(),
@@ -571,10 +629,58 @@ export async function POST(req: NextRequest) {
   }
 
   const rawText = parsed.choices?.[0]?.message?.content?.trim() ?? "";
-  const { cleanedReply, suggestions } = extractTripSuggestionsFromReply(rawText);
-  const text = formatAssistantReplyForMarkdown(cleanedReply);
+  let { cleanedReply, suggestions } = extractTripSuggestionsFromReply(rawText);
+
+  // One-shot retry when the turn was classified as suggestions but every recommendation
+  // was dropped by the ≥3-options validator.
+  if (classifiedMessageKind === "suggestions" && suggestions.length === 0) {
+    const retryMessages: ChatMessage[] = [
+      { role: "system", content: (systemContent + EXPAND_OPTIONS_RETRY_APPENDIX).slice(0, 100_000) },
+      ...turnMessages.slice(-TRIP_ASSISTANT_OPENAI_MESSAGE_HISTORY_CAP),
+    ];
+    const retryRes = await fetch(OPENAI_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiKey()!}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: openaiModel(),
+        messages: retryMessages,
+        temperature: 0.55,
+        max_completion_tokens: 4096,
+      }),
+    });
+    if (retryRes.ok) {
+      const retryRaw = await retryRes.text();
+      let retryParsed: { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      try {
+        retryParsed = JSON.parse(retryRaw) as typeof retryParsed;
+        const retryUsage = retryParsed.usage;
+        if (retryUsage) {
+          await recordLlmUsageUsd({
+            provider: "openai",
+            model: openaiModel(),
+            inputTokens: Number(retryUsage.prompt_tokens) || 0,
+            outputTokens: Number(retryUsage.completion_tokens) || 0,
+          }).catch((e) => console.warn("[llmMonthlyBudget] record failed after OpenAI retry", e));
+        }
+        const retryText = retryParsed.choices?.[0]?.message?.content?.trim() ?? "";
+        const retry = extractTripSuggestionsFromReply(retryText);
+        if (retry.suggestions.length > 0) {
+          suggestions = retry.suggestions;
+        }
+      } catch {
+        // ignore retry parse failure; proceed with empty suggestions
+      }
+    }
+  }
+
+  const { markdownInput, requestKind } = finalizeTripAssistantReply(cleanedReply);
+  const text = formatAssistantReplyForMarkdown(markdownInput);
   return NextResponse.json({
     reply: text,
+    ...(requestKind ? { requestKind } : {}),
     ...(suggestions.length > 0 ? { suggestions } : {}),
     provider: "openai" as const,
     model: openaiModel(),

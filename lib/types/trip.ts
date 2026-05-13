@@ -291,9 +291,11 @@ export interface TripLiveLocation {
  * Pending suggestion for the trip — surfaced in the floating notifications dock.
  *
  * A recommendation is a *bundle of options* (each carrying a full step-interval
- * payload of the same `kind`). The user picks one option to approve, which
- * becomes a new step on the trip. The whole recommendation stays in the queue
- * until the user approves an option or deletes the recommendation.
+ * payload of the same `kind`). The user picks one option to approve: either it
+ * becomes a **new** step, or — when {@link BaseRecommendationOption#targetStepId}
+ * is set — the interval is **merged** into that existing step’s `stepIntervals`
+ * (same `stepType` as `kind`). The whole recommendation stays in the queue until
+ * the user approves an option or deletes the recommendation.
  *
  * Recommendations live alongside `steps` rather than inside one so the queue
  * is order-independent and can be authored by the assistant or other tooling.
@@ -312,6 +314,12 @@ interface BaseRecommendationOption {
    * not yet exist on the trip (ids should match the interval's references).
    */
   destinations?: Destination[];
+  /**
+   * When set, approving merges `interval` into this step’s `stepIntervals` instead
+   * of creating a new step. Must match some {@link TripStep#id} whose `stepType`
+   * equals this option’s recommendation `kind` (`stay` / `transit` / `activity`).
+   */
+  targetStepId?: string;
 }
 
 export interface StayRecommendationOption extends BaseRecommendationOption {
@@ -344,6 +352,12 @@ interface BaseTripRecommendation {
    * but no longer trigger the "new" indicator on the bell or the card.
    */
   seen?: boolean;
+  /**
+   * When set, only these email addresses may see this recommendation in the UI.
+   * Stamped by the assistant when the originating chat turn was `@private`.
+   * Stripped when the recommendation is approved into the itinerary (it becomes public).
+   */
+  visibleTo?: string[];
 }
 
 export interface StayRecommendation extends BaseTripRecommendation {
@@ -505,6 +519,11 @@ export interface Trip {
    * each entry carries a full step interval that can be promoted into `steps` on approve.
    */
   recommendations?: TripRecommendation[];
+  /**
+   * Recommendation ids removed from the queue (dismiss / approve). Used so thread snapshots
+   * do not resurrect deleted cards when syncing suggestions from the shared assistant thread.
+   */
+  removedRecommendationIds?: string[];
   /** Live device positions by participant key (typically lowercased email). */
   liveLocations?: Record<string, TripLiveLocation>;
   warnings?: TripWarning[];

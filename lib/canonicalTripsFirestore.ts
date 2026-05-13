@@ -1,6 +1,5 @@
 import {
   arrayUnion,
-  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -368,42 +367,6 @@ export async function ensureCanonicalTripListsMyUid(
   await setDoc(
     tripDocRef(db, tid),
     { [PARTICIPANT_UIDS]: arrayUnion(uid) },
-    { merge: true }
-  );
-}
-
-export async function updateCanonicalTripLiveLocation(
-  db: Firestore,
-  tripId: string,
-  userLocationKey: string,
-  location: TripLiveLocation
-): Promise<void> {
-  const ref = tripDocRef(db, tripId);
-  /** Dot notation in `updateDoc` field paths splits on `.`; nest under `liveLocations` instead. */
-  await setDoc(
-    ref,
-    {
-      liveLocations: {
-        [userLocationKey]: pruneUndefinedForFirestore(location),
-      },
-    },
-    { merge: true }
-  );
-}
-
-export async function clearCanonicalTripLiveLocation(
-  db: Firestore,
-  tripId: string,
-  userLocationKey: string
-): Promise<void> {
-  const ref = tripDocRef(db, tripId);
-  await setDoc(
-    ref,
-    {
-      liveLocations: {
-        [userLocationKey]: deleteField(),
-      },
-    },
     { merge: true }
   );
 }

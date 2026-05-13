@@ -6,8 +6,9 @@
  *                  `__global__` context is unhelpful and just costs tokens.
  * - `suggestions` → user explicitly asks for actionable proposals to add to the trip.
  *                  The assistant must emit a fenced `trip-suggestions` JSON block in
- *                  addition to the conversational reply (see
- *                  {@link buildTripRecommendationSchemaPrompt}).
+ *                  addition to the conversational reply. The **array** inside the
+ *                  \`trip-suggestions\` fence is what the app iterates for approve/skip;
+ *                  keep free-form prose minimal when using this marker.
  */
 export type TripAssistantRequestKind = "general" | "specific" | "suggestions";
 
@@ -96,6 +97,87 @@ export function tripAssistantNeedsGlobalContext(
 }
 
 /**
+ * Client boost when classify returns `specific` (or fails) but the text clearly asks for
+ * structured trip additions — server then appends {@link TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX}.
+ */
+export function tripAssistantUserWantsStructuredTripProposals(latestUserText: string): boolean {
+  const t = (latestUserText ?? "").trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+
+  const proposal =
+    /\b(suggest(ions?)?|recommend(ations?)?|propose|brainstorm|give me (a |some |few )?(options|ideas)|any (good )?ideas\b|what (should|can) (i|we) (add|book|try|visit|see))\b/i.test(
+      lower
+    ) ||
+    /תמליץ|תציע|המלצות|מה (להוסיף|כדאי לי|אפשר)|תן (לי )?(כמה )?רעיונות/i.test(t);
+
+  if (!proposal) return false;
+
+  const crossTripOnly =
+    /\b(next|future) (trip|vacation|holiday)\b/.test(lower) ||
+    /\bwhere (should|do you recommend|would you recommend|to) (i|we) (go|travel|fly)\b/.test(
+      lower
+    ) ||
+    /\b(recommend|suggest) (me|us)?\s*(a|some)?\s*(trip|destination|place|country|city)\b(?:\s*[.?!])?\s*$/i.test(
+      lower
+    ) ||
+    /טיול הבא|לטיול הבא|לאן (כדאי|לי).*לטוס|לאן לטייל/.test(t);
+
+  const tripAnchored =
+    /\b(this|my|our|the) (trip|itinerary)\b/.test(lower) ||
+    /\b(day|night) \d+\b/i.test(lower) ||
+    /\b(hotel|hostel|stay|lodging|resort|airbnb|flight|train|bus|shuttle|transit|ferry|museum|restaurant|dinner|lunch|breakfast|activity|tour|excursion|booking|step|itinerary|leg)\b/.test(
+      lower
+    ) ||
+    /\b(today|tomorrow|tonight|weekend)\b/.test(lower) ||
+    /שלב|מלון|טיסה|רכבת|מסעדה|מוזיאון|פעילות|סיור|הזמנה|היום|מחר|בערב/.test(t);
+
+  if (!tripAnchored) return false;
+  if (crossTripOnly) return false;
+
+  return true;
+}
+
+/**
+ * Appended to the system prompt when the client marks this turn as proposal-shaped so the
+ * model emits `##suggestions##` plus a fenced `trip-suggestions` JSON block.
+ *
+ * Two-path logic:
+ *  - If the request lacks enough specificity, ask ONE clarifying question (##specific##, no fence).
+ *  - If context is sufficient, emit ONE sentence of prose + the fence + ##suggestions##.
+ */
+export const TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX = [
+  "",
+  "### Server classification (this turn)",
+  "The user's latest message was classified as a request for **concrete trip additions** (stays, transit, or activities to consider adding to this trip).",
+  "",
+  "**Clarify-first gate (evaluate BEFORE generating suggestions):**",
+  "Check whether the conversation already tells you: (1) which day or time slot, (2) what kind of addition (stay / transit / activity), and (3) any price or style constraint.",
+  "If ANY of these is genuinely unknown and NOT answered earlier in this conversation, ask EXACTLY ONE focused clarifying question as your entire visible reply (one sentence), end with `##specific##`, and do NOT emit a `trip-suggestions` fence.",
+  "If you have enough context to generate good options, proceed with the instructions below.",
+  "",
+  "**When proceeding with suggestions:**",
+  "Your visible reply MUST be exactly ONE sentence (no lists, no headers, no tables in prose) followed by the `trip-suggestions` fence.",
+  "The product **queues only** the JSON **array** inside the single fenced `trip-suggestions` code block. Put **all** comparable alternatives there — do NOT repeat options as markdown text.",
+  "Each `TripRecommendation` in the array MUST have **at least 3 distinct `options`**. If you cannot produce 3 genuine alternatives for a slot, omit that recommendation entirely.",
+  `You MUST end with exactly ${REQUEST_KIND_SUGGESTIONS_MARKER} as the final line.`,
+  "Ground options in the current trip dates and existing `trip.destinations` ids. Do **not** choose `##general##` for hotel/resort/activity/transit ideas the user could add to this itinerary.",
+].join("\n");
+
+/**
+ * Appended to the system prompt for a second-pass retry when the first response
+ * produced suggestions with fewer than 3 options each.
+ */
+export const EXPAND_OPTIONS_RETRY_APPENDIX = [
+  "",
+  "### Retry: minimum options not met",
+  "The previous response had at least one recommendation with fewer than 3 options.",
+  "Output ONLY a `trip-suggestions` fence — no chat prose, no classification marker explanation.",
+  "Every `TripRecommendation` in the array MUST have EXACTLY 3 or more distinct `options`.",
+  `End with ${REQUEST_KIND_SUGGESTIONS_MARKER}.`,
+].join("\n");
+
+/**
  * The system-prompt fragment instructing the assistant to append a classification
  * marker on the very last line. Kept here so prompt + parser stay in sync.
  */
@@ -105,6 +187,6 @@ export const TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION = [
   `End your reply with EXACTLY one classification marker on its own final line, with no extra punctuation, prefix, or trailing text:`,
   `- ${REQUEST_KIND_GENERAL_MARKER}     → use when the user's latest message is about THEM as a traveler (likes, dislikes, hobbies, music, food preferences, lifestyle, pace, budget style, future trips, or cross-trip questions).`,
   `- ${REQUEST_KIND_SPECIFIC_MARKER}    → use when the user's latest message is about THIS trip's concrete details (a step, place, date, booking, route, price, schedule, document).`,
-  `- ${REQUEST_KIND_SUGGESTIONS_MARKER} → use when the user explicitly asks you to PROPOSE additions to the trip queue (stays, transit, or activities they should consider). When you pick this marker you MUST also include the fenced \`trip-suggestions\` JSON block described above; bind places to existing \`trip.destinations[].id\` values whenever they match (do not invent parallel ids). For activity options tied to a stay in \`trip.steps\`, set \`hostStayStepId\` to that stay step's \`id\`. If you cannot, choose \`${REQUEST_KIND_SPECIFIC_MARKER}\` or \`${REQUEST_KIND_GENERAL_MARKER}\` instead.`,
+  `- ${REQUEST_KIND_SUGGESTIONS_MARKER} → use when the user explicitly asks you to PROPOSE additions to the trip queue (stays, transit, or activities they should consider). When you pick this marker you MUST include the fenced \`trip-suggestions\` JSON block described above — a **top-level JSON array** \`[...]\` of \`TripRecommendation\` objects that the app will iterate; keep normal chat prose **short** and do **not** mirror the same alternatives again as markdown lists/tables/articles. Bind places to existing \`trip.destinations[].id\` values whenever they match (do not invent parallel ids). For activity options tied to a stay in \`trip.steps\`, set \`hostStayStepId\` to that stay step's \`id\`. If you cannot, choose \`${REQUEST_KIND_SPECIFIC_MARKER}\` or \`${REQUEST_KIND_GENERAL_MARKER}\` instead.`,
   "If both apply, pick the dominant intent. Never omit the marker. Never invent other markers.",
 ].join("\n");

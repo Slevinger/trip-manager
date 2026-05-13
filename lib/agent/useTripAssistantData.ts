@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
+import { userPrimaryEmailLower } from "@/lib/auth/userPrimaryEmailLower";
 import { useFirebaseUser } from "@/lib/auth/useFirebaseUser";
-import { subscribeSharedTripThread } from "@/lib/sharedTripThread";
+import { subscribeSharedTripThreadShared } from "@/lib/sharedTripThread";
 import { subscribeUser } from "@/lib/usersFirestore";
 import type { Trip, UserPreferences } from "@/lib/types/trip";
 import type {
@@ -13,11 +14,15 @@ import type {
 
 export interface UseTripAssistantDataResult {
   user: User | null;
+  /** Lowercase email from {@link User.email} or linked provider (for shared thread + persist). */
+  userEmailLower: string | null;
   profilePreferences: UserPreferences | null;
   tripChatMessages: TripChatMessage[];
   globalChatMessages: TripChatMessage[];
-  /** Subset of `useFirestore && user.email` resolved for the dock. */
+  /** True when Firestore is configured, user is signed in, and an email could be resolved. */
   canPersistMemory: boolean;
+  /** Raw shared thread rows (for merging structured suggestions into the trip). */
+  sharedTripThread: { loaded: boolean; entries: SharedTripThreadEntry[] };
 }
 
 /**
@@ -35,37 +40,41 @@ export function useTripAssistantData(trip: Trip | null): UseTripAssistantDataRes
   }>({ loaded: false, entries: [] });
 
   const tripId = trip?.id ?? null;
+  const userEmailLower = useMemo(() => userPrimaryEmailLower(user), [user]);
 
   useEffect(() => {
-    if (!useFirestore || !user?.email?.trim()) {
+    if (!useFirestore || !userEmailLower) {
       setProfilePreferences(null);
       setChatMemory([]);
       return () => {};
     }
-    return subscribeUser(user.email!, (u) => {
+    return subscribeUser(userEmailLower, (u) => {
       setProfilePreferences(u?.preferences ?? null);
       setChatMemory(u?.memory ?? []);
     });
-  }, [useFirestore, user]);
+  }, [useFirestore, userEmailLower]);
 
   useEffect(() => {
-    if (!useFirestore || !tripId) {
+    if (!useFirestore || !tripId || !user) {
       setSharedThread({ loaded: false, entries: [] });
       return () => {};
     }
-    return subscribeSharedTripThread(
+    return subscribeSharedTripThreadShared(
       tripId,
       (rows) => setSharedThread({ loaded: true, entries: rows }),
-      () => setSharedThread({ loaded: true, entries: [] })
+      (err) => {
+        console.warn("[subscribeSharedTripThread]", err);
+        setSharedThread((prev) => ({ ...prev, loaded: true }));
+      }
     );
-  }, [useFirestore, tripId]);
+  }, [useFirestore, tripId, user]);
 
   const tripChatMessages = useMemo<TripChatMessage[]>(() => {
     if (!tripId) return [];
     if (!sharedThread.loaded) return [];
     const allForTrip = sharedThread.entries.filter((e) => e.tripId === tripId);
     return allForTrip
-      .filter((e) => e.active)
+      .filter((e) => e.active !== false)
       .slice(-40)
       .map((e) => ({
         tripId: e.tripId,
@@ -78,13 +87,15 @@ export function useTripAssistantData(trip: Trip | null): UseTripAssistantDataRes
 
   const globalChatMessages: TripChatMessage[] = [];
 
-  const canPersistMemory = Boolean(useFirestore && user?.email?.trim());
+  const canPersistMemory = Boolean(useFirestore && user && userEmailLower);
 
   return {
     user,
+    userEmailLower,
     profilePreferences,
     tripChatMessages,
     globalChatMessages,
     canPersistMemory,
+    sharedTripThread: { loaded: sharedThread.loaded, entries: sharedThread.entries },
   };
 }

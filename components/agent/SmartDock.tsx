@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
+  Lock,
   Loader2,
   Send,
   Sparkles,
+  Square,
   Trash2,
   Wand2,
   X,
@@ -27,12 +29,13 @@ import {
 } from "@/lib/tripRecommendations";
 import { activeTripScreen } from "@/components/shell/navItems";
 import { TripAssistantMessageBody } from "@/components/trip/TripAssistantMessageBody";
+import { MentionInput } from "@/components/agent/MentionInput";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/ui/cn";
+import { subscribeSharedTripThreadShared } from "@/lib/sharedTripThread";
 import type { Trip, TripRecommendation, TripRecommendationOption } from "@/lib/types/trip";
 import { fetchTripHeroCoverFromApi } from "@/lib/trip/heroCoverClient";
 
@@ -61,6 +64,11 @@ function SmartDockInner({ tripId }: { tripId: string }) {
 
   const trip = useAppSelector((s) => s.trip.trip);
   const screen = activeTripScreen(pathname, tripId);
+
+  useEffect(() => {
+    if (!trip || trip.id !== tripId.trim()) return;
+    return subscribeSharedTripThreadShared(tripId, () => {}, undefined);
+  }, [trip, tripId]);
 
   if (!trip || trip.id !== tripId) {
     return (
@@ -211,7 +219,7 @@ function DockPanel({
     profilePreferences: data.profilePreferences,
     tripChatMessages: data.tripChatMessages,
     globalChatMessages: data.globalChatMessages,
-    userEmail: data.user?.email?.trim() ?? null,
+    userEmail: data.userEmailLower,
     userDisplayName: data.user?.displayName?.trim() ?? null,
     isTripOwner: isOwner,
     canPersistMemory: data.canPersistMemory,
@@ -219,8 +227,12 @@ function DockPanel({
     ...(viewerPingRef ? { viewerPingRef } : {}),
   });
 
+  const userEmailLower = data.userEmailLower ?? null;
   const recommendations = trip.recommendations ?? [];
-  const recommendationCount = recommendations.length;
+  const visibleRecommendations = recommendations.filter(
+    (r) => !r.visibleTo || !userEmailLower || r.visibleTo.includes(userEmailLower)
+  );
+  const recommendationCount = visibleRecommendations.length;
 
   return (
     <>
@@ -275,14 +287,27 @@ function DockPanel({
         </div>
 
         <TabsContent value="chat" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-          <ChatTab assistant={assistant} screen={screen} />
+          <ChatTab assistant={assistant} screen={screen} isOwner={isOwner} />
         </TabsContent>
 
         <TabsContent
           value="suggestions"
           className="m-0 flex max-h-[55dvh] min-h-0 flex-col overflow-y-auto px-4 pb-4 data-[state=inactive]:hidden"
         >
-          <SuggestionsTab trip={trip} persistTrip={persistTrip} />
+          <SuggestionsTab
+            trip={trip}
+            persistTrip={persistTrip}
+            userEmail={userEmailLower}
+            onTighten={(rec, option) => {
+              const label = option.label?.trim() || option.interval.title.trim();
+              const prefix = rec.visibleTo && rec.visibleTo.length > 0 ? "@private " : "";
+              assistant.prepare(
+                `${prefix}Dig deeper on "${label}" (${rec.kind}${rec.title ? ` — "${rec.title}"` : ""}). ` +
+                  `Suggest 3 specific alternatives for this exact slot: exact times, realistic prices, what's included, and why each fits this trip.`
+              );
+              onTabChange("chat");
+            }}
+          />
         </TabsContent>
 
         <TabsContent
@@ -308,9 +333,11 @@ function DockPanel({
 function ChatTab({
   assistant,
   screen,
+  isOwner,
 }: {
   assistant: ReturnType<typeof useTripAssistant>;
   screen: ReturnType<typeof activeTripScreen>;
+  isOwner: boolean;
 }) {
   const { t } = useI18n();
   const [input, setInput] = useState("");
@@ -339,6 +366,27 @@ function ChatTab({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {isOwner && assistant.lines.length > 0 ? (
+        <div className="flex shrink-0 justify-end border-b border-[var(--color-border)] px-3 py-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={assistant.forgetting || assistant.loading}
+            aria-label={t("agent.clearChat")}
+            title={t("agent.clearChat")}
+            className="h-7 gap-1 px-2 text-[11px] text-[var(--color-muted-foreground)] hover:text-[var(--color-danger)]"
+            onClick={() => void assistant.forget()}
+          >
+            {assistant.forgetting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Trash2 className="h-3 w-3" />
+            )}
+            {t("agent.clearChat")}
+          </Button>
+        </div>
+      ) : null}
       <div
         ref={listRef}
         className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-y-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
@@ -348,19 +396,46 @@ function ChatTab({
             {t("agent.empty")}
           </p>
         ) : null}
-        {assistant.lines.map((line, i) => (
-          <div
-            key={i}
-            className={cn(
-              "max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
-              line.role === "user"
-                ? "ml-auto bg-gradient-brand text-white"
-                : "bg-[var(--color-surface-muted)] text-[var(--color-foreground)]"
-            )}
-          >
-            <TripAssistantMessageBody content={line.content} variant={line.role} />
-          </div>
-        ))}
+        {assistant.lines.map((line, i) => {
+          const isUser = line.role === "user";
+          const isPrivate = isUser && /@private\b/i.test(line.content);
+          const mentionMatch = isUser ? line.content.match(/@([A-Za-z0-9_.-]+)/g)?.find(
+            (m) => !/@private\b/i.test(m) && !/@all\b/i.test(m)
+          ) : undefined;
+          // Strip @private and @all from the displayed text.
+          const displayContent = isUser
+            ? line.content.replace(/@private\b\s*/gi, "").replace(/@all\b\s*/gi, "").trim()
+            : line.content;
+          return (
+            <div key={i} className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
+              {isUser && (isPrivate || mentionMatch) ? (
+                <div className="mb-0.5 flex gap-1 px-1">
+                  {isPrivate ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-muted-foreground)]">
+                      <Lock className="h-2.5 w-2.5" />
+                      {t("agent.audiencePrivate")}
+                    </span>
+                  ) : null}
+                  {mentionMatch ? (
+                    <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-muted-foreground)]">
+                      {t("agent.audienceTo")} {mentionMatch}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              <div
+                className={cn(
+                  "max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                  isUser
+                    ? "bg-gradient-brand text-white"
+                    : "bg-[var(--color-surface-muted)] text-[var(--color-foreground)]"
+                )}
+              >
+                <TripAssistantMessageBody content={displayContent} variant={line.role} />
+              </div>
+            </div>
+          );
+        })}
         {assistant.loading ? (
           <div className="inline-flex items-center gap-2 rounded-2xl bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-muted-foreground)]">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -403,32 +478,35 @@ function ChatTab({
         onSubmit={onSubmit}
         className="flex shrink-0 items-end gap-2 border-t border-[var(--color-border)] p-3"
       >
-        <Textarea
+        <MentionInput
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void onSubmit(e as unknown as React.FormEvent);
-            }
-          }}
+          onChange={setInput}
+          onSubmit={() => void onSubmit({ preventDefault: () => {} } as React.FormEvent)}
           placeholder={t("agent.placeholder")}
-          rows={1}
-          className="min-h-10 flex-1 resize-none rounded-2xl"
+          disabled={assistant.loading}
         />
-        <Button
-          type="submit"
-          size="icon"
-          variant="primary"
-          disabled={assistant.loading || assistant.evolving || !input.trim()}
-          aria-label={t("agent.send")}
-        >
-          {assistant.loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
+        {assistant.loading ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="primary"
+            aria-label={t("agent.stop")}
+            title={t("agent.stop")}
+            onClick={() => assistant.stop()}
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button
+            type="submit"
+            size="icon"
+            variant="primary"
+            disabled={assistant.evolving || !input.trim()}
+            aria-label={t("agent.send")}
+          >
             <Send className="h-4 w-4" />
-          )}
-        </Button>
+          </Button>
+        )}
       </form>
     </div>
   );
@@ -437,12 +515,18 @@ function ChatTab({
 function SuggestionsTab({
   trip,
   persistTrip,
+  userEmail,
+  onTighten,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
+  userEmail: string | null;
+  onTighten: (rec: TripRecommendation, option: TripRecommendationOption) => void;
 }) {
   const { t } = useI18n();
-  const recs = trip.recommendations ?? [];
+  const recs = (trip.recommendations ?? []).filter(
+    (r) => !r.visibleTo || !userEmail || r.visibleTo.includes(userEmail)
+  );
   if (recs.length === 0) {
     return (
       <p className="rounded-2xl bg-[var(--color-surface-muted)] px-3 py-3 text-sm text-[var(--color-muted-foreground)]">
@@ -455,6 +539,7 @@ function SuggestionsTab({
       {recs.map((rec) => (
         <RecommendationCard
           key={rec.id}
+          trip={trip}
           rec={rec}
           onApprove={async (optionId) => {
             const next = approveTripRecommendationOptionDetailed(trip, rec.id, optionId).trip;
@@ -466,6 +551,10 @@ function SuggestionsTab({
           onDelete={async () => {
             await persistTrip(removeTripRecommendation(trip, rec.id));
           }}
+          onTighten={(optionId) => {
+            const option = (rec.options as TripRecommendationOption[]).find((o) => o.id === optionId);
+            if (option) onTighten(rec, option);
+          }}
         />
       ))}
     </div>
@@ -473,15 +562,19 @@ function SuggestionsTab({
 }
 
 function RecommendationCard({
+  trip,
   rec,
   onApprove,
   onSkip,
   onDelete,
+  onTighten,
 }: {
+  trip: Trip;
   rec: TripRecommendation;
   onApprove: (optionId: string) => Promise<void>;
   onSkip: () => Promise<void>;
   onDelete: () => Promise<void>;
+  onTighten: (optionId: string) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState<"approve" | "skip" | "delete" | null>(null);
@@ -490,7 +583,15 @@ function RecommendationCard({
   return (
     <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
       <div className="flex items-center justify-between gap-2">
-        <Badge tone={tone}>{rec.kind}</Badge>
+        <div className="flex items-center gap-1.5">
+          <Badge tone={tone}>{rec.kind}</Badge>
+          {rec.visibleTo && rec.visibleTo.length > 0 ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-muted-foreground)]">
+              <Lock className="h-2.5 w-2.5" />
+              {t("agent.audiencePrivate")}
+            </span>
+          ) : null}
+        </div>
         {rec.seen ? null : <Badge tone="coral">{t("recs.newPill")}</Badge>}
       </div>
       {rec.title ? (
@@ -515,22 +616,43 @@ function RecommendationCard({
                     {opt.note}
                   </p>
                 ) : null}
+                {opt.targetStepId ? (
+                  <p className="mt-0.5 text-[10px] text-[var(--color-muted-foreground)]">
+                    {t("recs.addsToStep", {
+                      stepTitle:
+                        trip.steps.find((s) => s.id === opt.targetStepId)?.title?.trim() ||
+                        opt.targetStepId,
+                    })}
+                  </p>
+                ) : null}
               </div>
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={busy != null}
-                onClick={async () => {
-                  setBusy("approve");
-                  try {
-                    await onApprove(opt.id);
-                  } finally {
-                    setBusy(null);
-                  }
-                }}
-              >
-                {busy === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : t("recs.approve")}
-              </Button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy != null}
+                  title={t("recs.tighten")}
+                  aria-label={t("recs.tighten")}
+                  onClick={() => onTighten(opt.id)}
+                >
+                  <Wand2 className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={busy != null}
+                  onClick={async () => {
+                    setBusy("approve");
+                    try {
+                      await onApprove(opt.id);
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  {busy === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : t("recs.approve")}
+                </Button>
+              </div>
             </li>
           );
         })}

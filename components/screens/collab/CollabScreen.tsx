@@ -485,7 +485,10 @@ function PresencePanel({
         const traveler =
           trip.travelers.find((tr) => tr.email?.toLowerCase() === key.toLowerCase()) ??
           trip.viewers?.find((v) => v.email?.toLowerCase() === key.toLowerCase());
-        const name = traveler?.name ?? key.split("@")[0];
+        const name =
+          loc.name?.trim() ||
+          traveler?.name?.trim() ||
+          (key.includes("@") ? key.split("@")[0]! : key.slice(0, 8));
         const updatedMs = loc.updatedAt ? Date.parse(loc.updatedAt) : nowMs;
         const minutes = Math.max(0, Math.round((nowMs - updatedMs) / 60000));
         return (

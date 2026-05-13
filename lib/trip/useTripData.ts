@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import {
   ensureCanonicalTripListsMyUid,
@@ -21,6 +21,10 @@ import { clearTripHistoryLocalStorage } from "@/lib/store/historyPersistence";
 import { clearManageDraftLocal } from "@/lib/trip/manageDraftLocalCache";
 import { getTrip, putTrip } from "@/lib/tripLocalStore";
 import type { Trip } from "@/lib/types/trip";
+import type { SharedTripThreadEntry } from "@/lib/types/user";
+import { userPrimaryEmailLower } from "@/lib/auth/userPrimaryEmailLower";
+import { subscribeSharedTripThreadShared } from "@/lib/sharedTripThread";
+import { useTripThreadRecommendationsSync } from "@/lib/trip/useTripThreadRecommendationsSync";
 
 export type TripLoadState =
   | "loading"
@@ -82,14 +86,40 @@ export function useTripData(tripId: string): UseTripDataResult {
   const [loadState, setLoadState] = useState<TripLoadState>("loading");
   const [user, setUser] = useState<User | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [sharedAssistantThread, setSharedAssistantThread] = useState<{
+    loaded: boolean;
+    entries: SharedTripThreadEntry[];
+  }>({ loaded: false, entries: [] });
 
   const useFirestore = Boolean(getDb() && getMissingFirebasePublicEnv().length === 0);
   const canManageFirestore = firestoreTripAccess?.canManageFirestore ?? false;
   const isOwnerFirestore = firestoreTripAccess?.isOwner ?? false;
 
+  const tripThreadSyncEmail = useMemo(() => userPrimaryEmailLower(user), [user]);
+
+  useTripThreadRecommendationsSync({
+    trip: trip?.id === tripId.trim() ? trip : null,
+    threadLoaded: sharedAssistantThread.loaded,
+    threadEntries: sharedAssistantThread.entries,
+    canPersist: Boolean(useFirestore && tripThreadSyncEmail && canManageFirestore),
+    persistTrip,
+  });
+
   useEffect(() => {
     dispatch(setActiveTripId(tripId));
   }, [dispatch, tripId]);
+
+  useEffect(() => {
+    if (!useFirestore || !tripId.trim() || !user) {
+      setSharedAssistantThread({ loaded: false, entries: [] });
+      return () => {};
+    }
+    return subscribeSharedTripThreadShared(
+      tripId,
+      (rows) => setSharedAssistantThread({ loaded: true, entries: rows }),
+      () => setSharedAssistantThread((prev) => ({ ...prev, loaded: true }))
+    );
+  }, [useFirestore, tripId, user]);
 
   useEffect(() => {
     setLoadState("loading");

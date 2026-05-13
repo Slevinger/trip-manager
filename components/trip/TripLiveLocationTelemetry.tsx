@@ -2,6 +2,7 @@
 
 import type { Trip } from "@/lib/types/trip";
 import { useTripAgentViewerPingRef } from "@/lib/agent/tripAgentViewerPingContext";
+import { userPrimaryEmailLower } from "@/lib/auth/userPrimaryEmailLower";
 import { useFirebaseUser } from "@/lib/auth/useFirebaseUser";
 import { useTripLiveLocationTelemetry } from "@/lib/trip/useTripLiveLocationTelemetry";
 
@@ -22,7 +23,8 @@ export function TripLiveLocationTelemetry({
     tripId,
     trip,
     {
-      userEmail: user?.email?.trim() ?? null,
+      userUid: user?.uid?.trim() ?? null,
+      userEmail: userPrimaryEmailLower(user),
       userDisplayName: user?.displayName?.trim() ?? null,
       useFirestore,
     },

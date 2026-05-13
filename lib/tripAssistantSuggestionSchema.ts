@@ -309,6 +309,11 @@ const OPTION_BASE_FIELDS = {
     description:
       "New registry rows referenced by this option's interval. Only include places NOT already on `trip.destinations`.",
   },
+  targetStepId: {
+    type: "string",
+    description:
+      "When appending to an existing step, that step's `id` (must match recommendation `kind`). Omit to create a new step.",
+  },
 } as const satisfies ShapeRecord<OptionBaseFields>;
 
 const STAY_OPTION_DISC_FIELDS = {
@@ -355,6 +360,11 @@ const RECOMMENDATION_BASE_FIELDS = {
     type: "boolean",
     description: "Whether the user has reviewed this card.",
     guidance: "DO NOT SET — managed by the dock UI",
+  },
+  visibleTo: {
+    type: "string[]",
+    description: "Email list controlling visibility — assigned by the server.",
+    guidance: "DO NOT SET — server fills for @private turns",
   },
 } as const satisfies ShapeRecord<RecommendationBaseFields>;
 
@@ -423,10 +433,8 @@ export function buildTripRecommendationSchemaPrompt(): string {
   return [
     "### `##suggestions##` reply contract",
     "When you classify a turn as `##suggestions##`, you MUST produce TWO things:",
-    "  1. A short conversational paragraph for the human (one or two sentences explaining",
-    "     what you are proposing and why — no bullet lists of the JSON fields).",
-    `  2. EXACTLY ONE fenced JSON block tagged \`\`\`${TRIP_SUGGESTIONS_FENCE}\`\`\` that contains a JSON`,
-    `     ARRAY of TripRecommendation objects (1-4 entries). Multiple suggestions go in this single array.`,
+    "  1. **Very short** chat for the human (1–3 sentences: intent + one line of guidance). Do **not** paste hour-by-hour plans, markdown tables, horizontal rules, or multi-heading “articles” here — the UI ignores that for queuing.",
+    `  2. EXACTLY ONE fenced JSON block tagged \`\`\`${TRIP_SUGGESTIONS_FENCE}\`\`\` whose body is a **JSON array** \`[...]\` (first non-whitespace char \`[\`) of TripRecommendation objects (one or more). That array is the **authoritative** list the app iterates as cards (approve/skip/edit); put **every** bookable idea **only** there — use **separate** array elements per distinct proposal (e.g. morning vs lunch vs dinner) and \`options[]\` for A/B/C picks within the same slot.`,
     "",
     "The shapes below are TypeScript-flavoured pseudo-JSON. The trailing `// ...`",
     "comments document required/optional + intent — do NOT include them in your output.",
@@ -486,7 +494,9 @@ export function buildTripRecommendationSchemaPrompt(): string {
     "",
     "Authoring rules:",
     `- Allowed kinds: ${quoteEnum(TRIP_RECOMMENDATION_KINDS)}.`,
-    "- Output between 1 and 4 recommendations per reply, each with 1-3 options of the same `kind`.",
+    "- The fenced body is **only** a JSON array — never wrap it in an object key.",
+    "- Each \`TripRecommendation\` MUST have **at least 3 \`options\`** of the same \`kind\`. If you cannot generate 3 genuinely distinct alternatives for a slot, omit that recommendation entirely — never pad with weak duplicates.",
+    "- Output as many TripRecommendation rows as the user's ask needs (often 3–10 for a full-day menu), each with a minimum of 3 \`options\` of the same \`kind\`.",
     "- An option's `interval.intervalType` MUST equal the recommendation's `kind`.",
     "- Times must be ISO 8601 with timezone offset and inside the trip's date range.",
     "- Currency codes default to the trip currency; do not invent prices you cannot justify.",
@@ -749,12 +759,19 @@ function readRecommendation(raw: unknown, nowIso: string): TripRecommendation | 
   ) {
     return null;
   }
+  const visibleToRaw = raw.visibleTo;
+  const visibleTo =
+    Array.isArray(visibleToRaw) && visibleToRaw.length > 0
+      ? (visibleToRaw.filter((v): v is string => typeof v === "string" && v.trim() !== "") as string[])
+      : undefined;
+
   const baseExtras = {
     id: safeString(raw.id, 80) ?? newId(),
     createdAt: safeIso(raw.createdAt) ?? nowIso,
     ...(safeString(raw.title, 200) ? { title: safeString(raw.title, 200)! } : {}),
     ...(safeString(raw.note, 4000) ? { note: safeString(raw.note, 4000)! } : {}),
     ...(safeString(raw.source, 80) ? { source: safeString(raw.source, 80)! } : {}),
+    ...(visibleTo ? { visibleTo } : {}),
   };
   const optionsRaw = Array.isArray(raw.options) ? raw.options : [];
   if (raw.kind === "stay") {
@@ -763,7 +780,7 @@ function readRecommendation(raw: unknown, nowIso: string): TripRecommendation | 
       const parsed = readOption(opt, readStayInterval);
       if (parsed) options.push(parsed as StayRecommendationOption);
     }
-    if (options.length === 0) return null;
+    if (options.length < 3) return null;
     const rec: StayRecommendation = { ...baseExtras, kind: "stay", options };
     return rec;
   }
@@ -773,7 +790,7 @@ function readRecommendation(raw: unknown, nowIso: string): TripRecommendation | 
       const parsed = readOption(opt, readTransitInterval);
       if (parsed) options.push(parsed as TransitRecommendationOption);
     }
-    if (options.length === 0) return null;
+    if (options.length < 3) return null;
     const rec: TransitRecommendation = { ...baseExtras, kind: "transit", options };
     return rec;
   }
@@ -782,7 +799,7 @@ function readRecommendation(raw: unknown, nowIso: string): TripRecommendation | 
     const parsed = readActivityRecommendationOption(opt);
     if (parsed) options.push(parsed);
   }
-  if (options.length === 0) return null;
+  if (options.length < 3) return null;
   const rec: ActivityRecommendation = { ...baseExtras, kind: "activity", options };
   return rec;
 }
@@ -805,6 +822,25 @@ function parseFencedJson(raw: string): unknown {
     }
     return null;
   }
+}
+
+/**
+ * Parses a JSON array string (e.g. shared-thread `recommendationsJson` snapshots)
+ * into validated {@link TripRecommendation} rows. Malformed entries are skipped.
+ */
+export function parseTripRecommendationsFromJsonString(
+  rawJson: string,
+  fallbackCreatedAtIso?: string
+): TripRecommendation[] {
+  const nowIso = fallbackCreatedAtIso ?? new Date().toISOString();
+  const parsed = parseFencedJson(rawJson);
+  if (!Array.isArray(parsed)) return [];
+  const out: TripRecommendation[] = [];
+  for (const entry of parsed) {
+    const rec = readRecommendation(entry, nowIso);
+    if (rec) out.push(rec);
+  }
+  return out;
 }
 
 /**

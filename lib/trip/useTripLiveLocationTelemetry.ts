@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
-import { clearCanonicalTripLiveLocation, updateCanonicalTripLiveLocation } from "@/lib/canonicalTripsFirestore";
-import { getDb } from "@/lib/firebase";
+import { getClientAuth } from "@/lib/firebase";
 import type { Trip } from "@/lib/types/trip";
 import type { ViewerDevicePing } from "@/lib/tripTravelerLocationContext";
 
@@ -34,15 +33,63 @@ export function writeTripLiveLocationShareEnabled(tripId: string, enabled: boole
 
 const WRITE_THROTTLE_MS = 45_000;
 
+async function postLiveLocation(opts: {
+  tripId: string;
+  locationKey: string;
+  name: string;
+  lat: number;
+  lon: number;
+  updatedAt: string;
+}): Promise<void> {
+  const auth = getClientAuth();
+  const token = await auth?.currentUser?.getIdToken();
+  if (!token) return;
+  const res = await fetch("/api/trip/live-location", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tripId: opts.tripId,
+      locationKey: opts.locationKey,
+      name: opts.name,
+      lat: opts.lat,
+      lon: opts.lon,
+      updatedAt: opts.updatedAt,
+    }),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(j.error?.trim() || `HTTP ${res.status}`);
+  }
+}
+
+async function deleteLiveLocation(tripId: string, locationKey: string): Promise<void> {
+  const auth = getClientAuth();
+  const token = await auth?.currentUser?.getIdToken();
+  if (!token) return;
+  const u = new URL("/api/trip/live-location", typeof window !== "undefined" ? window.location.origin : "http://localhost");
+  u.searchParams.set("tripId", tripId);
+  u.searchParams.set("locationKey", locationKey);
+  await fetch(u.toString(), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
+}
+
 /**
  * When session opt-in is on and the user is a listed traveler, watches device GPS,
- * writes throttled fixes to `canonicalTrips/{id}.liveLocations`, and mirrors the
- * latest fix into `pingRef` for trip-assistant requests.
+ * persists throttled fixes via **POST /api/trip/live-location** (Admin SDK), and mirrors
+ * the latest fix into `pingRef` for trip-assistant requests.
+ *
+ * Avoids client `setDoc` on `canonicalTrips/{id}` while a trip snapshot is active — that
+ * pattern has triggered Firestore 12.x watch internal assertion failures.
+ *
+ * Uses **Firebase Auth uid** as the `liveLocations` map key (not email).
  */
 export function useTripLiveLocationTelemetry(
   tripId: string | null,
   trip: Trip | null,
   opts: {
+    userUid: string | null;
     userEmail: string | null;
     userDisplayName: string | null;
     useFirestore: boolean;
@@ -85,16 +132,33 @@ export function useTripLiveLocationTelemetry(
     return emails.includes(em);
   }, [opts.userEmail, travelerEmailsFingerprint]);
 
+  /** Single primitive gate so the geolocation effect dependency list length never changes between renders (HMR-safe). */
+  const geoGateKey = [
+    shareEnabled ? "1" : "0",
+    eligible ? "1" : "0",
+    opts.useFirestore ? "1" : "0",
+    opts.userEmail ?? "",
+    opts.userUid ?? "",
+    opts.userDisplayName ?? "",
+    tripId ?? "",
+  ].join("|");
+
   useEffect(() => {
     pingRef.current = null;
-    if (!shareEnabled || !eligible || !opts.useFirestore || !tripId?.trim() || !opts.userEmail?.trim()) {
+    if (
+      !shareEnabled ||
+      !eligible ||
+      !opts.useFirestore ||
+      !tripId?.trim() ||
+      !opts.userEmail?.trim() ||
+      !opts.userUid?.trim()
+    ) {
       return;
     }
-    const db = getDb();
-    if (!db || typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
 
     const tid = tripId.trim();
-    const key = opts.userEmail.trim().toLowerCase();
+    const key = opts.userUid.trim();
     const display = opts.userDisplayName?.trim() || opts.userEmail.split("@")[0] || "Traveler";
 
     let watchId: number | null = null;
@@ -113,7 +177,9 @@ export function useTripLiveLocationTelemetry(
       };
       if (now - lastWrite < WRITE_THROTTLE_MS) return;
       lastWrite = now;
-      void updateCanonicalTripLiveLocation(db, tid, key, {
+      void postLiveLocation({
+        tripId: tid,
+        locationKey: key,
         name: display,
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,
@@ -130,9 +196,9 @@ export function useTripLiveLocationTelemetry(
     return () => {
       if (watchId != null) navigator.geolocation.clearWatch(watchId);
       pingRef.current = null;
-      void clearCanonicalTripLiveLocation(db, tid, key).catch(() => {});
+      void deleteLiveLocation(tid, key);
     };
-  }, [shareEnabled, eligible, opts.useFirestore, opts.userEmail, opts.userDisplayName, tripId, pingRef]);
+  }, [geoGateKey, pingRef]);
 
   return { shareEnabled };
 }
