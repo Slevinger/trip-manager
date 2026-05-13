@@ -320,6 +320,12 @@ interface BaseRecommendationOption {
    * equals this option’s recommendation `kind` (`stay` / `transit` / `activity`).
    */
   targetStepId?: string;
+  /** Direct booking / info URL (hotel page, transit booking, attraction site…). */
+  url?: string;
+  /** Photo or thumbnail URL to show alongside the option. */
+  imageUrl?: string;
+  /** Human-readable price note, e.g. "€120/night", "~$45 pp", "Free entry". */
+  priceNote?: string;
 }
 
 export interface StayRecommendationOption extends BaseRecommendationOption {

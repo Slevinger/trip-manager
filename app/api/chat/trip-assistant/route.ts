@@ -396,10 +396,8 @@ export async function POST(req: NextRequest) {
       );
     }
   }
-  const wantsLiveWeb =
-    provider === "anthropic" &&
-    webCap > 0 &&
-    tripUserMessageRequestsWebSearch(lastUserText);
+  // Web search is on for every Anthropic request when the cap allows it.
+  const wantsLiveWeb = provider === "anthropic" && webCap > 0;
 
   let anthropicApiTurns = turnMessages;
   let anthropicWebUses = 0;
@@ -481,7 +479,7 @@ export async function POST(req: NextRequest) {
   let systemContent = buildTripAssistantSystemPrompt(tripForPrompt, {
     nowMs: contextAtMs,
     profilePreferences: preferences,
-    anthropicWebSearchEnabled: anthropicWebUses > 0,
+    anthropicWebSearchEnabled: wantsLiveWeb,
     travelerLocationContextAppendix: travelerLocationAppendix || undefined,
   });
   if (classifiedMessageKind === "suggestions") {

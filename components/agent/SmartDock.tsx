@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
+  ExternalLink,
   Lock,
   Loader2,
   Send,
@@ -303,7 +304,9 @@ function DockPanel({
               const prefix = rec.visibleTo && rec.visibleTo.length > 0 ? "@private " : "";
               assistant.prepare(
                 `${prefix}Dig deeper on "${label}" (${rec.kind}${rec.title ? ` — "${rec.title}"` : ""}). ` +
-                  `Suggest 3 specific alternatives for this exact slot: exact times, realistic prices, what's included, and why each fits this trip.`
+                  `Suggest 3 specific alternatives for this exact slot. For each option fill: exact times, ` +
+                  `a real booking/info URL in the \`url\` field, a public photo URL in the \`imageUrl\` field, ` +
+                  `a specific price in the \`priceNote\` field (local currency), what's included, and why it fits this trip. =>`
               );
               onTabChange("chat");
             }}
@@ -607,26 +610,53 @@ function RecommendationCard({
           return (
             <li
               key={opt.id}
-              className="flex items-start justify-between gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2"
+              className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[var(--color-foreground)]">{label}</p>
-                {opt.note ? (
-                  <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
-                    {opt.note}
-                  </p>
-                ) : null}
-                {opt.targetStepId ? (
-                  <p className="mt-0.5 text-[10px] text-[var(--color-muted-foreground)]">
-                    {t("recs.addsToStep", {
-                      stepTitle:
-                        trip.steps.find((s) => s.id === opt.targetStepId)?.title?.trim() ||
-                        opt.targetStepId,
-                    })}
-                  </p>
-                ) : null}
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
+              {/* Optional thumbnail */}
+              {opt.imageUrl ? (
+                <img
+                  src={opt.imageUrl}
+                  alt={label}
+                  className="h-28 w-full object-cover"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                />
+              ) : null}
+
+              <div className="flex items-start justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-[var(--color-foreground)]">{label}</p>
+                  {opt.priceNote ? (
+                    <p className="mt-0.5 text-[11px] font-semibold text-[var(--color-brand)]">
+                      {opt.priceNote}
+                    </p>
+                  ) : null}
+                  {opt.note ? (
+                    <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
+                      {opt.note}
+                    </p>
+                  ) : null}
+                  {opt.targetStepId ? (
+                    <p className="mt-0.5 text-[10px] text-[var(--color-muted-foreground)]">
+                      {t("recs.addsToStep", {
+                        stepTitle:
+                          trip.steps.find((s) => s.id === opt.targetStepId)?.title?.trim() ||
+                          opt.targetStepId,
+                      })}
+                    </p>
+                  ) : null}
+                  {opt.url ? (
+                    <a
+                      href={opt.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] underline-offset-2 hover:underline"
+                    >
+                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                      {new URL(opt.url).hostname.replace(/^www\./, "")}
+                    </a>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -652,6 +682,7 @@ function RecommendationCard({
                 >
                   {busy === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : t("recs.approve")}
                 </Button>
+                </div>
               </div>
             </li>
           );

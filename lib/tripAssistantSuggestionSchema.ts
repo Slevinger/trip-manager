@@ -314,6 +314,18 @@ const OPTION_BASE_FIELDS = {
     description:
       "When appending to an existing step, that step's `id` (must match recommendation `kind`). Omit to create a new step.",
   },
+  url: {
+    type: "string",
+    description: "Direct booking or info URL for this option (hotel page, transit booking, attraction site). Use a real, publicly accessible URL.",
+  },
+  imageUrl: {
+    type: "string",
+    description: "Public photo or thumbnail URL representing this option (Wikimedia, official site image, etc.).",
+  },
+  priceNote: {
+    type: "string",
+    description: "Human-readable price estimate, e.g. \"€120/night\", \"~$45 per person\", \"Free entry\". Be specific; use the local currency.",
+  },
 } as const satisfies ShapeRecord<OptionBaseFields>;
 
 const STAY_OPTION_DISC_FIELDS = {
@@ -731,12 +743,18 @@ function readOption<T extends StayStepInterval | TransitStepInterval | ActivityS
   const label = safeString(raw.label, 120);
   const note = safeString(raw.note, 2000);
   const destinations = safeDestinations(raw.destinations);
+  const url = safeString(raw.url, 600);
+  const imageUrl = safeString(raw.imageUrl, 600);
+  const priceNote = safeString(raw.priceNote, 120);
   return {
     id,
     interval,
     ...(label ? { label } : {}),
     ...(note ? { note } : {}),
     ...(destinations ? { destinations } : {}),
+    ...(url ? { url } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    ...(priceNote ? { priceNote } : {}),
   };
 }
 
