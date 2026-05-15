@@ -230,6 +230,7 @@ export function useTripData(tripId: string): UseTripDataResult {
   }, [dispatch, tripId]);
 
   async function persistTrip(next: Trip): Promise<void> {
+    if (useFirestore && !canManageFirestore) return;
     setSaveError(null);
     try {
       const normalized = normalizeTripForPersist(next);

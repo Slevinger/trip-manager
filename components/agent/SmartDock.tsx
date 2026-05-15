@@ -211,6 +211,7 @@ function DockPanel({
 
   const onAddRecommendations = useCallback(
     async (baseTrip: Trip, recs: TripRecommendation[]) => {
+      if (!canManage) return;
       let next = baseTrip;
       for (const rec of recs) {
         next = addTripRecommendation(next, rec);
@@ -218,16 +219,17 @@ function DockPanel({
       latestTripRef.current = next; // update before await so image patches see the new recs
       await persistTrip(next);
     },
-    [persistTrip]
+    [canManage, persistTrip]
   );
 
   const onUpdateOptionImage = useCallback(
     (recId: string, optionId: string, imageUrl: string, priceNote?: string) => {
+      if (!canManage) return;
       const patched = patchTripRecommendationOptionImage(latestTripRef.current, recId, optionId, imageUrl, priceNote);
       latestTripRef.current = patched;
       void persistTrip(patched);
     },
-    [persistTrip]
+    [canManage, persistTrip]
   );
 
   const viewerPingRef = useTripAgentViewerPingRefOptional();
@@ -316,6 +318,7 @@ function DockPanel({
           <SuggestionsTab
             trip={trip}
             persistTrip={persistTrip}
+            canManage={canManage}
             userEmail={userEmailLower}
             pendingImageOptIds={assistant.pendingImageOptIds}
             onTighten={(rec, option) => {
@@ -551,12 +554,14 @@ function ChatTab({
 function SuggestionsTab({
   trip,
   persistTrip,
+  canManage,
   userEmail,
   pendingImageOptIds,
   onTighten,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
+  canManage: boolean;
   userEmail: string | null;
   pendingImageOptIds: Set<string>;
   onTighten: (rec: TripRecommendation, option: TripRecommendationOption) => void;
@@ -579,6 +584,7 @@ function SuggestionsTab({
           key={rec.id}
           trip={trip}
           rec={rec}
+          canManage={canManage}
           pendingImageOptIds={pendingImageOptIds}
           onApprove={async (optionId) => {
             const next = approveTripRecommendationOptionDetailed(trip, rec.id, optionId).trip;
@@ -603,6 +609,7 @@ function SuggestionsTab({
 function RecommendationCard({
   trip,
   rec,
+  canManage,
   pendingImageOptIds,
   onApprove,
   onSkip,
@@ -611,6 +618,7 @@ function RecommendationCard({
 }: {
   trip: Trip;
   rec: TripRecommendation;
+  canManage: boolean;
   pendingImageOptIds: Set<string>;
   onApprove: (optionId: string) => Promise<void>;
   onSkip: () => Promise<void>;
@@ -715,6 +723,7 @@ function RecommendationCard({
                     })() : null}
                   </div>
                 </div>
+                {canManage ? (
                 <div className="flex shrink-0 items-center gap-1.5">
                 <Button
                   size="sm"
@@ -742,13 +751,14 @@ function RecommendationCard({
                   {busy === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : t("recs.approve")}
                 </Button>
                 </div>
+                ) : null}
               </div>
             </li>
           );
         })}
       </ul>
 
-      <div className="mt-3 flex items-center justify-end gap-2">
+      {canManage ? <div className="mt-3 flex items-center justify-end gap-2">
         <Button
           size="sm"
           variant="ghost"
@@ -784,7 +794,7 @@ function RecommendationCard({
             <Trash2 className="h-3 w-3" />
           )}
         </Button>
-      </div>
+      </div> : null}
     </div>
   );
 }

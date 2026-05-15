@@ -35,6 +35,7 @@ function isMemoryNoteRow(m: TripChatMessage): boolean {
 function sanitizeAgentContent(raw: string): string {
   return raw
     .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
+    .replace(/<\/?cite[^>]*>/gi, "")
     .replace(/^View on .+ ·\s*$/gim, "")
     .trim();
 }
