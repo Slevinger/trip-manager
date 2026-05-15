@@ -3,7 +3,12 @@
  * Markdown lists need leading newlines before `- ` so ReactMarkdown + GFM renders bullets.
  */
 export function formatAssistantReplyForMarkdown(raw: string): string {
-  let t = raw.replace(/\r\n/g, "\n").trim();
+  // Strip Anthropic web-search citation tags: <cite index="...">text</cite> → text
+  let t = raw
+    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
+    // Strip "View on Site ·" attribution lines emitted by web-search results
+    .replace(/^View on .+ ·\s*$/gim, "")
+    .replace(/\r\n/g, "\n").trim();
   if (!t) return t;
 
   // "Heading: - First bullet …" → heading then real list

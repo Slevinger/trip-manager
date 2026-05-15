@@ -320,8 +320,10 @@ interface BaseRecommendationOption {
    * equals this option’s recommendation `kind` (`stay` / `transit` / `activity`).
    */
   targetStepId?: string;
-  /** Direct booking / info URL (hotel page, transit booking, attraction site…). */
+  /** Tripadvisor (or activity info) URL — for reviews and ratings. */
   url?: string;
+  /** Booking.com / Viator / Google Flights search URL — for checking availability. */
+  bookingUrl?: string;
   /** Photo or thumbnail URL to show alongside the option. */
   imageUrl?: string;
   /** Human-readable price note, e.g. "€120/night", "~$45 pp", "Free entry". */

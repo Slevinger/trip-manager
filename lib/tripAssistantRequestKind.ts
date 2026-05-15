@@ -162,6 +162,19 @@ export const TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX = [
   "Each `TripRecommendation` in the array MUST have **at least 3 distinct `options`**. If you cannot produce 3 genuine alternatives for a slot, omit that recommendation entirely.",
   `You MUST end with exactly ${REQUEST_KIND_SUGGESTIONS_MARKER} as the final line.`,
   "Ground options in the current trip dates and existing `trip.destinations` ids. Do **not** choose `##general##` for hotel/resort/activity/transit ideas the user could add to this itinerary.",
+  "",
+  "**Research source — ALWAYS use Tripadvisor first:**",
+  "Search Tripadvisor for every hotel, restaurant, and activity you suggest. Base the option's `note`, ratings, and highlights on what you find on Tripadvisor.",
+  "",
+  "**Links — provide BOTH for every option:**",
+  "• `url` (review/ratings): Tripadvisor search link — https://www.tripadvisor.com/Search?q={Hotel+Name+City}",
+  "• `bookingUrl` (check availability): Booking.com search with trip dates — https://www.booking.com/searchresults.html?ss={Hotel+Name+City}&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD&group_adults=N&no_rooms=1",
+  "  For activities: use Viator search or the operator's direct booking page. For flights: Google Flights URL.",
+  "",
+  "**Images — REQUIRED for every option:**",
+  "For each hotel/venue, visit its Tripadvisor listing page (search Tripadvisor, click the result). The page HTML contains a `<meta property=\"og:image\" content=\"...\">` tag with a direct CDN image URL (e.g. https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2c/ab/34/84/caption.jpg?w=900&h=500&s=1).",
+  "Copy that exact CDN URL into `imageUrl`. The URL path must contain a real image extension (.jpg, .jpeg, .webp, .png) — query parameters like `?w=900&h=500&s=1` are fine and should be kept as-is.",
+  "Never put a homepage URL. Always put the direct image file URL from Tripadvisor's og:image.",
 ].join("\n");
 
 /**

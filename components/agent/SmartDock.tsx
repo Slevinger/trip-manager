@@ -14,6 +14,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { OgImage } from "@/components/ui/og-image";
 import { useAppSelector } from "@/lib/store/hooks";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
@@ -24,6 +25,7 @@ import { actionsForScreen } from "@/lib/agent/quickActions";
 import {
   addTripRecommendation,
   approveTripRecommendationOptionDetailed,
+  patchTripRecommendationOptionImage,
   removeTripRecommendation,
   skipTripRecommendation,
   unseenTripRecommendationCount,
@@ -202,13 +204,28 @@ function DockPanel({
   const { persistTrip, isOwner, canManage } = useTripData(tripId);
   const data = useTripAssistantData(trip);
 
+  // Always reflects the most-recently-persisted trip, updated synchronously before
+  // any async persist so image patches never land on a stale (pre-recommendation) snapshot.
+  const latestTripRef = useRef(trip);
+  latestTripRef.current = trip;
+
   const onAddRecommendations = useCallback(
     async (baseTrip: Trip, recs: TripRecommendation[]) => {
       let next = baseTrip;
       for (const rec of recs) {
         next = addTripRecommendation(next, rec);
       }
+      latestTripRef.current = next; // update before await so image patches see the new recs
       await persistTrip(next);
+    },
+    [persistTrip]
+  );
+
+  const onUpdateOptionImage = useCallback(
+    (recId: string, optionId: string, imageUrl: string, priceNote?: string) => {
+      const patched = patchTripRecommendationOptionImage(latestTripRef.current, recId, optionId, imageUrl, priceNote);
+      latestTripRef.current = patched;
+      void persistTrip(patched);
     },
     [persistTrip]
   );
@@ -225,6 +242,7 @@ function DockPanel({
     isTripOwner: isOwner,
     canPersistMemory: data.canPersistMemory,
     onAddRecommendations,
+    onUpdateOptionImage,
     ...(viewerPingRef ? { viewerPingRef } : {}),
   });
 
@@ -288,7 +306,7 @@ function DockPanel({
         </div>
 
         <TabsContent value="chat" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-          <ChatTab assistant={assistant} screen={screen} isOwner={isOwner} />
+          <ChatTab assistant={assistant} screen={screen} isOwner={isOwner} tripId={tripId} />
         </TabsContent>
 
         <TabsContent
@@ -299,14 +317,17 @@ function DockPanel({
             trip={trip}
             persistTrip={persistTrip}
             userEmail={userEmailLower}
+            pendingImageOptIds={assistant.pendingImageOptIds}
             onTighten={(rec, option) => {
               const label = option.label?.trim() || option.interval.title.trim();
               const prefix = rec.visibleTo && rec.visibleTo.length > 0 ? "@private " : "";
               assistant.prepare(
                 `${prefix}Dig deeper on "${label}" (${rec.kind}${rec.title ? ` — "${rec.title}"` : ""}). ` +
-                  `Suggest 3 specific alternatives for this exact slot. For each option fill: exact times, ` +
-                  `a real booking/info URL in the \`url\` field, a public photo URL in the \`imageUrl\` field, ` +
-                  `a specific price in the \`priceNote\` field (local currency), what's included, and why it fits this trip. =>`
+                  `Search Tripadvisor first and suggest 3 specific alternatives for this exact slot. For each option: ` +
+                  `(1) \`url\` = Tripadvisor search URL: tripadvisor.com/Search?q={Name+City} (for reviews); ` +
+                  `(2) \`bookingUrl\` = Booking.com search URL with trip dates: booking.com/searchresults.html?ss={Name+City}&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD&group_adults=N&no_rooms=1 (for availability); ` +
+                  `(3) \`imageUrl\` = direct CDN image URL from the Tripadvisor listing's og:image meta tag (e.g. https://media-cdn.tripadvisor.com/media/photo-s/.../.jpg) — NOT a homepage; ` +
+                  `(4) specific price in local currency for \`priceNote\`, Tripadvisor rating, what's included, and why it fits this trip.`
               );
               onTabChange("chat");
             }}
@@ -337,18 +358,25 @@ function ChatTab({
   assistant,
   screen,
   isOwner,
+  tripId,
 }: {
   assistant: ReturnType<typeof useTripAssistant>;
   screen: ReturnType<typeof activeTripScreen>;
   isOwner: boolean;
+  tripId: string;
 }) {
   const { t } = useI18n();
-  const [input, setInput] = useState("");
+  const draftKey = `chat-draft:${tripId}`;
+  const [input, setInput] = useState(() => {
+    try { return localStorage.getItem(draftKey) ?? ""; } catch { return ""; }
+  });
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (assistant.pendingDraft != null) {
-      setInput(assistant.pendingDraft);
+      const draft = assistant.pendingDraft;
+      setInput(draft);
+      try { draft ? localStorage.setItem(draftKey, draft) : localStorage.removeItem(draftKey); } catch { /* ignore */ }
       assistant.consumeDraft();
     }
   }, [assistant.pendingDraft, assistant]);
@@ -362,6 +390,7 @@ function ChatTab({
     const text = input.trim();
     if (!text) return;
     setInput("");
+    try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
     await assistant.send(text);
   };
 
@@ -483,10 +512,14 @@ function ChatTab({
       >
         <MentionInput
           value={input}
-          onChange={setInput}
+          onChange={(v) => {
+            setInput(v);
+            try { v ? localStorage.setItem(draftKey, v) : localStorage.removeItem(draftKey); } catch { /* ignore */ }
+            if (assistant.error) assistant.clearError();
+          }}
           onSubmit={() => void onSubmit({ preventDefault: () => {} } as React.FormEvent)}
           placeholder={t("agent.placeholder")}
-          disabled={assistant.loading}
+          disabled={assistant.loading || assistant.evolving || assistant.forgetting}
         />
         {assistant.loading ? (
           <Button
@@ -504,7 +537,7 @@ function ChatTab({
             type="submit"
             size="icon"
             variant="primary"
-            disabled={assistant.evolving || !input.trim()}
+            disabled={assistant.evolving || assistant.sendLocked || !input.trim()}
             aria-label={t("agent.send")}
           >
             <Send className="h-4 w-4" />
@@ -519,11 +552,13 @@ function SuggestionsTab({
   trip,
   persistTrip,
   userEmail,
+  pendingImageOptIds,
   onTighten,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
   userEmail: string | null;
+  pendingImageOptIds: Set<string>;
   onTighten: (rec: TripRecommendation, option: TripRecommendationOption) => void;
 }) {
   const { t } = useI18n();
@@ -544,6 +579,7 @@ function SuggestionsTab({
           key={rec.id}
           trip={trip}
           rec={rec}
+          pendingImageOptIds={pendingImageOptIds}
           onApprove={async (optionId) => {
             const next = approveTripRecommendationOptionDetailed(trip, rec.id, optionId).trip;
             await persistTrip(next);
@@ -567,6 +603,7 @@ function SuggestionsTab({
 function RecommendationCard({
   trip,
   rec,
+  pendingImageOptIds,
   onApprove,
   onSkip,
   onDelete,
@@ -574,6 +611,7 @@ function RecommendationCard({
 }: {
   trip: Trip;
   rec: TripRecommendation;
+  pendingImageOptIds: Set<string>;
   onApprove: (optionId: string) => Promise<void>;
   onSkip: () => Promise<void>;
   onDelete: () => Promise<void>;
@@ -612,14 +650,14 @@ function RecommendationCard({
               key={opt.id}
               className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
             >
-              {/* Optional thumbnail */}
               {opt.imageUrl ? (
-                <img
+                <OgImage
                   src={opt.imageUrl}
                   alt={label}
                   className="h-28 w-full object-cover"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                 />
+              ) : pendingImageOptIds.has(opt.id) ? (
+                <div className="h-28 w-full animate-pulse bg-[var(--color-surface-raised)]" />
               ) : null}
 
               <div className="flex items-start justify-between gap-2 px-3 py-2">
@@ -644,17 +682,38 @@ function RecommendationCard({
                       })}
                     </p>
                   ) : null}
-                  {opt.url ? (
-                    <a
-                      href={opt.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] underline-offset-2 hover:underline"
-                    >
-                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                      {new URL(opt.url).hostname.replace(/^www\./, "")}
-                    </a>
-                  ) : null}
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {opt.url ? (() => {
+                      let hostname = opt.url;
+                      try { hostname = new URL(opt.url).hostname.replace(/^www\./, ""); } catch {}
+                      return (
+                        <a
+                          href={opt.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] underline-offset-2 hover:underline"
+                        >
+                          <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                          {hostname.includes("tripadvisor") ? "View on Tripadvisor" : "Reviews"} · <span className="opacity-70">{hostname}</span>
+                        </a>
+                      );
+                    })() : null}
+                    {opt.bookingUrl ? (() => {
+                      let hostname = opt.bookingUrl;
+                      try { hostname = new URL(opt.bookingUrl).hostname.replace(/^www\./, ""); } catch {}
+                      return (
+                        <a
+                          href={opt.bookingUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-[var(--color-brand)] underline-offset-2 hover:underline"
+                        >
+                          <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                          Check availability · <span className="opacity-70">{hostname}</span>
+                        </a>
+                      );
+                    })() : null}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                 <Button

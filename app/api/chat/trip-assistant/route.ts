@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import path from "path";
+const execFileAsync = promisify(execFile);
 import {
   buildTripAssistantSystemPrompt,
   TRIP_ASSISTANT_WEB_REFINE_APPENDIX,
@@ -23,7 +27,7 @@ import {
   tripUserMessageInlineHashWeb,
   tripUserMessageRequestsWebSearch,
 } from "@/lib/tripAssistantWebIntent";
-import type { Trip, UserPreferences } from "@/lib/types/trip";
+import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
 import { formatAssistantReplyForMarkdown } from "@/lib/formatAssistantReplyMarkdown";
 import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 import { TRIP_ASSISTANT_OPENAI_MESSAGE_HISTORY_CAP } from "@/lib/tripChatEvolveGate";
@@ -31,8 +35,388 @@ import {
   buildTravelerLocationContextAppendix,
   parseViewerDevicePing,
 } from "@/lib/tripTravelerLocationContext";
+import { getAdminFirestore } from "@/lib/firebaseAdmin";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+
+// ---------------------------------------------------------------------------
+// Global venue image cache (Firestore — shared across all users and trips)
+// ---------------------------------------------------------------------------
+
+const VENUE_IMAGE_CACHE_COLLECTION = "venueImageCache";
+
+function venueCacheKey(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+async function getCachedVenueImage(label: string): Promise<string | null> {
+  const db = getAdminFirestore();
+  if (!db) return null;
+  try {
+    const snap = await db
+      .collection(VENUE_IMAGE_CACHE_COLLECTION)
+      .doc(venueCacheKey(label))
+      .get();
+    const data = snap.data();
+    return typeof data?.imageUrl === "string" ? data.imageUrl : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedVenueImage(
+  label: string,
+  imageUrl: string,
+  source: string
+): Promise<void> {
+  const db = getAdminFirestore();
+  if (!db) return;
+  try {
+    await db
+      .collection(VENUE_IMAGE_CACHE_COLLECTION)
+      .doc(venueCacheKey(label))
+      .set({ imageUrl, source, cachedAt: new Date() }, { merge: true });
+  } catch {
+    /* non-fatal */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Server-side OG image enrichment
+// ---------------------------------------------------------------------------
+
+const OG_FETCH_TIMEOUT_MS = 9_000;
+const OG_READ_LIMIT_BYTES = 200_000;
+
+/** Hosts that block server-side scraping (403/redirect). Images must come via og-fetcher or LLM. */
+const BOOKING_PLATFORM_HOSTS_SET = new Set([
+  "booking.com", "airbnb.com", "airbnb.co.il", "vrbo.com",
+  "hotels.com", "agoda.com", "viator.com", "getyourguide.com", "expedia.com",
+  "tripadvisor.com", "tripadvisor.co.il", "tripadvisor.co.uk",
+]);
+
+function extractOgImageUrl(html: string, base: URL): string | null {
+  const props = ["og:image", "og:image:url", "twitter:image", "twitter:image:src"];
+  for (const p of props) {
+    const re1 = new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]+content=["']([^"']+)["']`, "i");
+    const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${p}["']`, "i");
+    const m = re1.exec(html) ?? re2.exec(html);
+    if (m?.[1]) {
+      try { return new URL(m[1], base.toString()).toString(); } catch { return m[1]; }
+    }
+  }
+  return null;
+}
+
+async function fetchOgImageUrl(pageUrl: string): Promise<string | null> {
+  let target: URL;
+  try { target = new URL(pageUrl); } catch { return null; }
+
+  if (isBookingPlatformUrl(pageUrl)) return null;
+
+  try {
+    const res = await fetch(target.toString(), {
+      signal: AbortSignal.timeout(OG_FETCH_TIMEOUT_MS),
+      headers: {
+        Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      },
+      redirect: "follow",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.log(`[og-fetch] ${pageUrl} → HTTP ${res.status}`);
+      return null;
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return null;
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      total += value.byteLength;
+      if (total >= OG_READ_LIMIT_BYTES) break;
+    }
+    reader.cancel().catch(() => {});
+    const merged = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) { merged.set(c, off); off += c.length; }
+    const found = extractOgImageUrl(new TextDecoder().decode(merged), target);
+    console.log(`[og-fetch] ${pageUrl} → ${found ?? "no og:image found"}`);
+    return found;
+  } catch (err) {
+    console.log(`[og-fetch] ${pageUrl} → error: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+function isBookingPlatformUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    return BOOKING_PLATFORM_HOSTS_SET.has(h) || BOOKING_PLATFORM_HOSTS_SET.has(h.split(".").slice(-2).join("."));
+  } catch {
+    return false;
+  }
+}
+
+
+interface OgFetcherResult { imageUrl: string; priceNote?: string }
+
+/**
+ * Scrapes Booking.com via og-fetcher (Playwright/headless Chromium).
+ * Uses --json output to get image URL + live price when dates are provided.
+ */
+async function fetchImageViaOgFetcher(
+  label: string,
+  dates?: { checkin: string; checkout: string; adults: number }
+): Promise<OgFetcherResult | null> {
+  try {
+    const cliPath = path.join(process.cwd(), "node_modules", "og-fetcher", "cli.js");
+    const extraArgs: string[] = ["--json"];
+    if (dates) {
+      extraArgs.push("--checkin", dates.checkin, "--checkout", dates.checkout, "--adults", String(dates.adults));
+    }
+    const { stdout } = await execFileAsync("node", [cliPath, ...extraArgs, label], { timeout: 30_000 });
+    const raw = stdout.trim();
+    if (!raw) return null;
+    let parsed: { url?: string; priceNote?: string };
+    try { parsed = JSON.parse(raw) as typeof parsed; } catch { return null; }
+    const imageUrl = parsed.url?.trim();
+    if (!imageUrl) return null;
+    try { new URL(imageUrl); } catch { return null; }
+    console.log(`[og-fetcher] found image for "${label}": ${imageUrl}${parsed.priceNote ? ` | price: ${parsed.priceNote}` : ""}`);
+    return { imageUrl, priceNote: parsed.priceNote || undefined };
+  } catch (err) {
+    console.log(`[og-fetcher] no result for "${label}": ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/** Searches Wikipedia for `name` and returns the article's og:image if found. */
+async function fetchWikipediaOgImage(name: string): Promise<string | null> {
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(name)}&limit=1&format=json`;
+    const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(4_000) });
+    if (!searchRes.ok) return null;
+    const [, titles] = await searchRes.json() as [string, string[]];
+    const title = titles?.[0];
+    if (!title) return null;
+    const pageUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
+    return await fetchOgImageUrl(pageUrl);
+  } catch {
+    return null;
+  }
+}
+
+/** Returns true when the URL resolves to a real image (non-OTA, 2xx, image content-type). */
+async function verifyImageUrl(url: string): Promise<boolean> {
+  if (!url || isBookingPlatformUrl(url)) return false;
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      signal: AbortSignal.timeout(4_000),
+      redirect: "follow",
+    });
+    if (!res.ok) return false;
+    const ct = res.headers.get("content-type") ?? "";
+    return ct.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Simple semaphore — limits how many image-lookup coroutines run at the same time.
+ * Prevents bursting N parallel Anthropic web-search calls when suggestions arrive.
+ */
+function makeSemaphore(limit: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  const acquire = () =>
+    new Promise<void>((resolve) => {
+      if (active < limit) { active++; resolve(); }
+      else queue.push(resolve);
+    });
+  const release = () => {
+    active--;
+    if (queue.length > 0) { active++; queue.shift()!(); }
+  };
+  return { acquire, release };
+}
+
+/** One semaphore shared across a single enrichment pass — max 2 concurrent LLM image lookups. */
+const IMAGE_LLM_CONCURRENCY = 2;
+
+/** Deduplicates in-flight og-fetcher calls so the same label is never scraped twice at once. */
+const imageLlmInFlight = new Map<string, Promise<OgFetcherResult | null>>();
+
+async function fetchImageViaOgFetcherDeduped(
+  label: string,
+  sem: ReturnType<typeof makeSemaphore>,
+  dates?: { checkin: string; checkout: string; adults: number }
+): Promise<OgFetcherResult | null> {
+  const key = label.trim().toLowerCase();
+  const existing = imageLlmInFlight.get(key);
+  if (existing) return existing;
+  const p = (async () => {
+    await sem.acquire();
+    try {
+      return await fetchImageViaOgFetcher(label, dates);
+    } finally {
+      sem.release();
+      imageLlmInFlight.delete(key);
+    }
+  })();
+  imageLlmInFlight.set(key, p);
+  return p;
+}
+
+interface ResolvedOptionData { imageUrl: string; priceNote?: string }
+
+/**
+ * Resolves the best image (and live price when dates provided) for a single suggestion option.
+ * Fallback chain:
+ * 0. Global Firestore cache → instant hit when already known.
+ * 1. Verify the LLM-provided imageUrl via HEAD request.
+ * 2. Fetch og:image from opt.url (non-OTA only).
+ * 3. Scrape Booking.com via og-fetcher (Playwright, semaphore-limited) — also returns live price.
+ * 4. Wikipedia fallback by label name.
+ * Any resolved imageUrl is written to the cache for future requests.
+ */
+async function resolveOptionImage(
+  opt: { id: string; label?: string; url?: string; imageUrl?: string },
+  sem: ReturnType<typeof makeSemaphore>,
+  dates?: { checkin: string; checkout: string; adults: number }
+): Promise<ResolvedOptionData | null> {
+  const cacheAndReturn = async (url: string, source: string, priceNote?: string): Promise<ResolvedOptionData> => {
+    if (opt.label) void setCachedVenueImage(opt.label, url, source);
+    return { imageUrl: url, priceNote };
+  };
+
+  // Step 0: global cache check — skip all network work on a hit.
+  // Note: cached entries don't carry price (no dates at cache time), so we still run
+  // og-fetcher for price if dates are available and no cached price exists.
+  if (opt.label) {
+    const cached = await getCachedVenueImage(opt.label);
+    if (cached) {
+      console.log(`[og-cache] hit for "${opt.label}": ${cached}`);
+      // If we have dates, still fetch live price via og-fetcher (image won't re-scrape since cache hit)
+      if (dates) {
+        const scraped = await fetchImageViaOgFetcherDeduped(opt.label, sem, dates);
+        if (scraped?.priceNote) return { imageUrl: cached, priceNote: scraped.priceNote };
+      }
+      return { imageUrl: cached };
+    }
+  }
+
+  // Step 1: verify LLM-provided imageUrl.
+  if (opt.imageUrl) {
+    const valid = await verifyImageUrl(opt.imageUrl);
+    if (valid) {
+      console.log(`[og-enrich] verified direct image: ${opt.imageUrl}`);
+      return cacheAndReturn(opt.imageUrl, "llm_direct");
+    }
+    console.log(`[og-enrich] dead/hallucinated imageUrl: ${opt.imageUrl} — skipping`);
+  }
+
+  // Step 2: fetch og:image from opt.url (non-OTA only).
+  if (opt.url && !isBookingPlatformUrl(opt.url)) {
+    const urlImage = await fetchOgImageUrl(opt.url);
+    if (urlImage) {
+      console.log(`[og-enrich] fetched og:image from url: ${urlImage}`);
+      return cacheAndReturn(urlImage, "url");
+    }
+  }
+
+  // Step 3: og-fetcher — scrapes Booking.com via Playwright; returns image + live price.
+  if (opt.label) {
+    const scraped = await fetchImageViaOgFetcherDeduped(opt.label, sem, dates);
+    if (scraped) return cacheAndReturn(scraped.imageUrl, "og-fetcher", scraped.priceNote);
+  }
+
+  // Step 4: final fallback — Wikipedia by label.
+  if (opt.label) {
+    const wikiImage = await fetchWikipediaOgImage(opt.label);
+    if (wikiImage) return cacheAndReturn(wikiImage, "wikipedia");
+  }
+
+  return null;
+}
+
+/**
+ * Streams an NDJSON response:
+ * - Line 1 immediately: `{ type:"result", reply, requestKind?, suggestions, provider, model }`
+ *   where suggestions have NO imageUrl yet.
+ * - Subsequent lines as each image resolves: `{ type:"image", recId, optionId, imageUrl }`
+ *
+ * This lets the client render suggestions instantly and patch images as they trickle in.
+ */
+function buildSuggestionsStreamResponse(opts: {
+  reply: string;
+  requestKind: ReturnType<typeof parseTripAssistantRequestKind>;
+  provider: "anthropic" | "openai";
+  model: string;
+  suggestions: TripRecommendation[];
+  dates?: { checkin: string; checkout: string; adults: number };
+}): Response {
+  const enc = new TextEncoder();
+  const { suggestions, reply, requestKind, provider, model, dates } = opts;
+
+  // Strip LLM-provided imageUrls from initial payload — they'll be verified async.
+  const bareSuggestions = suggestions.map((rec) => ({
+    ...rec,
+    options: rec.options.map((opt) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { imageUrl: _img, ...rest } = opt as typeof opt & { imageUrl?: string };
+      return rest;
+    }),
+  }));
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const write = (obj: unknown) => {
+        try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { /* closed */ }
+      };
+
+      // 1. Send reply + bare suggestions immediately.
+      write({
+        type: "result",
+        reply,
+        ...(requestKind ? { requestKind } : {}),
+        suggestions: bareSuggestions,
+        provider,
+        model,
+      });
+
+      // 2. Resolve images (+ live prices) concurrently and stream patches as they arrive.
+      const sem = makeSemaphore(IMAGE_LLM_CONCURRENCY);
+      await Promise.allSettled(
+        suggestions.flatMap((rec) =>
+          rec.options.map(async (opt) => {
+            const resolved = await resolveOptionImage(opt, sem, dates);
+            if (resolved) {
+              write({ type: "image", recId: rec.id, optionId: opt.id, imageUrl: resolved.imageUrl, ...(resolved.priceNote ? { priceNote: resolved.priceNote } : {}) });
+            }
+          })
+        )
+      );
+
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
 
 type TripAssistantProvider = "openai" | "anthropic";
 
@@ -189,6 +573,9 @@ function parseAnthropicError(
     if (typ === "rate_limit_error") {
       return { message: "Anthropic rate limit — wait a moment and try again.", omitDetail: true };
     }
+    if (typ === "overloaded_error") {
+      return { message: "Anthropic is overloaded right now — please try again in a few seconds.", omitDetail: true };
+    }
     if (typ === "invalid_request_error" && msg?.toLowerCase().includes("credit")) {
       return {
         message: `Anthropic billing or credits issue. Check ${ANTHROPIC_CONSOLE}`,
@@ -335,6 +722,15 @@ export async function POST(req: NextRequest) {
   }
 
   const tripForPrompt = normalizeTripForPrompt(tripRaw);
+
+  // Extract check-in / check-out dates for live Booking.com pricing
+  const tripDates = (() => {
+    const checkin = tripForPrompt.startDate?.slice(0, 10);
+    const checkout = tripForPrompt.endDate?.slice(0, 10);
+    if (!checkin || !checkout || checkin >= checkout) return undefined;
+    const adults = Math.max(1, (tripForPrompt.travelers ?? []).length);
+    return { checkin, checkout, adults };
+  })();
 
   const contextAtMs =
     typeof body.contextAtMs === "number" && Number.isFinite(body.contextAtMs)
@@ -489,7 +885,16 @@ export async function POST(req: NextRequest) {
   if (provider === "anthropic") {
     const key = anthropicKey()!;
     const webSearchMaxUses = anthropicWebUses;
-    const result = await completeTripAssistantAnthropic({
+
+    const isAnthropicOverloaded = (body: string, status: number) => {
+      if (status === 529) return true;
+      try {
+        const j = JSON.parse(body) as { error?: { type?: string } };
+        return j.error?.type === "overloaded_error";
+      } catch { return false; }
+    };
+
+    let result = await completeTripAssistantAnthropic({
       apiKey: key,
       model: anthropicModel(),
       system: systemContent,
@@ -498,6 +903,23 @@ export async function POST(req: NextRequest) {
       temperature: 0.55,
       ...(webSearchMaxUses > 0 ? { webSearchMaxUses } : {}),
     });
+
+    // Retry up to 2 times with backoff if Anthropic is momentarily overloaded.
+    const RETRY_DELAYS_MS = [2_000, 5_000];
+    for (const delay of RETRY_DELAYS_MS) {
+      if (result.ok || !isAnthropicOverloaded(result.body, result.status)) break;
+      console.warn(`[trip-assistant] Anthropic overloaded — retrying in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+      result = await completeTripAssistantAnthropic({
+        apiKey: key,
+        model: anthropicModel(),
+        system: systemContent,
+        turns: anthropicApiTurns,
+        maxOutputTokens: webSearchMaxUses > 0 ? 8192 : 4096,
+        temperature: 0.55,
+        ...(webSearchMaxUses > 0 ? { webSearchMaxUses } : {}),
+      });
+    }
 
     if (!result.ok) {
       const parsed = parseAnthropicError(result.status, result.body, anthropicModel());
@@ -559,10 +981,13 @@ export async function POST(req: NextRequest) {
 
     const { markdownInput, requestKind } = finalizeTripAssistantReply(cleanedReply);
     const text = formatAssistantReplyForMarkdown(markdownInput);
+    if (suggestions.length > 0) {
+      console.log("[suggestions] raw from LLM:", JSON.stringify(suggestions.flatMap(s => s.options.map(o => ({ label: o.label, url: o.url, imageUrl: o.imageUrl })))));
+      return buildSuggestionsStreamResponse({ reply: text, requestKind, provider: "anthropic", model: anthropicModel(), suggestions, dates: tripDates });
+    }
     return NextResponse.json({
       reply: text,
       ...(requestKind ? { requestKind } : {}),
-      ...(suggestions.length > 0 ? { suggestions } : {}),
       provider: "anthropic" as const,
       model: anthropicModel(),
     });
@@ -676,10 +1101,13 @@ export async function POST(req: NextRequest) {
 
   const { markdownInput, requestKind } = finalizeTripAssistantReply(cleanedReply);
   const text = formatAssistantReplyForMarkdown(markdownInput);
+  if (suggestions.length > 0) {
+    console.log("[suggestions] raw from LLM:", JSON.stringify(suggestions.flatMap(s => s.options.map(o => ({ label: o.label, url: o.url, imageUrl: o.imageUrl })))));
+    return buildSuggestionsStreamResponse({ reply: text, requestKind, provider: "openai", model: openaiModel(), suggestions, dates: tripDates });
+  }
   return NextResponse.json({
     reply: text,
     ...(requestKind ? { requestKind } : {}),
-    ...(suggestions.length > 0 ? { suggestions } : {}),
     provider: "openai" as const,
     model: openaiModel(),
   });

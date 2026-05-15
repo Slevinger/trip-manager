@@ -55,6 +55,37 @@ export function addTripRecommendation(trip: Trip, rec: TripRecommendation): Trip
   };
 }
 
+/** Patches `imageUrl` and/or `priceNote` on a single recommendation option after lazy-loading. */
+export function patchTripRecommendationOptionImage(
+  trip: Trip,
+  recId: string,
+  optionId: string,
+  imageUrl: string,
+  priceNote?: string
+): Trip {
+  const recs = trip.recommendations ?? [];
+  const idx = recs.findIndex((r) => r.id === recId);
+  if (idx === -1) return trip;
+  const rec = recs[idx];
+  const updatedRec = {
+    ...rec,
+    options: rec.options.map((opt) =>
+      opt.id === optionId
+        ? { ...opt, imageUrl, ...(priceNote ? { priceNote } : {}) }
+        : opt
+    ),
+  } as TripRecommendation;
+  return {
+    ...trip,
+    recommendations: [
+      ...recs.slice(0, idx),
+      updatedRec,
+      ...recs.slice(idx + 1),
+    ],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function removeTripRecommendation(trip: Trip, recommendationId: string): Trip {
   const list = trip.recommendations ?? [];
   if (!list.some((r) => r.id === recommendationId)) return trip;

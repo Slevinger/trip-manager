@@ -316,11 +316,28 @@ const OPTION_BASE_FIELDS = {
   },
   url: {
     type: "string",
-    description: "Direct booking or info URL for this option (hotel page, transit booking, attraction site). Use a real, publicly accessible URL.",
+    description:
+      "Tripadvisor search URL for reviews and ratings. Format:\n" +
+      "• Hotels/stays → https://www.tripadvisor.com/Search?q={Hotel+Name+City}\n" +
+      "• Activities/tours → https://www.tripadvisor.com/Search?q={Activity+Name+City}\n" +
+      "Always include the property name and city. This is the review/info link.",
+  },
+  bookingUrl: {
+    type: "string",
+    description:
+      "Booking/availability URL with trip dates. Format:\n" +
+      "• Hotels/stays → https://www.booking.com/searchresults.html?ss={Hotel+Name+City}&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD&group_adults=N&no_rooms=1\n" +
+      "• Activities/tours → https://www.viator.com/search/{Activity+Name}?startDate=YYYY-MM-DD or operator booking page.\n" +
+      "• Flights/transit → https://www.google.com/travel/flights?q=flights+from+ORIGIN+to+DEST+on+DATE\n" +
+      "Always include the exact trip dates from the interval.",
   },
   imageUrl: {
     type: "string",
-    description: "Public photo or thumbnail URL representing this option (Wikimedia, official site image, etc.).",
+    description:
+      "Direct CDN image URL for this property — obtained from the Tripadvisor listing page's og:image meta tag " +
+      "(e.g. https://media-cdn.tripadvisor.com/media/photo-s/01/23/45/67/hotel-name.jpg). " +
+      "Must be a real image file URL ending in .jpg, .jpeg, .webp, or .png. " +
+      "Do NOT put a website homepage. Visit the Tripadvisor listing and copy the og:image URL.",
   },
   priceNote: {
     type: "string",
@@ -744,6 +761,7 @@ function readOption<T extends StayStepInterval | TransitStepInterval | ActivityS
   const note = safeString(raw.note, 2000);
   const destinations = safeDestinations(raw.destinations);
   const url = safeString(raw.url, 600);
+  const bookingUrl = safeString(raw.bookingUrl, 600);
   const imageUrl = safeString(raw.imageUrl, 600);
   const priceNote = safeString(raw.priceNote, 120);
   return {
@@ -753,6 +771,7 @@ function readOption<T extends StayStepInterval | TransitStepInterval | ActivityS
     ...(note ? { note } : {}),
     ...(destinations ? { destinations } : {}),
     ...(url ? { url } : {}),
+    ...(bookingUrl ? { bookingUrl } : {}),
     ...(imageUrl ? { imageUrl } : {}),
     ...(priceNote ? { priceNote } : {}),
   };

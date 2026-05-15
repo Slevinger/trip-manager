@@ -31,13 +31,21 @@ function isMemoryNoteRow(m: TripChatMessage): boolean {
   return m.memoryCompressed === true && m.from === "agent";
 }
 
+/** Strip Anthropic web-search artifacts from stored/streamed assistant content. */
+function sanitizeAgentContent(raw: string): string {
+  return raw
+    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
+    .replace(/^View on .+ ·\s*$/gim, "")
+    .trim();
+}
+
 export function tripMessagesToLines(msgs: TripChatMessage[]): ChatLine[] {
   return msgs
     .filter((m) => !isMemoryNoteRow(m))
     .map((m) => {
       const isAgent = m.from === "agent";
       const content = isAgent
-        ? stripTripAssistantRequestKindMarker(m.content).trim() || m.content
+        ? sanitizeAgentContent(stripTripAssistantRequestKindMarker(m.content)) || m.content
         : m.content;
       return {
         role: isAgent ? ("assistant" as const) : ("user" as const),
@@ -67,7 +75,7 @@ function partitionMemoryNotes(msgs: TripChatMessage[]): { notes: string; lines: 
       role: m.from === "agent" ? ("assistant" as const) : ("user" as const),
       content:
         m.from === "agent"
-          ? stripTripAssistantRequestKindMarker(m.content).trim() || m.content
+          ? sanitizeAgentContent(stripTripAssistantRequestKindMarker(m.content)) || m.content
           : m.content,
     });
   }
@@ -109,6 +117,8 @@ export interface UseTripAssistantOptions {
   isTripOwner?: boolean;
   canPersistMemory: boolean;
   onAddRecommendations?: (trip: Trip, recommendations: TripRecommendation[]) => Promise<void>;
+  /** Called for each patch streamed after the initial suggestion response. */
+  onUpdateOptionImage?: (recId: string, optionId: string, imageUrl: string, priceNote?: string) => void;
   /** Latest device GPS ping for agent requests (optional). */
   viewerPingRef?: MutableRefObject<ViewerDevicePing | null>;
 }
@@ -133,6 +143,12 @@ export interface UseTripAssistantResult {
   /** Latest "prepare" payload — consumed by the UI to pre-fill inputs. */
   pendingDraft: string | null;
   consumeDraft: () => void;
+  /** Dismiss the current error (e.g. when the user edits the input to retry). */
+  clearError: () => void;
+  /** True while a rate-limit cooldown is active — sending will fail, so the UI should block it. */
+  sendLocked: boolean;
+  /** Option IDs whose images are currently being resolved via the streaming enrichment. */
+  pendingImageOptIds: Set<string>;
 }
 
 export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistantResult {
@@ -145,6 +161,9 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   const [llmBackend, setLlmBackend] = useState<"openai" | "anthropic" | null>(null);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [pendingDraft, setPendingDraft] = useState<string | null>(null);
+  const [sendLocked, setSendLocked] = useState(false);
+  const sendLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingImageOptIds, setPendingImageOptIds] = useState<Set<string>>(new Set());
 
   const abortRef = useRef<AbortController | null>(null);
   /** While >0, skip syncing `lines` from Firestore so a transient listener error or stale snapshot does not drop the optimistic user/assistant pair. */
@@ -164,6 +183,12 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   useEffect(() => {
     pendingPersistRef.current = 0;
   }, [opts.trip.id]);
+
+  useEffect(() => {
+    return () => {
+      if (sendLockTimerRef.current) clearTimeout(sendLockTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (pendingPersistRef.current > 0) return;
@@ -371,57 +396,128 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
               : {}),
           }),
         });
-        const data = (await res.json().catch(() => ({}))) as {
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+          if (res.status === 429 || res.status === 529) {
+            setSendLocked(true);
+            if (sendLockTimerRef.current) clearTimeout(sendLockTimerRef.current);
+            sendLockTimerRef.current = setTimeout(() => setSendLocked(false), 30_000);
+          }
+          const head = errData.error?.trim() || `Request failed (${res.status})`;
+          const tail = errData.detail?.trim();
+          throw new Error(tail ? `${head}\n${tail.slice(0, 400)}` : head);
+        }
+
+        type ResultChunk = {
+          type: "result";
           reply?: string;
-          error?: string;
-          detail?: string;
           provider?: "openai" | "anthropic";
           model?: string;
           suggestions?: TripRecommendation[];
           requestKind?: "general" | "specific" | "suggestions";
         };
-        if (!res.ok) {
-          const head = data.error?.trim() || `Request failed (${res.status})`;
-          const tail = data.detail?.trim();
-          throw new Error(tail ? `${head}\n${tail.slice(0, 400)}` : head);
-        }
-        const reply = (data.reply ?? "").trim() || "(No reply)";
-        const requestKind =
-          data.requestKind === "general" ||
-          data.requestKind === "specific" ||
-          data.requestKind === "suggestions"
-            ? data.requestKind
-            : parseTripAssistantRequestKind(reply) ?? undefined;
-        if (data.provider === "openai" || data.provider === "anthropic") {
-          setLlmBackend(data.provider);
-        }
-        if (typeof data.model === "string" && data.model.trim()) {
-          setActiveModel(data.model.trim());
-        }
+        type ImageChunk = { type: "image"; recId: string; optionId: string; imageUrl: string; priceNote?: string };
 
-        const rawSuggestions =
-          Array.isArray(data.suggestions) && data.suggestions.length > 0 ? data.suggestions : [];
-        // Stamp private suggestions so only the sender sees them until approved.
-        const suggestions: TripRecommendation[] =
-          turnVisibleTo && turnVisibleTo.length > 0
-            ? rawSuggestions.map((s) => ({ ...s, visibleTo: turnVisibleTo }))
-            : rawSuggestions;
-
-        if (suggestions.length > 0 && opts.onAddRecommendations) {
-          try {
-            await opts.onAddRecommendations(opts.trip, suggestions);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : t("recs.errorGeneric");
-            setError(`${t("assistant.suggestionsFailed")} ${msg}`);
-            setLines((prev) => prev.slice(0, -1));
-            return;
+        const processResult = async (data: ResultChunk) => {
+          const reply = (data.reply ?? "").trim() || "(No reply)";
+          const requestKind =
+            data.requestKind === "general" ||
+            data.requestKind === "specific" ||
+            data.requestKind === "suggestions"
+              ? data.requestKind
+              : parseTripAssistantRequestKind(reply) ?? undefined;
+          if (data.provider === "openai" || data.provider === "anthropic") {
+            setLlmBackend(data.provider);
           }
-        }
+          if (typeof data.model === "string" && data.model.trim()) {
+            setActiveModel(data.model.trim());
+          }
 
-        setLines((prev) => [...prev, { role: "assistant", content: reply }]);
+          const rawSuggestions =
+            Array.isArray(data.suggestions) && data.suggestions.length > 0 ? data.suggestions : [];
+          const suggestions: TripRecommendation[] =
+            turnVisibleTo && turnVisibleTo.length > 0
+              ? rawSuggestions.map((s) => ({ ...s, visibleTo: turnVisibleTo }))
+              : rawSuggestions;
+
+          if (suggestions.length > 0 && opts.onAddRecommendations) {
+            try {
+              await opts.onAddRecommendations(opts.trip, suggestions);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : t("recs.errorGeneric");
+              setError(`${t("assistant.suggestionsFailed")} ${msg}`);
+              setLines((prev) => prev.slice(0, -1));
+              return { reply, requestKind, suggestions, aborted: true as const };
+            }
+          }
+
+          setLines((prev) => [...prev, { role: "assistant", content: reply }]);
+          if (suggestions.length > 0) {
+            setPendingImageOptIds(new Set(suggestions.flatMap((s) => s.options.map((o) => o.id))));
+          }
+          return { reply, requestKind, suggestions, aborted: false as const };
+        };
+
+        // NDJSON stream: first line is the result, subsequent lines are image patches.
+        const isNdjson = (res.headers.get("content-type") ?? "").includes("ndjson");
+        let reply: string;
+        let requestKind: "general" | "specific" | "suggestions" | undefined;
+        let persistedSuggestions: TripRecommendation[] = [];
+
+        if (isNdjson && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let resultHandled = false;
+          let earlyReturn = false;
+
+          outer: while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              let chunk: { type?: string } & Record<string, unknown>;
+              try { chunk = JSON.parse(line) as typeof chunk; } catch { continue; }
+
+              if (chunk.type === "result" && !resultHandled) {
+                resultHandled = true;
+                const outcome = await processResult(chunk as unknown as ResultChunk);
+                reply = outcome.reply;
+                requestKind = outcome.requestKind;
+                persistedSuggestions = outcome.suggestions;
+                if (outcome.aborted) { earlyReturn = true; break outer; }
+              } else if (chunk.type === "image") {
+                const c = chunk as unknown as ImageChunk;
+                if (c.recId && c.optionId && c.imageUrl) {
+                  opts.onUpdateOptionImage?.(c.recId, c.optionId, c.imageUrl, c.priceNote);
+                  setPendingImageOptIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(c.optionId);
+                    return next;
+                  });
+                }
+              }
+            }
+          }
+
+          setPendingImageOptIds(new Set());
+          if (earlyReturn) return;
+          reply ??= "(No reply)";
+          requestKind ??= undefined;
+        } else {
+          const data = (await res.json().catch(() => ({}))) as ResultChunk;
+          const outcome = await processResult(data);
+          if (outcome.aborted) return;
+          reply = outcome.reply;
+          requestKind = outcome.requestKind;
+          persistedSuggestions = outcome.suggestions;
+        }
 
         const recommendationsJson =
-          suggestions.length > 0 ? JSON.stringify(suggestions).slice(0, 25000) : undefined;
+          persistedSuggestions.length > 0 ? JSON.stringify(persistedSuggestions).slice(0, 25000) : undefined;
 
         if (opts.canPersistMemory && opts.userEmail?.trim()) {
           const where = buildChatMemoryTripWhere(opts.trip, contextAtMs);
@@ -478,6 +574,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         const msg = err instanceof Error ? err.message : t("assistant.genericError");
         setError(msg);
         setLines((prev) => prev.slice(0, -1));
+        setPendingDraft(text);
       } finally {
         if (willPersist) pendingPersistRef.current -= 1;
         if (abortRef.current === controller) abortRef.current = null;
@@ -493,6 +590,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
       opts.canPersistMemory,
       opts.globalChatMessages,
       opts.onAddRecommendations,
+      opts.onUpdateOptionImage,
       opts.profilePreferences,
       opts.trip,
       opts.tripChatMessages,
@@ -507,6 +605,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   const prepare = useCallback((text: string) => setPendingDraft(text), []);
   const consumeDraft = useCallback(() => setPendingDraft(null), []);
   const stop = useCallback(() => abortRef.current?.abort(), []);
+  const clearError = useCallback(() => setError(null), []);
 
   return {
     lines,
@@ -524,5 +623,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
     prepare,
     pendingDraft,
     consumeDraft,
+    clearError,
+    sendLocked,
+    pendingImageOptIds,
   };
 }
