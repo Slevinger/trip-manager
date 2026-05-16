@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import { resolveCommonsDirectImageUrl } from "@/lib/trip/wikimediaCommonsResolve";
@@ -85,8 +86,8 @@ function formatAnthropicHttpError(status: number, bodyText: string): string {
       }
       return msg.length > 320 ? `${msg.slice(0, 320)}…` : msg;
     }
-  } catch {
-    /* not JSON */
+  } catch (e) {
+    logCaughtExceptionServer(e, "heroCoverRoute/formatAnthropicHttpError/upstreamBody");
   }
   if (status === 401) return "Anthropic rejected the API key (check ANTHROPIC_API_KEY).";
   if (status === 429) return "Anthropic rate limit — try again in a moment.";
@@ -437,8 +438,8 @@ function tryExtractHeroFromLooseModelText(raw: string): Omit<TripHeroCoverPersis
     let url = quoted[1].replace(/\\"/g, '"').trim();
     try {
       url = decodeURIComponent(url);
-    } catch {
-      /* keep */
+    } catch (e) {
+      logCaughtExceptionServer(e, "heroCoverRoute/tryExtractHeroFromLooseModelText/decodeURIComponent");
     }
     if (isLikelyDirectImageUrl(url)) {
       const nameM = normalized.match(/"photographerName"\s*:\s*"([^"]*)"/i);
@@ -718,8 +719,8 @@ export async function POST(req: Request) {
   try {
     const refined = await refineSearchQueryWithOpenAI(trip);
     if (refined) searchHint = refined;
-  } catch {
-    /* optional */
+  } catch (e) {
+    logCaughtExceptionServer(e, "heroCoverRoute/refineSearchQueryWithOpenAI");
   }
 
   const dest0 = trip.destinations?.[0];

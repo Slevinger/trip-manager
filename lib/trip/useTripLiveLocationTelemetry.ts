@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
 import { getClientAuth } from "@/lib/firebase";
+import { logCaughtException } from "@/lib/logCaughtException";
 import type { Trip } from "@/lib/types/trip";
 import type { ViewerDevicePing } from "@/lib/tripTravelerLocationContext";
 
@@ -26,8 +27,8 @@ export function writeTripLiveLocationShareEnabled(tripId: string, enabled: boole
   try {
     window.sessionStorage.setItem(storageKey(tripId), enabled ? "1" : "0");
     window.dispatchEvent(new CustomEvent(TRIP_LIVE_LOCATION_STORAGE_EVENT, { detail: { tripId } }));
-  } catch {
-    /* ignore */
+  } catch (e) {
+    logCaughtException(e, "useTripLiveLocationTelemetry/persistSharePreference");
   }
 }
 
@@ -72,7 +73,7 @@ async function deleteLiveLocation(tripId: string, locationKey: string): Promise<
   await fetch(u.toString(), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
-  }).catch(() => {});
+  }).catch((e) => logCaughtException(e, "useTripLiveLocationTelemetry/deleteLiveLocation"));
 }
 
 /**
@@ -184,7 +185,7 @@ export function useTripLiveLocationTelemetry(
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,
         updatedAt: new Date(now).toISOString(),
-      }).catch(() => {});
+      }).catch((e) => logCaughtException(e, "useTripLiveLocationTelemetry/postLiveLocation"));
     };
 
     watchId = navigator.geolocation.watchPosition(onPos, () => {}, {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { logCaughtException } from "@/lib/logCaughtException";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -110,8 +111,8 @@ export function DashboardScreen() {
             await saveTrip(trip);
             setWizardOpen(false);
             router.push(`/trip/${trip.id}`);
-          } catch {
-            /* surfaced inline */
+          } catch (e) {
+            logCaughtException(e, "DashboardScreen/wizardOnCreate/saveTrip");
           }
         }}
       />

@@ -35,6 +35,37 @@ import type {
 import type { SharedTripThreadEntry } from "@/lib/types/user";
 import { parseTripRecommendationsFromJsonString } from "@/lib/tripAssistantSuggestionSchema";
 
+// ---------------------------------------------------------------------------
+// Suggestion wizard: missing-field detection
+// ---------------------------------------------------------------------------
+
+/** Fields the suggestion wizard requires before an approved option is "complete". */
+export type WizardMissingField = "price" | "time" | "note";
+
+/**
+ * Returns which required fields are missing from the approved option.
+ * The wizard will auto-trigger follow-up suggestion rounds until all are present.
+ */
+export function getWizardMissingFields(
+  option: TripRecommendationOption,
+  rec: TripRecommendation
+): WizardMissingField[] {
+  const missing: WizardMissingField[] = [];
+  if (!option.interval.startTime?.trim() || !option.interval.endTime?.trim()) {
+    missing.push("time");
+  }
+  const intervalPrice = (option.interval as { price?: { amount?: number } }).price;
+  const hasPrice =
+    !!option.priceNote?.trim() ||
+    (typeof intervalPrice?.amount === "number" && intervalPrice.amount > 0);
+  if (!hasPrice) missing.push("price");
+  const hasNote = !!option.note?.trim() || !!rec.note?.trim();
+  if (!hasNote) missing.push("note");
+  return missing;
+}
+
+// ---------------------------------------------------------------------------
+
 /** Queue tombstone so thread-based sync never re-adds a removed or approved recommendation. */
 function withRemovedRecommendationQueueEntry(
   trip: Trip,

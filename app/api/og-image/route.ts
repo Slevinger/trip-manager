@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 
 const TIMEOUT_MS = 6_000;
 const MAX_HTML_BYTES = 200_000; // read only the first ~200 KB (enough for <head>)
@@ -101,8 +102,8 @@ export async function GET(req: Request) {
     let resolved = imageUrl;
     try {
       resolved = new URL(imageUrl, target.toString()).toString();
-    } catch {
-      // keep as-is
+    } catch (e) {
+      logCaughtExceptionServer(e, "ogImageRoute/resolveRelativeImageUrl", { imageUrl });
     }
 
     return NextResponse.json(
@@ -112,7 +113,8 @@ export async function GET(req: Request) {
         headers: { "Cache-Control": "public, max-age=86400, s-maxage=86400" },
       }
     );
-  } catch {
+  } catch (e) {
+    logCaughtExceptionServer(e, "ogImageRoute/fetchHtml/faviconFallback");
     return NextResponse.json(
       { imageUrl: faviconFallback(target.hostname) },
       {

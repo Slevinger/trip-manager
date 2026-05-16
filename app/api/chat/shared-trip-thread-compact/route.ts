@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import { getApps, initializeApp, cert, type ServiceAccount } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
@@ -224,7 +225,8 @@ export async function POST(req: NextRequest) {
   try {
     const u = await auth.getUser(uid);
     callerEmail = (u.email ?? "").toString().trim().toLowerCase();
-  } catch {
+  } catch (e) {
+    logCaughtExceptionServer(e, "sharedTripThreadCompactRoute/authGetUserEmail", { uid });
     callerEmail = "";
   }
   if (!canonicalTripDocReadableByUser(uid, callerEmail, tripData)) {
@@ -282,7 +284,9 @@ export async function POST(req: NextRequest) {
         inputTokens: r.usage.inputTokens,
         outputTokens: r.usage.outputTokens,
       });
-    } catch {}
+    } catch (e) {
+      logCaughtExceptionServer(e, "sharedTripThreadCompactRoute/recordLlmUsageUsd/anthropic");
+    }
   } else if (r.usage && "promptTokens" in r.usage) {
     try {
       await recordLlmUsageUsd({
@@ -291,7 +295,9 @@ export async function POST(req: NextRequest) {
         inputTokens: r.usage.promptTokens,
         outputTokens: r.usage.completionTokens,
       });
-    } catch {}
+    } catch (e) {
+      logCaughtExceptionServer(e, "sharedTripThreadCompactRoute/recordLlmUsageUsd/openai");
+    }
   }
 
   const now = Date.now();

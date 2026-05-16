@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import { buildTripAssistantSystemPrompt } from "@/lib/tripAssistantPrompt";
 import { buildTripRecommendationSchemaPrompt, extractTripSuggestionsFromReply } from "@/lib/tripAssistantSuggestionSchema";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
@@ -173,7 +174,9 @@ export async function POST(req: NextRequest) {
         inputTokens: r.usage.inputTokens,
         outputTokens: r.usage.outputTokens,
       });
-    } catch {}
+    } catch (e) {
+      logCaughtExceptionServer(e, "tightenRecommendationRoute/recordLlmUsageUsd/anthropic");
+    }
 
     const extracted = extractTripSuggestionsFromReply(r.text);
     const tightened = extracted.suggestions?.[0];
@@ -225,7 +228,9 @@ export async function POST(req: NextRequest) {
         inputTokens: Number(parsed.usage.prompt_tokens) || 0,
         outputTokens: Number(parsed.usage.completion_tokens) || 0,
       });
-    } catch {}
+    } catch (e) {
+      logCaughtExceptionServer(e, "tightenRecommendationRoute/recordLlmUsageUsd/openai");
+    }
   }
 
   const extracted = extractTripSuggestionsFromReply(reply);

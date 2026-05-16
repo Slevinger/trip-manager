@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -16,6 +17,10 @@ import {
   type TripAssistantRequestKind,
 } from "@/lib/tripAssistantRequestKind";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
+import {
+  SCHEDULE_CHECK_APPENDIX,
+  extractScheduleFixFromReply,
+} from "@/lib/tripScheduleCheck";
 import {
   normalizeTripAssistantTurnsForWebTool,
   replaceLastUserContent,
@@ -514,8 +519,8 @@ function parseOpenAiError(status: number, bodyText: string): { message: string; 
         omitDetail: false,
       };
     }
-  } catch {
-    /* not JSON */
+  } catch (e) {
+    logCaughtExceptionServer(e, "tripAssistantRoute/parseOpenAiError/upstreamBody");
   }
   if (status === 401) {
     return {
@@ -588,8 +593,8 @@ function parseAnthropicError(
         omitDetail: false,
       };
     }
-  } catch {
-    /* not JSON */
+  } catch (e) {
+    logCaughtExceptionServer(e, "tripAssistantRoute/parseAnthropicError/upstreamBody");
   }
   if (status === 401) {
     return { message: "Anthropic rejected the API key (check ANTHROPIC_API_KEY).", omitDetail: false };
@@ -872,14 +877,19 @@ export async function POST(req: NextRequest) {
       ? rawClassified
       : undefined;
 
+  const isScheduleCheck = body.scheduleCheck === true;
+
   let systemContent = buildTripAssistantSystemPrompt(tripForPrompt, {
     nowMs: contextAtMs,
     profilePreferences: preferences,
-    anthropicWebSearchEnabled: wantsLiveWeb,
+    anthropicWebSearchEnabled: wantsLiveWeb && !isScheduleCheck,
     travelerLocationContextAppendix: travelerLocationAppendix || undefined,
   });
   if (classifiedMessageKind === "suggestions") {
     systemContent += TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX;
+  }
+  if (isScheduleCheck) {
+    systemContent += SCHEDULE_CHECK_APPENDIX;
   }
 
   if (provider === "anthropic") {
@@ -952,7 +962,10 @@ export async function POST(req: NextRequest) {
 
     // One-shot retry when the turn was classified as suggestions but every recommendation
     // was dropped by the ≥3-options validator.
-    if (classifiedMessageKind === "suggestions" && suggestions.length === 0) {
+    // Skip retry when the model intentionally asked a clarifying question (wizard gate):
+    // the clarify-first gate tells the model to end with ##specific## instead of emitting suggestions.
+    const anthropicReplyKind = parseTripAssistantRequestKind(cleanedReply);
+    if (classifiedMessageKind === "suggestions" && suggestions.length === 0 && anthropicReplyKind !== "specific") {
       const retryResult = await completeTripAssistantAnthropic({
         apiKey: key,
         model: anthropicModel(),
@@ -979,7 +992,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { markdownInput, requestKind } = finalizeTripAssistantReply(cleanedReply);
+    // Schedule-check: extract patches before markdown normalization.
+    const scheduleFixResult = isScheduleCheck ? extractScheduleFixFromReply(cleanedReply) : null;
+    const replyForMarkdown = scheduleFixResult ? scheduleFixResult.cleanedReply : cleanedReply;
+
+    const { markdownInput, requestKind } = finalizeTripAssistantReply(replyForMarkdown);
     const text = formatAssistantReplyForMarkdown(markdownInput);
     if (suggestions.length > 0) {
       console.log("[suggestions] raw from LLM:", JSON.stringify(suggestions.flatMap(s => s.options.map(o => ({ label: o.label, url: o.url, imageUrl: o.imageUrl })))));
@@ -990,6 +1007,9 @@ export async function POST(req: NextRequest) {
       ...(requestKind ? { requestKind } : {}),
       provider: "anthropic" as const,
       model: anthropicModel(),
+      ...(scheduleFixResult?.patches.length
+        ? { scheduleFix: { patches: scheduleFixResult.patches, summary: scheduleFixResult.summary } }
+        : {}),
     });
   }
 
@@ -1056,7 +1076,10 @@ export async function POST(req: NextRequest) {
 
   // One-shot retry when the turn was classified as suggestions but every recommendation
   // was dropped by the ≥3-options validator.
-  if (classifiedMessageKind === "suggestions" && suggestions.length === 0) {
+  // Skip retry when the model intentionally asked a clarifying question (wizard gate):
+  // the clarify-first gate tells the model to end with ##specific## instead of emitting suggestions.
+  const openaiReplyKind = parseTripAssistantRequestKind(cleanedReply);
+  if (classifiedMessageKind === "suggestions" && suggestions.length === 0 && openaiReplyKind !== "specific") {
     const retryMessages: ChatMessage[] = [
       { role: "system", content: (systemContent + EXPAND_OPTIONS_RETRY_APPENDIX).slice(0, 100_000) },
       ...turnMessages.slice(-TRIP_ASSISTANT_OPENAI_MESSAGE_HISTORY_CAP),
@@ -1093,13 +1116,16 @@ export async function POST(req: NextRequest) {
         if (retry.suggestions.length > 0) {
           suggestions = retry.suggestions;
         }
-      } catch {
-        // ignore retry parse failure; proceed with empty suggestions
+      } catch (e) {
+        logCaughtExceptionServer(e, "tripAssistantRoute/openaiSuggestionsRetry/parseJson");
       }
     }
   }
 
-  const { markdownInput, requestKind } = finalizeTripAssistantReply(cleanedReply);
+  const scheduleFixResultOai = isScheduleCheck ? extractScheduleFixFromReply(cleanedReply) : null;
+  const replyForMarkdownOai = scheduleFixResultOai ? scheduleFixResultOai.cleanedReply : cleanedReply;
+
+  const { markdownInput, requestKind } = finalizeTripAssistantReply(replyForMarkdownOai);
   const text = formatAssistantReplyForMarkdown(markdownInput);
   if (suggestions.length > 0) {
     console.log("[suggestions] raw from LLM:", JSON.stringify(suggestions.flatMap(s => s.options.map(o => ({ label: o.label, url: o.url, imageUrl: o.imageUrl })))));
@@ -1110,5 +1136,8 @@ export async function POST(req: NextRequest) {
     ...(requestKind ? { requestKind } : {}),
     provider: "openai" as const,
     model: openaiModel(),
+    ...(scheduleFixResultOai?.patches.length
+      ? { scheduleFix: { patches: scheduleFixResultOai.patches, summary: scheduleFixResultOai.summary } }
+      : {}),
   });
 }

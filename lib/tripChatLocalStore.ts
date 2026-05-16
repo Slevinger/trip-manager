@@ -8,6 +8,7 @@
  * conversation that produced the user's recommendations.
  */
 
+import { logCaughtException } from "@/lib/logCaughtException";
 import type { TripChatMessage } from "@/lib/types/user";
 
 const STORAGE_KEY = "planner-next:tripChat:v1";
@@ -24,7 +25,8 @@ function readStore(): Store {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return parsed as Store;
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "tripChatLocalStore/readStore");
     return {};
   }
 }
@@ -33,8 +35,8 @@ function writeStore(store: Store): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    /* quota — drop silently; cloud writes (when configured) remain the source of truth */
+  } catch (e) {
+    logCaughtException(e, "tripChatLocalStore/writeStore");
   }
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { logCaughtException } from "@/lib/logCaughtException";
 import { mergeAssistantThreadRecommendationsIntoTrip } from "@/lib/tripRecommendations";
 import type { Trip } from "@/lib/types/trip";
 import type { SharedTripThreadEntry } from "@/lib/types/user";
@@ -25,6 +26,8 @@ export function useTripThreadRecommendationsSync(opts: {
     if (!trip || !threadLoaded || !canPersist) return;
     const merged = mergeAssistantThreadRecommendationsIntoTrip(trip, threadEntries);
     if (!merged) return;
-    void persistRef.current(merged).catch(() => {});
+    void persistRef.current(merged).catch((e) =>
+      logCaughtException(e, "useTripThreadRecommendationsSync/persistMergedRecommendations")
+    );
   }, [opts.trip, opts.threadLoaded, opts.threadEntries, opts.canPersist]);
 }

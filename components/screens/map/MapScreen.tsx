@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { MapPin, Search, Sparkles, X } from "lucide-react";
+import { logCaughtException } from "@/lib/logCaughtException";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
@@ -204,8 +205,8 @@ function MapContent({ trip }: { trip: Trip }) {
         const res = await fetch(url.toString(), { signal: ctrl.signal });
         const json = (await res.json().catch(() => ({}))) as { hits?: PlaceSearchHit[] };
         setSearchHits(Array.isArray(json.hits) ? json.hits.slice(0, 6) : []);
-      } catch {
-        /* swallow */
+      } catch (e) {
+        logCaughtException(e, "MapScreen/placesSearch");
       } finally {
         setSearching(false);
       }

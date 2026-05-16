@@ -36,26 +36,30 @@ function getAtFragment(
   return { fragment: m[0], start: cursorPos - m[0].length };
 }
 
-/** Render plain text with every `@word` token wrapped in a coloured chip. */
+/** Render plain text with `@mention` and `[action-tag]` tokens as coloured chips. */
 function renderHighlighted(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let last = 0;
-  for (const m of text.matchAll(/@([A-Za-z0-9_.-]+)/g)) {
+  for (const m of text.matchAll(/(@[A-Za-z0-9_.-]+|\[[\w-]+\])/g)) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
-    const tag = m[0].toLowerCase();
+    const token = m[0];
+    const isActionTag = token.startsWith("[");
+    const tag = token.toLowerCase();
     nodes.push(
       <mark
         key={m.index}
         className={cn(
-          "rounded px-1 not-italic",
-          tag === "@private"
-            ? "bg-[var(--color-brand)]/20 text-[var(--color-brand)]"
-            : tag === "@all"
-              ? "bg-[var(--color-surface-muted)] text-[var(--color-muted-foreground)]"
-              : "bg-[color-mix(in_oklab,var(--color-brand)_12%,transparent)] text-[var(--color-brand)]"
+          "rounded px-1 not-italic font-medium",
+          isActionTag
+            ? "bg-[var(--color-brand)]/15 text-[var(--color-brand)]"
+            : tag === "@private"
+              ? "bg-[var(--color-brand)]/20 text-[var(--color-brand)]"
+              : tag === "@all"
+                ? "bg-[var(--color-surface-muted)] text-[var(--color-muted-foreground)]"
+                : "bg-[color-mix(in_oklab,var(--color-brand)_12%,transparent)] text-[var(--color-brand)]"
         )}
       >
-        {m[0]}
+        {token}
       </mark>
     );
     last = m.index + m[0].length;

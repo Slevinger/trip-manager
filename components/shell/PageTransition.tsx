@@ -2,12 +2,19 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
 export function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   const reduce = useReducedMotion();
-  // No translate `y`: a transformed ancestor breaks `position: fixed` (e.g. manage save bar).
+
+  // Group all sub-routes of the same trip so tab navigations don't re-trigger the fade.
+  const animationKey = useMemo(() => {
+    const tripMatch = pathname.match(/^\/trip\/([^/]+)/);
+    if (tripMatch) return `/trip/${tripMatch[1]}`;
+    return pathname;
+  }, [pathname]);
+
   const initial = reduce ? false : { opacity: 0 };
   const animate = { opacity: 1 };
   const exit = { opacity: 0 };
@@ -15,7 +22,7 @@ export function PageTransition({ children }: { children: ReactNode }) {
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
-        key={pathname}
+        key={animationKey}
         initial={initial}
         animate={animate}
         exit={exit}

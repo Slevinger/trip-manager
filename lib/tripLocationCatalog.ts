@@ -194,7 +194,7 @@ export function collectStayGroupedTripPlacePicks(
       addDestination(otherMap, destinationFromList(destinations, s.fromStayId), stepLine);
       addDestination(otherMap, destinationFromList(destinations, s.toStayId), stepLine);
       addDestination(otherMap, destinationFromList(destinations, s.targetDestinationId), stepLine);
-      for (const int of s.stepIntervals) {
+      for (const int of (s.stepIntervals ?? [])) {
         if (int.intervalType !== "transit") continue;
         const legLine = (int.title || "").trim() || stepLine;
         addDestination(otherMap, destinationFromList(destinations, int.fromDestinationId), legLine);
@@ -203,7 +203,7 @@ export function collectStayGroupedTripPlacePicks(
     } else {
       addDestination(otherMap, destinationFromList(destinations, s.destinationId), stepLine);
       addDestination(otherMap, destinationFromList(destinations, s.targetDestinationId), stepLine);
-      for (const int of s.stepIntervals) {
+      for (const int of (s.stepIntervals ?? [])) {
         if (int.intervalType === "activity" && int.destinationId) {
           addDestination(otherMap, destinationFromList(destinations, int.destinationId), stepLine);
         }
@@ -237,7 +237,7 @@ export function collectTripPlacePicks(steps: TripStep[], destinations: Destinati
           `${stayLine} · area center`
         );
       }
-      for (const int of s.stepIntervals) {
+      for (const int of (s.stepIntervals ?? [])) {
         if (int.intervalType !== "stay") continue;
         const loc = (int.location ?? "").trim();
         const c = int.coordinates;
@@ -266,7 +266,7 @@ export function collectTripPlacePicks(steps: TripStep[], destinations: Destinati
       addDestination(map, destinationFromList(destinations, s.fromStayId), transitLine);
       addDestination(map, destinationFromList(destinations, s.toStayId), transitLine);
       addDestination(map, destinationFromList(destinations, s.targetDestinationId), transitLine);
-      for (const int of s.stepIntervals) {
+      for (const int of (s.stepIntervals ?? [])) {
         if (int.intervalType === "transit") {
           const legLine = (int.title || "").trim() || transitLine;
           addDestination(map, destinationFromList(destinations, int.fromDestinationId), legLine);
@@ -277,7 +277,7 @@ export function collectTripPlacePicks(steps: TripStep[], destinations: Destinati
       const activityLine = (s.title || "").trim() || "—";
       addDestination(map, destinationFromList(destinations, s.destinationId), activityLine);
       addDestination(map, destinationFromList(destinations, s.targetDestinationId), activityLine);
-      for (const int of s.stepIntervals) {
+      for (const int of (s.stepIntervals ?? [])) {
         if (int.intervalType === "activity" && int.destinationId) {
           addDestination(map, destinationFromList(destinations, int.destinationId), activityLine);
         }

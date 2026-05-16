@@ -1,5 +1,6 @@
 "use client";
 
+import { logCaughtException } from "@/lib/logCaughtException";
 import {
   useCallback,
   useEffect,
@@ -104,7 +105,8 @@ export function formatPrettyDate(isoDate: string, intlLocale: string): string {
       day: "numeric",
       year: "numeric",
     }).format(date);
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "DateRangeCalendar/formatPrettyDate/intlFallback", { intlLocale });
     return date.toDateString();
   }
 }
@@ -121,7 +123,8 @@ export function formatPrettyDateTime(iso: string, intlLocale: string): string {
       hour: "numeric",
       minute: "2-digit",
     }).format(date);
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "DateRangeCalendar/formatPrettyDateTime/intlFallback", { intlLocale });
     return date.toLocaleString();
   }
 }
@@ -518,7 +521,8 @@ function formatMonthHeader(year: number, month: number, intlLocale: string): str
       month: "long",
       year: "numeric",
     }).format(new Date(year, month, 1));
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "DateRangeCalendar/formatMonthHeader/intlFallback", { intlLocale });
     return `${year}-${pad2(month + 1)}`;
   }
 }
@@ -530,7 +534,8 @@ function buildWeekdayLabels(intlLocale: string): string[] {
     for (let i = 0; i < 7; i++) {
       labels.push(fmt.format(new Date(2024, 0, 1 + i)));
     }
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "DateRangeCalendar/buildWeekdayLabels/intlFallback", { intlLocale });
     return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   }
   return labels;

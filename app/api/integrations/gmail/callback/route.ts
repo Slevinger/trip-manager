@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse, type NextRequest } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 
 import { getAdminFirestore } from "@/lib/firebaseAdmin";
 import {
@@ -86,8 +87,8 @@ export async function GET(req: NextRequest) {
         googleEmail = typeof j.email === "string" ? j.email.trim() : "";
       }
     }
-  } catch {
-    /* ignore */
+  } catch (e) {
+    logCaughtExceptionServer(e, "gmailCallbackRoute/oauthUserinfo");
   }
 
   await userGmailCredentialRef(db, emailLower).set({

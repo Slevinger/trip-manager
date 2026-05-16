@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import { assertMonthlyBudgetAllowsNewSpend, recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 
@@ -167,7 +168,9 @@ export async function POST(req: NextRequest) {
           inputTokens: r.usage.inputTokens,
           outputTokens: r.usage.outputTokens,
         });
-      } catch {}
+      } catch (e) {
+        logCaughtExceptionServer(e, "tripAssistantClassifyRoute/recordLlmUsageUsd/anthropic");
+      }
     }
     return NextResponse.json({ kind: parseKind(r.text) });
   }
@@ -216,7 +219,9 @@ export async function POST(req: NextRequest) {
         inputTokens: Number(parsed.usage.prompt_tokens) || 0,
         outputTokens: Number(parsed.usage.completion_tokens) || 0,
       });
-    } catch {}
+    } catch (e) {
+      logCaughtExceptionServer(e, "tripAssistantClassifyRoute/recordLlmUsageUsd/openai");
+    }
   }
   return NextResponse.json({ kind: parseKind(text) });
 }

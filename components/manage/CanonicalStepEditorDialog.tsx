@@ -387,9 +387,8 @@ export function CanonicalStepEditorDialog({
       draft.stepType === "stay" && active.intervalType === "stay"
         ? (() => {
             const st = active as StayStepInterval;
-            const fromInt = (st.location ?? "").trim();
-            if (fromInt) return fromInt;
-            if (st.destinationId) return (rowFor(st.destinationId).location ?? "").trim();
+            if (st.location != null) return st.location;
+            if (st.destinationId) return rowFor(st.destinationId).location ?? "";
             return "";
           })()
         : "";

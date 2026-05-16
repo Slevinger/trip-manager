@@ -1,7 +1,8 @@
 "use client";
 
 import type { User } from "firebase/auth";
-import { Redo2, Undo2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Plus, Redo2, Undo2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/context";
 import { TripDocumentUploads } from "@/components/TripDocumentUploads";
@@ -35,6 +36,7 @@ export function ManageTripWorkspace({
   canRedo,
   onUndo,
   onRedo,
+  section = "logistics",
 }: {
   trip: Trip;
   onTripChange: (next: Trip) => void;
@@ -52,6 +54,8 @@ export function ManageTripWorkspace({
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  /** Which section to render. Defaults to "logistics". */
+  section?: "logistics" | "itinerary" | "people";
 }) {
   const { t, locale } = useI18n();
   const rtlIcons = locale === "he";
@@ -64,39 +68,9 @@ export function ManageTripWorkspace({
   } | null>(null);
 
   const sortedSteps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
-  const [manageTab, setManageTab] = useState<
-    "overview" | "itinerary" | "people" | "logistics"
-  >("overview");
 
   const stepCount = trip.steps.length;
   const placeCount = trip.destinations.length;
-  const peopleCount = trip.travelers.length + (trip.viewers?.length ?? 0);
-  const taskCount = trip.tasks?.length ?? 0;
-  const docCount = trip.documents?.length ?? 0;
-  const logisticsCount = taskCount + docCount;
-
-  const tabs = [
-    {
-      id: "overview" as const,
-      label: t("manage.tabOverview"),
-      count: undefined as number | undefined,
-    },
-    {
-      id: "itinerary" as const,
-      label: t("manage.tabItinerary"),
-      count: stepCount + placeCount,
-    },
-    {
-      id: "people" as const,
-      label: t("manage.tabPeople"),
-      count: peopleCount,
-    },
-    {
-      id: "logistics" as const,
-      label: t("manage.tabLogistics"),
-      count: logisticsCount,
-    },
-  ];
 
   function mergeSavedStep(saved: TripStep, destinationUpserts: Destination[]) {
     const mergedDest = mergeDestinationLists(trip.destinations, destinationUpserts);
@@ -183,79 +157,45 @@ export function ManageTripWorkspace({
 
   return (
     <div className="relative">
-      <div className="space-y-6 pb-36 lg:pb-28">
-        <div className="sticky top-0 z-10 -mx-4 flex justify-center border-b border-zinc-200/70 bg-white/85 px-4 py-2 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/85">
-          <div
-            role="tablist"
-            aria-label={t("manage.tabsLabel")}
-            className="inline-flex max-w-full overflow-x-auto rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
-          >
-            {tabs.map((tab) => {
-              const active = manageTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setManageTab(tab.id)}
-                  className={
-                    active
-                      ? "flex shrink-0 items-center gap-1.5 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 shadow dark:bg-zinc-800 dark:text-zinc-50"
-                      : "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                  }
-                >
-                  <span>{tab.label}</span>
-                  {typeof tab.count === "number" && tab.count > 0 ? (
-                    <span
-                      className={
-                        active
-                          ? "rounded-full bg-zinc-900/10 px-1.5 py-px text-[10px] font-semibold text-zinc-900 dark:bg-white/15 dark:text-zinc-50"
-                          : "rounded-full bg-zinc-200/70 px-1.5 py-px text-[10px] font-semibold text-zinc-600 dark:bg-zinc-700/60 dark:text-zinc-300"
-                      }
-                    >
-                      {tab.count}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {manageTab === "overview" ? (
-          <ManageTripForm
-            trip={trip}
-            onChange={onTripChange}
-            profilePreferences={profilePreferences}
-            section="overview"
-          />
+      <div className="space-y-10 pb-36 lg:pb-28">
+        {section === "logistics" ? (
+          <>
+            <ManageTripForm
+              trip={trip}
+              onChange={onTripChange}
+              profilePreferences={profilePreferences}
+              section="overview"
+            />
+            <ManageTripForm
+              trip={trip}
+              onChange={onTripChange}
+              profilePreferences={profilePreferences}
+              section="tasks"
+            />
+            <TripDocumentUploads
+              trip={trip}
+              canUpload={canUploadTripFiles}
+              disabledHint={uploadDisabledHint}
+              onPersist={persistTrip}
+            />
+          </>
         ) : null}
 
-        {manageTab === "itinerary" ? (
+        {section === "itinerary" ? (
           <div className="space-y-6">
             <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-                    {t("manage.steps")}
-                    {stepCount > 0 ? (
-                      <span className="ml-2 align-middle text-xs font-normal text-zinc-500">
-                        ({stepCount})
-                      </span>
-                    ) : null}
-                  </h2>
-                  <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                    {t("manage.workspaceDestHelp")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={addStep}
-                  className="shrink-0 rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white dark:bg-white dark:text-zinc-900"
-                >
-                  {t("manage.addStep")}
-                </button>
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                  {t("manage.steps")}
+                  {stepCount > 0 ? (
+                    <span className="ml-2 align-middle text-xs font-normal text-zinc-500">
+                      ({stepCount})
+                    </span>
+                  ) : null}
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {t("manage.workspaceDestHelp")}
+                </p>
               </div>
               <CanonicalStepList
                 trip={trip}
@@ -265,7 +205,6 @@ export function ManageTripWorkspace({
                 onInsertAfter={insertStepAfter}
               />
             </section>
-
             {!saveDisabled ? (
               <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                 <h3 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
@@ -301,7 +240,7 @@ export function ManageTripWorkspace({
           </div>
         ) : null}
 
-        {manageTab === "people" ? (
+        {section === "people" ? (
           <ManageTripForm
             trip={trip}
             onChange={onTripChange}
@@ -309,24 +248,21 @@ export function ManageTripWorkspace({
             section="people"
           />
         ) : null}
-
-        {manageTab === "logistics" ? (
-          <div className="space-y-6">
-            <ManageTripForm
-              trip={trip}
-              onChange={onTripChange}
-              profilePreferences={profilePreferences}
-              section="tasks"
-            />
-            <TripDocumentUploads
-              trip={trip}
-              canUpload={canUploadTripFiles}
-              disabledHint={uploadDisabledHint}
-              onPersist={persistTrip}
-            />
-          </div>
-        ) : null}
       </div>
+
+      {section === "itinerary" && !saveDisabled ? (
+        <motion.button
+          type="button"
+          onClick={addStep}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
+          aria-label={t("manage.addStep")}
+          title={t("manage.addStep")}
+          className="fixed bottom-[calc(4.5rem+max(env(safe-area-inset-bottom),0.5rem)+4.5rem)] start-4 z-[46] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-brand)] text-white shadow-[var(--shadow-float)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-brand)]/40 lg:bottom-20 lg:start-6"
+        >
+          <Plus className="h-6 w-6" />
+        </motion.button>
+      ) : null}
 
       <div
         className={

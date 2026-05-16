@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, Component, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useFirebaseUser } from "@/lib/auth/useFirebaseUser";
@@ -16,6 +16,39 @@ const SmartDock = dynamic(
   () => import("@/components/agent/SmartDock").then((m) => ({ default: m.SmartDock })),
   { ssr: false }
 );
+
+class SmartDockBoundary extends Component<
+  { children: ReactNode },
+  { crashed: boolean; error: string | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { crashed: false, error: null };
+  }
+  static getDerivedStateFromError(error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[SmartDock] render error — copy this to the developer:", msg);
+    return { crashed: true, error: msg };
+  }
+  render() {
+    if (this.state.crashed) {
+      return (
+        <button
+          style={{
+            position: "fixed", bottom: 80, right: 16, zIndex: 40,
+            background: "red", color: "white", borderRadius: "50%",
+            width: 56, height: 56, fontSize: 20, border: "none", cursor: "pointer",
+          }}
+          title={`SmartDock error: ${this.state.error ?? "unknown"}`}
+          onClick={() => this.setState({ crashed: false, error: null })}
+        >
+          ⚠
+        </button>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user } = useFirebaseUser();
@@ -40,7 +73,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <BottomTabs tripId={routeTripId} />
         <TripLiveLocationTelemetry tripId={routeTripId} trip={telemetryTrip} />
-        <SmartDock tripId={routeTripId} />
+        <SmartDockBoundary>
+          <SmartDock tripId={routeTripId} />
+        </SmartDockBoundary>
       </div>
     </TripAgentViewerPingProvider>
   );

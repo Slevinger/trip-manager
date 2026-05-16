@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { getIdTokenResult, type User } from "firebase/auth";
 import { migrateTripToDestinationRegistry } from "@/lib/tripDestinationRegistry";
+import { logCaughtException } from "@/lib/logCaughtException";
 import type { Trip, TripLiveLocation } from "@/lib/types/trip";
 
 /** Top-level collection for canonical (v2) trip documents. */
@@ -58,8 +59,8 @@ function isoFromFirestoreInstant(raw: unknown): string {
     if (typeof o.toDate === "function") {
       try {
         return o.toDate().toISOString();
-      } catch {
-        /* ignore */
+      } catch (e) {
+        logCaughtException(e, "canonicalTripsFirestore/isoFromFirestoreInstant/toDate");
       }
     }
     if (typeof o.seconds === "number") {
@@ -428,8 +429,8 @@ export function subscribeMyCanonicalTrips(
       let body: { trips?: Trip[]; error?: string } = {};
       try {
         body = (await res.json()) as typeof body;
-      } catch {
-        /* ignore */
+      } catch (e) {
+        logCaughtException(e, "canonicalTripsFirestore/subscribeMyCanonicalTrips/parseResponseJson");
       }
       if (!res.ok) {
         const msg =

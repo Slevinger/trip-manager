@@ -73,9 +73,9 @@ export function StayStepIntervalWizardPanel({
   }
 
   const intervalLocationValue =
-    (interval.location ?? "").trim() ||
+    interval.location ??
     (interval.destinationId
-      ? (destinationFromList(trip.destinations, interval.destinationId)?.location ?? "").trim()
+      ? (destinationFromList(trip.destinations, interval.destinationId)?.location ?? "")
       : "");
 
   function addAnotherHotelPeriod() {

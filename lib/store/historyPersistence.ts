@@ -1,3 +1,4 @@
+import { logCaughtException } from "@/lib/logCaughtException";
 import type { JsonChangeAction } from "./types";
 
 const MAX_ENTRIES = 100;
@@ -13,7 +14,8 @@ export function loadTripHistory(tripId: string): { past: JsonChangeAction[]; fut
     if (!raw) return { past: [], future: [] };
     const parsed = JSON.parse(raw) as { past?: JsonChangeAction[]; future?: JsonChangeAction[] };
     return { past: parsed.past ?? [], future: parsed.future ?? [] };
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "historyPersistence/loadTripHistory");
     return { past: [], future: [] };
   }
 }
@@ -43,8 +45,8 @@ export function persistTripHistoryDebounced(
         getHistoryStorageKey(latest.tripId),
         JSON.stringify({ past: latest.past, future: latest.future }),
       );
-    } catch {
-      // ignore quota/unavailable
+    } catch (e) {
+      logCaughtException(e, "historyPersistence/persistTripHistoryDebounced");
     } finally {
       pending = null;
     }
@@ -61,8 +63,8 @@ export function clearTripHistoryLocalStorage(tripId: string): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(getHistoryStorageKey(id));
-  } catch {
-    /* ignore */
+  } catch (e) {
+    logCaughtException(e, "historyPersistence/clearTripHistoryLocalStorage");
   }
   if (latest?.tripId === id) {
     if (pending !== null) {

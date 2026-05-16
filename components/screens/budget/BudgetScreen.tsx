@@ -11,6 +11,7 @@ import {
   Trash2,
   Wallet,
 } from "lucide-react";
+import { logCaughtException } from "@/lib/logCaughtException";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
@@ -686,7 +687,8 @@ function SettlementSummary({
 function formatMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount);
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "BudgetScreen/formatMoney/intlFallback", { currency });
     return `${amount.toLocaleString()} ${currency}`;
   }
 }

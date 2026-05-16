@@ -302,22 +302,28 @@ export function CanonicalStepList({
               if (el) cardRefs.current.set(s.id, el);
               else cardRefs.current.delete(s.id);
             }}
-            className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+            className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
           >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                  <button
-                    type="button"
-                    className="mr-2 cursor-grab touch-none text-zinc-400 active:cursor-grabbing"
-                    title={t("manage.listDragReorderTitle")}
-                    onPointerDown={(e) => scheduleLongPressReorder(e, s.id)}
-                    aria-label={t("manage.listDragStepAria")}
-                  >
-                    ⋮⋮
-                  </button>
-                  {idx + 1}. {stepEmoji(s)} {stepDisplayTitle(s)}
-                </div>
+            <div className="flex items-stretch">
+              <button
+                type="button"
+                className="flex cursor-grab touch-none items-center px-3 text-zinc-400 active:cursor-grabbing"
+                title={t("manage.listDragReorderTitle")}
+                onPointerDown={(e) => { scheduleLongPressReorder(e, s.id); }}
+                aria-label={t("manage.listDragStepAria")}
+              >
+                ⋮⋮
+              </button>
+              <button
+                type="button"
+                onClick={() => onEdit(s)}
+                className="min-w-0 flex-1 cursor-pointer py-4 pe-4 text-start hover:bg-zinc-50 transition-colors dark:hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500"
+              >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    {idx + 1}. {stepEmoji(s)} {stepDisplayTitle(s)}
+                  </div>
                 {s.stepIntervals.length > 1 ? (
                   <div className="mt-1.5">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -417,71 +423,61 @@ export function CanonicalStepList({
                   );
                 })()}
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 flex-col items-end gap-2">
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
                     {stepKindLabel(s, t)}
                   </span>
-                  {deleteConfirmStepId !== s.id ? (
+                </div>
+              </div>
+              </button>
+            </div>
+
+            <div className="border-t border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100"
+                  onClick={(e) => { e.stopPropagation(); onInsertAfter(s.id); }}
+                >
+                  {t("manage.addStepAfter")}
+                </button>
+                {deleteConfirmStepId !== s.id ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
+                    onClick={(e) => { e.stopPropagation(); setDeleteConfirmStepId(s.id); }}
+                    aria-label={t("manage.deleteStepAria", { title: stepDisplayTitle(s) })}
+                  >
+                    {t("manage.deleteStep")}
+                  </button>
+                ) : null}
+              </div>
+              {deleteConfirmStepId === s.id ? (
+                <div
+                  className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/30"
+                  role="alert"
+                >
+                  <p className="text-xs leading-snug text-amber-950 dark:text-amber-100">
+                    {t("manage.deleteStepConfirm", { title: stepDisplayTitle(s) })}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
-                      onClick={() => setDeleteConfirmStepId(s.id)}
-                      aria-label={t("manage.deleteStepAria", { title: stepDisplayTitle(s) })}
+                      className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      onClick={(e) => { e.stopPropagation(); setDeleteConfirmStepId(null); }}
                     >
-                      {t("manage.deleteStep")}
+                      {t("manage.keepStep")}
                     </button>
-                  ) : null}
+                    <button
+                      type="button"
+                      className="rounded-lg border border-red-300 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white dark:border-red-800 dark:bg-red-700"
+                      onClick={(e) => { e.stopPropagation(); onDelete(s.id); setDeleteConfirmStepId(null); }}
+                    >
+                      {t("manage.deleteStepYes")}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </div>
-            {deleteConfirmStepId === s.id ? (
-              <div
-                className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/30"
-                role="alert"
-              >
-                <p className="text-xs leading-snug text-amber-950 dark:text-amber-100">
-                  {t("manage.deleteStepConfirm", { title: stepDisplayTitle(s) })}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                    onClick={() => setDeleteConfirmStepId(null)}
-                  >
-                    {t("manage.keepStep")}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-red-300 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white dark:border-red-800 dark:bg-red-700"
-                    onClick={() => {
-                      onDelete(s.id);
-                      setDeleteConfirmStepId(null);
-                    }}
-                  >
-                    {t("manage.deleteStepYes")}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-900"
-                onClick={() => {
-                  setDeleteConfirmStepId(null);
-                  onEdit(s);
-                }}
-              >
-                {t("common.edit")}
-              </button>
-              <button
-                type="button"
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100"
-                onClick={() => onInsertAfter(s.id)}
-              >
-                {t("manage.addStepAfter")}
-              </button>
+              ) : null}
             </div>
           </div>
         </div>

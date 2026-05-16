@@ -50,12 +50,14 @@ export function CollabScreen({ tripId }: { tripId: string }) {
   return <CollabContent trip={trip} persistTrip={persistTrip} />;
 }
 
-function CollabContent({
+export function CollabContent({
   trip,
   persistTrip,
+  standalone = true,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
+  standalone?: boolean;
 }) {
   const { t } = useI18n();
   const { user, useFirestore } = useFirebaseUser();
@@ -114,9 +116,8 @@ function CollabContent({
 
   const liveEntries = Object.entries(trip.liveLocations ?? {});
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
-      <TripBackToTripLink tripId={trip.id} />
+  const inner = (
+    <>
       <header>
         <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-brand)]">
           <MessagesSquare className="h-3.5 w-3.5" /> {trip.title}
@@ -229,6 +230,12 @@ function CollabContent({
           </Card>
         </div>
       </div>
+    </>
+  );
+  if (!standalone) return inner;
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      {inner}
     </div>
   );
 }

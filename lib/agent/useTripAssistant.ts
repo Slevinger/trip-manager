@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { agentEvolve } from "@/lib/agentEvolve";
+import { logCaughtException } from "@/lib/logCaughtException";
 import { buildChatMemoryTripWhere } from "@/lib/chatMemoryTripContext";
 import { getClientAuth } from "@/lib/firebase";
 import { useI18n } from "@/lib/i18n/context";
@@ -15,6 +16,8 @@ import {
 } from "@/lib/tripAssistantRequestKind";
 import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
 import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
+import { isScheduleCheckCommand } from "@/lib/tripScheduleCheck";
+import type { SchedulePatch } from "@/lib/tripScheduleCheck";
 import type { ViewerDevicePing } from "@/lib/tripTravelerLocationContext";
 import type { TripChatMessage } from "@/lib/types/user";
 
@@ -120,6 +123,8 @@ export interface UseTripAssistantOptions {
   onAddRecommendations?: (trip: Trip, recommendations: TripRecommendation[]) => Promise<void>;
   /** Called for each patch streamed after the initial suggestion response. */
   onUpdateOptionImage?: (recId: string, optionId: string, imageUrl: string, priceNote?: string) => void;
+  /** Called when a schedule-check response includes step-time patches to apply. */
+  onScheduleFix?: (trip: Trip, patches: SchedulePatch[]) => Promise<void>;
   /** Latest device GPS ping for agent requests (optional). */
   viewerPingRef?: MutableRefObject<ViewerDevicePing | null>;
 }
@@ -133,7 +138,7 @@ export interface UseTripAssistantResult {
   llmBackend: "openai" | "anthropic" | null;
   activeModel: string | null;
   canEvolve: boolean;
-  send: (text: string) => Promise<void>;
+  send: (text: string, opts?: { forceKind?: "general" | "specific" | "suggestions" }) => Promise<void>;
   /** Abort the in-flight request. The user's last message is removed from the
    * thread and restored to the input via `pendingDraft`. */
   stop: () => void;
@@ -150,6 +155,16 @@ export interface UseTripAssistantResult {
   sendLocked: boolean;
   /** Option IDs whose images are currently being resolved via the streaming enrichment. */
   pendingImageOptIds: Set<string>;
+  /** Schedule-fix patches waiting for user confirmation (null = none pending). */
+  pendingScheduleFix: { patches: SchedulePatch[]; summary: string } | null;
+  /** Apply and clear the pending schedule fix. */
+  applyScheduleFix: () => Promise<void>;
+  /** Discard the pending schedule fix without applying. */
+  discardScheduleFix: () => void;
+  /** Non-null right after suggestions arrive — cleared when the user sends their next message. */
+  latestSuggestionBatch: { count: number } | null;
+  /** Dismiss the suggestion bridge notification manually. */
+  dismissSuggestionBatch: () => void;
 }
 
 export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistantResult {
@@ -162,7 +177,9 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   const [llmBackend, setLlmBackend] = useState<"openai" | "anthropic" | null>(null);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [pendingDraft, setPendingDraft] = useState<string | null>(null);
+  const [pendingScheduleFix, setPendingScheduleFix] = useState<{ patches: SchedulePatch[]; summary: string } | null>(null);
   const [sendLocked, setSendLocked] = useState(false);
+  const [latestSuggestionBatch, setLatestSuggestionBatch] = useState<{ count: number } | null>(null);
   const sendLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingImageOptIds, setPendingImageOptIds] = useState<Set<string>>(new Set());
 
@@ -266,7 +283,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   }, [opts.canPersistMemory, opts.isTripOwner, opts.trip.id, opts.userEmail, persistedTripMessageCount, t]);
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, sendOpts?: { forceKind?: "general" | "specific" | "suggestions" }) => {
       const text = raw.trim();
       if (!text || loading || evolving || forgetting) return;
 
@@ -289,6 +306,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
       }
 
       setError(null);
+      setLatestSuggestionBatch(null);
 
       // Parse @private / @all / @mention tags before touching any state.
       const fromEmailLowerForAudience = opts.userEmail?.trim().toLowerCase() ?? "";
@@ -313,38 +331,46 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           [...lines].reverse().find((l) => l.role === "assistant")?.content ?? null;
         let classifiedMessageKind: "general" | "specific" | "suggestions" | undefined;
         let attachGlobal: boolean;
-        try {
-          const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: controller.signal,
-            body: JSON.stringify({
-              latestUserText: cleanText,
-              tripTitle: opts.trip.title ?? "",
-              recentTurns: nextLines.slice(-6).map((l) => ({ role: l.role, content: l.content })),
-            }),
-          });
-          if (classifyRes.ok) {
-            const j = (await classifyRes.json().catch(() => ({}))) as {
-              kind?: "general" | "specific" | "suggestions";
-            };
-            if (j.kind === "general" || j.kind === "specific" || j.kind === "suggestions") {
-              classifiedMessageKind = j.kind;
+
+        if (sendOpts?.forceKind) {
+          // Wizard path — skip classify round-trip and use the provided kind directly.
+          classifiedMessageKind = sendOpts.forceKind;
+          attachGlobal = sendOpts.forceKind === "general";
+        } else {
+          try {
+            const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                latestUserText: cleanText,
+                tripTitle: opts.trip.title ?? "",
+                recentTurns: nextLines.slice(-6).map((l) => ({ role: l.role, content: l.content })),
+              }),
+            });
+            if (classifyRes.ok) {
+              const j = (await classifyRes.json().catch(() => ({}))) as {
+                kind?: "general" | "specific" | "suggestions";
+              };
+              if (j.kind === "general" || j.kind === "specific" || j.kind === "suggestions") {
+                classifiedMessageKind = j.kind;
+              }
+              attachGlobal = j.kind === "general";
+            } else {
+              attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
             }
-            attachGlobal = j.kind === "general";
-          } else {
+          } catch (e) {
+            logCaughtException(e, "useTripAssistant/classifyMessageKind");
             attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
           }
-        } catch {
-          attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
-        }
 
-        if (classifiedMessageKind !== "general") {
-          if (
-            (classifiedMessageKind === "specific" || classifiedMessageKind === undefined) &&
-            tripAssistantUserWantsStructuredTripProposals(text)
-          ) {
-            classifiedMessageKind = "suggestions";
+          if (classifiedMessageKind !== "general") {
+            if (
+              (classifiedMessageKind === "specific" || classifiedMessageKind === undefined) &&
+              tripAssistantUserWantsStructuredTripProposals(text)
+            ) {
+              classifiedMessageKind = "suggestions";
+            }
           }
         }
 
@@ -377,11 +403,12 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         }));
 
         const ping = opts.viewerPingRef?.current ?? null;
+        const scheduleCheck = isScheduleCheckCommand(cleanText);
         const res = await fetch("/api/chat/trip-assistant", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-            body: JSON.stringify({
+          body: JSON.stringify({
             trip: opts.trip,
             preferences: opts.profilePreferences ?? undefined,
             contextAtMs,
@@ -389,6 +416,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
             ...(classifiedMessageKind === "suggestions"
               ? { classifiedMessageKind: "suggestions" as const }
               : {}),
+            ...(scheduleCheck ? { scheduleCheck: true } : {}),
             ...(ping
               ? {
                   viewerDevicePing: ping,
@@ -455,6 +483,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           setLines((prev) => [...prev, { role: "assistant", content: reply }]);
           if (suggestions.length > 0) {
             setPendingImageOptIds(new Set(suggestions.flatMap((s) => s.options.map((o) => o.id))));
+            setLatestSuggestionBatch({ count: suggestions.length });
           }
           return { reply, requestKind, suggestions, aborted: false as const };
         };
@@ -509,12 +538,20 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           reply ??= "(No reply)";
           requestKind ??= undefined;
         } else {
-          const data = (await res.json().catch(() => ({}))) as ResultChunk;
+          const data = (await res.json().catch(() => ({}))) as ResultChunk & {
+            scheduleFix?: { patches: SchedulePatch[]; summary: string };
+          };
           const outcome = await processResult(data);
           if (outcome.aborted) return;
           reply = outcome.reply;
           requestKind = outcome.requestKind;
           persistedSuggestions = outcome.suggestions;
+          if (data.scheduleFix?.patches?.length) {
+            setPendingScheduleFix({
+              patches: data.scheduleFix.patches,
+              summary: data.scheduleFix.summary ?? "",
+            });
+          }
         }
 
         const recommendationsJson =
@@ -558,10 +595,10 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
                   method: "POST",
                   headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                   body: JSON.stringify({ tripId: opts.trip.id }),
-                }).catch(() => {}),
+                }).catch((e) => logCaughtException(e, "useTripAssistant/triggerSharedTripThreadCompaction/fetch")),
               ]);
-            } catch {
-              /* ignore */
+            } catch (e) {
+              logCaughtException(e, "useTripAssistant/triggerSharedTripThreadCompaction");
             }
           })();
         }
@@ -607,6 +644,18 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   const consumeDraft = useCallback(() => setPendingDraft(null), []);
   const stop = useCallback(() => abortRef.current?.abort(), []);
   const clearError = useCallback(() => setError(null), []);
+  const dismissSuggestionBatch = useCallback(() => setLatestSuggestionBatch(null), []);
+  const discardScheduleFix = useCallback(() => setPendingScheduleFix(null), []);
+  const applyScheduleFix = useCallback(async () => {
+    if (!pendingScheduleFix || !opts.onScheduleFix) return;
+    try {
+      await opts.onScheduleFix(opts.trip, pendingScheduleFix.patches);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : t("assistant.genericError");
+      setError(msg);
+    }
+    setPendingScheduleFix(null);
+  }, [opts, pendingScheduleFix, t]);
 
   return {
     lines,
@@ -627,5 +676,10 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
     clearError,
     sendLocked,
     pendingImageOptIds,
+    pendingScheduleFix,
+    applyScheduleFix,
+    discardScheduleFix,
+    latestSuggestionBatch,
+    dismissSuggestionBatch,
   };
 }

@@ -9,6 +9,7 @@ import {
   subscribeCanonicalTrip,
 } from "@/lib/canonicalTripsFirestore";
 import { getClientAuth, getDb, getMissingFirebasePublicEnv } from "@/lib/firebase";
+import { logCaughtException } from "@/lib/logCaughtException";
 import { normalizeTripForPersist } from "@/lib/canonicalStepBuilders";
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks";
 import {
@@ -83,7 +84,9 @@ export function useTripData(tripId: string): UseTripDataResult {
   const dispatch = useAppDispatch();
   const trip = useAppSelector((s) => s.trip.trip);
   const firestoreTripAccess = useAppSelector((s) => s.trip.firestoreTripAccess);
-  const [loadState, setLoadState] = useState<TripLoadState>("loading");
+  const [loadState, setLoadState] = useState<TripLoadState>(
+    () => (trip?.id === tripId.trim() ? "ok" : "loading")
+  );
   const [user, setUser] = useState<User | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [sharedAssistantThread, setSharedAssistantThread] = useState<{
@@ -200,7 +203,9 @@ export function useTripData(tripId: string): UseTripDataResult {
                 meta: { history: "skip" },
               });
               setLoadState("ok");
-              void ensureCanonicalTripListsMyUid(db, tripId, u).catch(() => {});
+              void ensureCanonicalTripListsMyUid(db, tripId, u).catch((e) =>
+                logCaughtException(e, "useTripData/ensureCanonicalTripListsMyUid")
+              );
             },
             (err) => {
               const code =

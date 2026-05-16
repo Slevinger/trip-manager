@@ -1,4 +1,5 @@
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import { recordLlmUsageUsd } from "@/lib/llmMonthlyBudget";
 import {
   loadSeasonalOutlookCache,
@@ -31,8 +32,8 @@ function parseOutlookJson(text: string): string | null {
   try {
     const j = JSON.parse(t) as { outlook?: string };
     if (typeof j.outlook === "string" && j.outlook.trim()) return j.outlook.trim().slice(0, 800);
-  } catch {
-    /* loose */
+  } catch (e) {
+    logCaughtExceptionServer(e, "seasonalOutlookAnthropic/parseOutlookJson");
   }
   return null;
 }
@@ -112,8 +113,8 @@ Return JSON only.`;
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
     });
-  } catch {
-    /* non-fatal */
+  } catch (e) {
+    logCaughtExceptionServer(e, "seasonalOutlookAnthropic/recordLlmUsageUsd");
   }
   return text;
 }

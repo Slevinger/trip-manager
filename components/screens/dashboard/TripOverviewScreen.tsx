@@ -116,14 +116,16 @@ export function TripOverviewScreen({ tripId }: { tripId: string }) {
   return <TripOverviewContent trip={trip} persistTrip={persistTrip} canManage={canManage} />;
 }
 
-function TripOverviewContent({
+export function TripOverviewContent({
   trip,
   persistTrip,
   canManage,
+  standalone = true,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
   canManage: boolean;
+  standalone?: boolean;
 }) {
   const { t, locale } = useI18n();
   const nowMs = Date.now();
@@ -242,9 +244,8 @@ function TripOverviewContent({
             })
           : t("tripHero.countdownTitle", { days: 0, hours: 0 });
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
-      <TripBackToTripsHubLink />
+  const inner = (
+    <>
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -347,7 +348,7 @@ function TripOverviewContent({
 
           <div className="mt-6 flex flex-wrap gap-2">
             <Button asChild size="sm" variant="secondary" className="gap-1.5">
-              <Link href={`/trip/${trip.id}/itinerary`}>
+              <Link href={`/trip/${trip.id}?tab=itinerary`}>
                 <CalendarRange className="h-4 w-4" /> {t("tripHero.openItinerary")}
               </Link>
             </Button>
@@ -367,7 +368,7 @@ function TripOverviewContent({
               </Link>
             </Button>
             <Button asChild size="sm" variant="secondary" className="gap-1.5">
-              <Link href={`/trip/${trip.id}/collab`}>
+              <Link href={`/trip/${trip.id}?tab=people`}>
                 <MessagesSquare className="h-4 w-4" /> {t("tripHero.openCollab")}
               </Link>
             </Button>
@@ -492,6 +493,12 @@ function TripOverviewContent({
           </CardContent>
         </Card>
       </div>
+    </>
+  );
+  if (!standalone) return inner;
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      {inner}
     </div>
   );
 }

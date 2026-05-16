@@ -14,6 +14,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { logCaughtException } from "@/lib/logCaughtException";
 import { OgImage } from "@/components/ui/og-image";
 import { useAppSelector } from "@/lib/store/hooks";
 import { useI18n } from "@/lib/i18n/context";
@@ -25,11 +26,14 @@ import { actionsForScreen } from "@/lib/agent/quickActions";
 import {
   addTripRecommendation,
   approveTripRecommendationOptionDetailed,
+  getWizardMissingFields,
   patchTripRecommendationOptionImage,
   removeTripRecommendation,
   skipTripRecommendation,
   unseenTripRecommendationCount,
 } from "@/lib/tripRecommendations";
+import type { WizardMissingField } from "@/lib/tripRecommendations";
+import { applySchedulePatches } from "@/lib/tripScheduleCheck";
 import { activeTripScreen } from "@/components/shell/navItems";
 import { TripAssistantMessageBody } from "@/components/trip/TripAssistantMessageBody";
 import { MentionInput } from "@/components/agent/MentionInput";
@@ -232,6 +236,16 @@ function DockPanel({
     [canManage, persistTrip]
   );
 
+  const onScheduleFix = useCallback(
+    async (baseTripForFix: Trip, patches: import("@/lib/tripScheduleCheck").SchedulePatch[]) => {
+      if (!canManage) return;
+      const patched = applySchedulePatches(latestTripRef.current ?? baseTripForFix, patches);
+      latestTripRef.current = patched;
+      await persistTrip(patched);
+    },
+    [canManage, persistTrip]
+  );
+
   const viewerPingRef = useTripAgentViewerPingRefOptional();
 
   const assistant = useTripAssistant({
@@ -245,6 +259,7 @@ function DockPanel({
     canPersistMemory: data.canPersistMemory,
     onAddRecommendations,
     onUpdateOptionImage,
+    onScheduleFix,
     ...(viewerPingRef ? { viewerPingRef } : {}),
   });
 
@@ -308,7 +323,13 @@ function DockPanel({
         </div>
 
         <TabsContent value="chat" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-          <ChatTab assistant={assistant} screen={screen} isOwner={isOwner} tripId={tripId} />
+          <ChatTab
+            assistant={assistant}
+            screen={screen}
+            isOwner={isOwner}
+            tripId={tripId}
+            onViewSuggestions={() => onTabChange("suggestions")}
+          />
         </TabsContent>
 
         <TabsContent
@@ -321,6 +342,10 @@ function DockPanel({
             canManage={canManage}
             userEmail={userEmailLower}
             pendingImageOptIds={assistant.pendingImageOptIds}
+            assistantLoading={assistant.loading}
+            onWizardStep={(message) => {
+              void assistant.send(message, { forceKind: "suggestions" });
+            }}
             onTighten={(rec, option) => {
               const label = option.label?.trim() || option.interval.title.trim();
               const prefix = rec.visibleTo && rec.visibleTo.length > 0 ? "@private " : "";
@@ -350,6 +375,10 @@ function DockPanel({
               assistant.prepare(prompt);
               onTabChange("chat");
             }}
+            onScheduleCheck={() => {
+              void assistant.send("check my schedule", { forceKind: "specific" });
+              onTabChange("chat");
+            }}
           />
         </TabsContent>
       </Tabs>
@@ -362,16 +391,18 @@ function ChatTab({
   screen,
   isOwner,
   tripId,
+  onViewSuggestions,
 }: {
   assistant: ReturnType<typeof useTripAssistant>;
   screen: ReturnType<typeof activeTripScreen>;
   isOwner: boolean;
   tripId: string;
+  onViewSuggestions: () => void;
 }) {
   const { t } = useI18n();
   const draftKey = `chat-draft:${tripId}`;
   const [input, setInput] = useState(() => {
-    try { return localStorage.getItem(draftKey) ?? ""; } catch { return ""; }
+    try { return localStorage.getItem(draftKey) ?? ""; } catch (e) { logCaughtException(e, "SmartDock/ChatTab/loadDraft"); return ""; }
   });
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -379,7 +410,7 @@ function ChatTab({
     if (assistant.pendingDraft != null) {
       const draft = assistant.pendingDraft;
       setInput(draft);
-      try { draft ? localStorage.setItem(draftKey, draft) : localStorage.removeItem(draftKey); } catch { /* ignore */ }
+      try { draft ? localStorage.setItem(draftKey, draft) : localStorage.removeItem(draftKey); } catch (e) { logCaughtException(e, "SmartDock/ChatTab/persistDraft"); }
       assistant.consumeDraft();
     }
   }, [assistant.pendingDraft, assistant]);
@@ -388,16 +419,34 @@ function ChatTab({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [assistant.lines, assistant.loading]);
 
+  const actions = actionsForScreen(screen);
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
-    setInput("");
-    try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
-    await assistant.send(text);
-  };
 
-  const actions = actionsForScreen(screen);
+    // Expand [action-tag] prefix to the full action prompt + any user context.
+    let sendText = text;
+    let sendOpts: Parameters<typeof assistant.send>[1];
+    const tagMatch = text.match(/^\[([\w-]+)\]\s*([\s\S]*)/);
+    if (tagMatch) {
+      const action = actions.find((a) => a.id === tagMatch[1]);
+      if (action) {
+        const userContext = tagMatch[2].trim();
+        sendText = userContext ? `${action.prompt}\n\n${userContext}` : action.prompt;
+        // Mirror the same forceKind the Actions tab uses so the route handles
+        // effects (e.g. schedule-fix patches) the same way.
+        if (action.effect === "schedule-check") {
+          sendOpts = { forceKind: "specific" };
+        }
+      }
+    }
+
+    setInput("");
+    try { localStorage.removeItem(draftKey); } catch (e) { logCaughtException(e, "SmartDock/ChatTab/clearDraft"); }
+    await assistant.send(sendText, sendOpts);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -471,6 +520,26 @@ function ChatTab({
             </div>
           );
         })}
+        {!assistant.loading && assistant.latestSuggestionBatch ? (
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                assistant.dismissSuggestionBatch();
+                onViewSuggestions();
+              }}
+              className="flex items-center gap-2 rounded-2xl border border-[var(--color-brand)]/30 bg-[var(--color-brand-soft)] px-3 py-2 text-left text-xs text-[var(--color-brand)] shadow-[var(--shadow-soft)] hover:bg-[var(--color-brand)]/15 transition-colors"
+            >
+              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+              <span className="font-medium">
+                {assistant.latestSuggestionBatch.count === 1
+                  ? t("recs.suggestionBridgeSingle")
+                  : t("recs.suggestionBridgeMany", { count: assistant.latestSuggestionBatch.count })}
+              </span>
+              <span className="opacity-60">→</span>
+            </button>
+          </div>
+        ) : null}
         {assistant.loading ? (
           <div className="inline-flex items-center gap-2 rounded-2xl bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-muted-foreground)]">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -481,6 +550,35 @@ function ChatTab({
           <p className="rounded-2xl border border-[var(--color-danger)]/40 bg-[color-mix(in_oklab,var(--color-danger)_12%,transparent)] px-3 py-2 text-xs text-[var(--color-danger)]">
             {assistant.error}
           </p>
+        ) : null}
+        {assistant.pendingScheduleFix ? (
+          <div className="sticky bottom-0 rounded-2xl border border-[var(--color-brand)]/30 bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
+            <p className="mb-2 text-xs font-semibold text-[var(--color-foreground)]">
+              {t("agent.scheduleFixReady")}
+            </p>
+            {assistant.pendingScheduleFix.summary ? (
+              <p className="mb-2.5 text-xs text-[var(--color-muted-foreground)]">
+                {assistant.pendingScheduleFix.summary}
+              </p>
+            ) : null}
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1"
+                onClick={() => void assistant.applyScheduleFix()}
+              >
+                {t("agent.scheduleFixSave")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="flex-1"
+                onClick={assistant.discardScheduleFix}
+              >
+                {t("agent.scheduleFixDiscard")}
+              </Button>
+            </div>
+          </div>
         ) : null}
       </div>
 
@@ -498,7 +596,9 @@ function ChatTab({
                   type="button"
                   className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
                   onClick={() => {
-                    setInput(a.prompt);
+                    // Preserve any user text after an existing tag, then swap in the new tag.
+                    const userText = input.replace(/^\[[\w-]+\]\s*/, "").trim();
+                    setInput(userText ? `[${a.id}] ${userText}` : `[${a.id}] `);
                   }}
                 >
                   <Icon className="h-3 w-3" /> {t(a.labelKey)}
@@ -517,7 +617,7 @@ function ChatTab({
           value={input}
           onChange={(v) => {
             setInput(v);
-            try { v ? localStorage.setItem(draftKey, v) : localStorage.removeItem(draftKey); } catch { /* ignore */ }
+            try { v ? localStorage.setItem(draftKey, v) : localStorage.removeItem(draftKey); } catch (e) { logCaughtException(e, "SmartDock/ChatTab/persistInputDraft"); }
             if (assistant.error) assistant.clearError();
           }}
           onSubmit={() => void onSubmit({ preventDefault: () => {} } as React.FormEvent)}
@@ -551,26 +651,80 @@ function ChatTab({
   );
 }
 
+function buildWizardMessage(
+  option: TripRecommendationOption,
+  rec: TripRecommendation,
+  missing: WizardMissingField[]
+): string {
+  const label =
+    option.label?.trim() ||
+    (option.interval as { title?: string }).title?.trim() ||
+    rec.title?.trim() ||
+    rec.kind;
+  const parts: string[] = [`I just approved "${label}" (${rec.kind}).`];
+  if (missing.includes("time") && missing.includes("price")) {
+    parts.push(
+      "It's missing both a time slot and a price estimate. Please suggest 3 concrete options each with a specific date/time range and an estimated cost."
+    );
+  } else if (missing.includes("time")) {
+    parts.push(
+      "It's missing a specific time slot. Please suggest 3 concrete time options (e.g. morning / afternoon / evening) with exact start and end times."
+    );
+  } else if (missing.includes("price")) {
+    parts.push(
+      "It's missing a price estimate. Please suggest 3 pricing options (budget / mid-range / premium) with specific estimated costs."
+    );
+  }
+  if (missing.includes("note")) {
+    parts.push(
+      "Also include a short recommendation or warning for each option."
+    );
+  }
+  return parts.join(" ");
+}
+
 function SuggestionsTab({
   trip,
   persistTrip,
   canManage,
   userEmail,
   pendingImageOptIds,
+  assistantLoading,
   onTighten,
+  onWizardStep,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
   canManage: boolean;
   userEmail: string | null;
   pendingImageOptIds: Set<string>;
+  assistantLoading: boolean;
   onTighten: (rec: TripRecommendation, option: TripRecommendationOption) => void;
+  onWizardStep: (message: string) => void;
 }) {
   const { t } = useI18n();
+  const [wizardLabel, setWizardLabel] = useState<string | null>(null);
+  const [undoSnapshot, setUndoSnapshot] = useState<Trip | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleUndoDismiss = useCallback(() => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => setUndoSnapshot(null), 12_000);
+  }, []);
+
+  useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
+
+  // Clear the wizard loading banner once the assistant finishes.
+  useEffect(() => {
+    if (!assistantLoading) setWizardLabel(null);
+  }, [assistantLoading]);
+
   const recs = (trip.recommendations ?? []).filter(
     (r) => !r.visibleTo || !userEmail || r.visibleTo.includes(userEmail)
   );
-  if (recs.length === 0) {
+
+  const isEmpty = recs.length === 0 && !wizardLabel && !undoSnapshot;
+  if (isEmpty) {
     return (
       <p className="rounded-2xl bg-[var(--color-surface-muted)] px-3 py-3 text-sm text-[var(--color-muted-foreground)]">
         {t("agent.suggestionsEmpty")}
@@ -579,6 +733,35 @@ function SuggestionsTab({
   }
   return (
     <div className="space-y-3">
+      {undoSnapshot ? (
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-[var(--color-brand)]/30 bg-[var(--color-surface)] px-3 py-2 shadow-[var(--shadow-soft)]">
+          <p className="text-xs text-[var(--color-muted-foreground)]">{t("recs.applied")}</p>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            onClick={async () => {
+              await persistTrip(undoSnapshot);
+              setUndoSnapshot(null);
+            }}
+          >
+            {t("recs.undo")}
+          </Button>
+        </div>
+      ) : null}
+      {wizardLabel ? (
+        <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-3">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--color-muted-foreground)]" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-[var(--color-muted-foreground)]">
+              {t("recs.wizardRefining")}
+            </p>
+            <p className="truncate text-xs text-[var(--color-muted-foreground)] opacity-70">
+              {wizardLabel}
+            </p>
+          </div>
+        </div>
+      ) : null}
       {recs.map((rec) => (
         <RecommendationCard
           key={rec.id}
@@ -587,8 +770,20 @@ function SuggestionsTab({
           canManage={canManage}
           pendingImageOptIds={pendingImageOptIds}
           onApprove={async (optionId) => {
+            const option = (rec.options as TripRecommendationOption[]).find((o) => o.id === optionId);
+            const snapshot = trip;
             const next = approveTripRecommendationOptionDetailed(trip, rec.id, optionId).trip;
             await persistTrip(next);
+            setUndoSnapshot(snapshot);
+            scheduleUndoDismiss();
+            if (option) {
+              const missing = getWizardMissingFields(option, rec);
+              if (missing.length > 0) {
+                const label = option.label?.trim() || (option.interval as { title?: string }).title?.trim() || rec.title || rec.kind;
+                setWizardLabel(label);
+                onWizardStep(buildWizardMessage(option, rec, missing));
+              }
+            }
           }}
           onSkip={async () => {
             await persistTrip(skipTripRecommendation(trip, rec.id));
@@ -805,12 +1000,14 @@ function ActionsTab({
   canManage,
   persistTrip,
   onPickPrompt,
+  onScheduleCheck,
 }: {
   screen: ReturnType<typeof activeTripScreen>;
   trip: Trip;
   canManage: boolean;
   persistTrip: (next: Trip) => Promise<void>;
   onPickPrompt: (prompt: string) => void;
+  onScheduleCheck: () => void;
 }) {
   const { t } = useI18n();
   const actions = actionsForScreen(screen);
@@ -830,6 +1027,7 @@ function ActionsTab({
       {actions.map((a) => {
         const Icon = a.icon;
         const heroEffect = a.effect === "hero-cover";
+        const scheduleCheckEffect = a.effect === "schedule-check";
         const disabled = heroEffect && (!canManage || trip.destinations.length === 0);
         return (
           <button
@@ -837,6 +1035,10 @@ function ActionsTab({
             type="button"
             disabled={Boolean(busyId) || disabled}
             onClick={() => {
+              if (scheduleCheckEffect) {
+                onScheduleCheck();
+                return;
+              }
               if (heroEffect) {
                 if (!canManage || trip.destinations.length === 0) return;
                 setBusyId(a.id);

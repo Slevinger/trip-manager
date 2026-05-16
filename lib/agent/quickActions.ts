@@ -1,4 +1,5 @@
 import {
+  CalendarCheck,
   CalendarRange,
   CloudSun,
   Coins,
@@ -21,10 +22,19 @@ export interface AgentQuickAction {
   prompt: string;
   icon: LucideIcon;
   /** Runs a client-side trip mutation instead of opening chat (overview hero photo). */
-  effect?: "hero-cover";
+  effect?: "hero-cover" | "schedule-check";
 }
 
+const CHECK_SCHEDULE_ACTION: AgentQuickAction = {
+  id: "check-schedule",
+  labelKey: "agent.actionCheckSchedule",
+  prompt: "check my schedule",
+  icon: CalendarCheck,
+  effect: "schedule-check",
+};
+
 const COMMON_OVERVIEW: AgentQuickAction[] = [
+  CHECK_SCHEDULE_ACTION,
   {
     id: "tighten",
     labelKey: "agent.actionTighten",
@@ -54,6 +64,7 @@ const COMMON_OVERVIEW: AgentQuickAction[] = [
 ];
 
 const ITINERARY: AgentQuickAction[] = [
+  CHECK_SCHEDULE_ACTION,
   {
     id: "tighten-day",
     labelKey: "agent.actionTighten",
@@ -75,6 +86,7 @@ const ITINERARY: AgentQuickAction[] = [
 ];
 
 const MAP_ACTIONS: AgentQuickAction[] = [
+  CHECK_SCHEDULE_ACTION,
   {
     id: "nearby",
     labelKey: "agent.actionAddActivity",
@@ -90,6 +102,7 @@ const MAP_ACTIONS: AgentQuickAction[] = [
 ];
 
 const BUDGET_ACTIONS: AgentQuickAction[] = [
+  CHECK_SCHEDULE_ACTION,
   {
     id: "estimate",
     labelKey: "agent.actionBudget",
@@ -105,6 +118,7 @@ const BUDGET_ACTIONS: AgentQuickAction[] = [
 ];
 
 const PACKING_ACTIONS: AgentQuickAction[] = [
+  CHECK_SCHEDULE_ACTION,
   {
     id: "packing-add",
     labelKey: "agent.actionPacking",
@@ -120,6 +134,7 @@ const PACKING_ACTIONS: AgentQuickAction[] = [
 ];
 
 const COLLAB_ACTIONS: AgentQuickAction[] = [
+  CHECK_SCHEDULE_ACTION,
   {
     id: "consensus",
     labelKey: "agent.actionAddActivity",

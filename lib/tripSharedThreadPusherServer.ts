@@ -1,4 +1,5 @@
 import Pusher from "pusher";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 import {
   SHARED_THREAD_PUSHER_EVENT,
   sharedTripThreadPrivateChannel,
@@ -18,7 +19,8 @@ function pusherServer(): Pusher | null {
   }
   try {
     cached = new Pusher({ appId, key, secret, cluster, useTLS: true });
-  } catch {
+  } catch (e) {
+    logCaughtExceptionServer(e, "tripSharedThreadPusherServer/pusherServer/init");
     cached = null;
   }
   return cached;

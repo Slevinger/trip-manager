@@ -1,3 +1,5 @@
+import { logCaughtException } from "@/lib/logCaughtException";
+
 const KEY_PREFIX = "trip-manage-draft-v1:";
 
 function manageDraftLocalKey(tripId: string): string {
@@ -9,7 +11,7 @@ export function clearManageDraftLocal(tripId: string): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(manageDraftLocalKey(tripId));
-  } catch {
-    /* ignore */
+  } catch (e) {
+    logCaughtException(e, "manageDraftLocalCache/clearManageDraftLocal");
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { motion } from "framer-motion";
-import { CalendarRange, GripVertical } from "lucide-react";
+import { CalendarRange, GripVertical, Plus } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { TripLoadStateScreen } from "@/components/screens/_shared/TripLoadStateScreen";
@@ -24,8 +24,12 @@ import { TripBackToTripLink } from "@/components/screens/_shared/TripSubpageBack
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty";
 import { InlineAgentSuggestions } from "@/components/agent/InlineAgentSuggestions";
+import { CanonicalStepEditorDialog } from "@/components/manage/CanonicalStepEditorDialog";
+import { createStayStep, normalizeStepOrders } from "@/lib/canonicalStepBuilders";
+import { mergeDestinationLists } from "@/lib/tripDestinationRegistry";
+import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { groupStepsByDay, moveStepToDay } from "@/lib/tripStepReorder";
-import type { Trip, TripStep } from "@/lib/types/trip";
+import type { Destination, Trip, TripStep } from "@/lib/types/trip";
 import { DayColumn } from "./DayColumn";
 import { useTripWeather, weatherCodeIcon } from "@/lib/weather/useTripWeather";
 
@@ -35,18 +39,66 @@ export function ItineraryScreen({ tripId }: { tripId: string }) {
   return <ItineraryContent trip={trip} persistTrip={persistTrip} canManage={canManage} />;
 }
 
-function ItineraryContent({
+export function ItineraryContent({
   trip,
   persistTrip,
   canManage,
+  standalone = true,
 }: {
   trip: Trip;
   persistTrip: (next: Trip) => Promise<void>;
   canManage: boolean;
+  standalone?: boolean;
 }) {
   const { t } = useI18n();
   const [overlayId, setOverlayId] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{
+    step: TripStep;
+    isNew: boolean;
+    destinationSeeds?: Destination[];
+  } | null>(null);
+  const pendingInsertAfterId = useRef<string | null>(null);
   const weather = useTripWeather(trip);
+
+  const sortedSteps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
+
+  function addStep() {
+    pendingInsertAfterId.current = null;
+    const { step, newDestinations } = createStayStep(sortedSteps.length, trip.startDate);
+    setEditor({ step, isNew: true, destinationSeeds: newDestinations });
+  }
+
+  function editStep(s: TripStep) {
+    setEditor({ step: s, isNew: false });
+  }
+
+  async function handleSave({ step: saved, destinationUpserts }: { step: TripStep; destinationUpserts: Destination[] }) {
+    const mergedDest = mergeDestinationLists(trip.destinations, destinationUpserts);
+    const insertAfter = pendingInsertAfterId.current;
+    pendingInsertAfterId.current = null;
+    const idx = trip.steps.findIndex((s) => s.id === saved.id);
+    let nextSteps: TripStep[];
+    if (idx === -1) {
+      if (insertAfter) {
+        const sorted = sortTripStepsByStartTime(trip.steps);
+        const j = sorted.findIndex((s) => s.id === insertAfter);
+        nextSteps = j >= 0
+          ? [...sorted.slice(0, j + 1), saved, ...sorted.slice(j + 1)]
+          : [...trip.steps, saved];
+      } else {
+        nextSteps = [...trip.steps, saved];
+      }
+    } else {
+      nextSteps = trip.steps.map((s) => (s.id === saved.id ? saved : s));
+    }
+    await persistTrip({
+      ...trip,
+      destinations: mergedDest,
+      steps: normalizeStepOrders(nextSteps),
+      updatedAt: new Date().toISOString(),
+    });
+    setEditor(null);
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -83,9 +135,8 @@ function ItineraryContent({
 
   const totalSteps = trip.steps.length;
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
-      <TripBackToTripLink tripId={trip.id} />
+  const inner = (
+    <>
       <header>
         <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-brand)]">
           <CalendarRange className="h-3.5 w-3.5" /> {trip.title}
@@ -157,6 +208,44 @@ function ItineraryContent({
           />
         </DndContext>
       )}
+
+      {canManage ? (
+        <motion.button
+          type="button"
+          onClick={addStep}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
+          aria-label={t("manage.addStep")}
+          title={t("manage.addStep")}
+          className="fixed bottom-20 start-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-brand)] text-white shadow-[var(--shadow-float)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-brand)]/40 lg:bottom-6 lg:start-6"
+        >
+          <Plus className="h-6 w-6" />
+        </motion.button>
+      ) : null}
+
+      {editor ? (
+        <CanonicalStepEditorDialog
+          key={editor.step.id}
+          open
+          trip={trip}
+          tripStartIso={trip.startDate}
+          tripCurrency={trip.currency}
+          tripSteps={sortedSteps}
+          stepOrder={editor.step.order}
+          initial={editor.step}
+          isNew={editor.isNew}
+          initialDestinationSeeds={editor.destinationSeeds}
+          startInWizard={editor.isNew}
+          onClose={() => setEditor(null)}
+          onSave={(payload) => void handleSave(payload)}
+        />
+      ) : null}
+    </>
+  );
+  if (!standalone) return inner;
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 lg:px-8">
+      {inner}
     </div>
   );
 }
