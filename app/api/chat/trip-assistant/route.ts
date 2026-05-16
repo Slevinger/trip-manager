@@ -9,9 +9,14 @@ import {
   parseTripAssistantRequestKind,
   stripTripAssistantRequestKindMarker,
   TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX,
+  TRIP_ASSISTANT_ACTIONS_APPENDIX,
   EXPAND_OPTIONS_RETRY_APPENDIX,
   type TripAssistantRequestKind,
 } from "@/lib/tripAssistantRequestKind";
+import {
+  buildTripAssistantActionsSchemaPrompt,
+  extractTripActionsFromReply,
+} from "@/lib/tripAssistantActionSchema";
 import { completeTripAssistantAnthropic } from "@/lib/tripAssistantAnthropic";
 import {
   SCHEDULE_CHECK_APPENDIX,
@@ -822,7 +827,7 @@ export async function POST(req: NextRequest) {
 
   const rawClassified = body.classifiedMessageKind;
   const classifiedMessageKind: TripAssistantRequestKind | undefined =
-    rawClassified === "general" || rawClassified === "specific" || rawClassified === "suggestions"
+    rawClassified === "general" || rawClassified === "specific" || rawClassified === "suggestions" || rawClassified === "actions"
       ? rawClassified
       : undefined;
 
@@ -836,6 +841,12 @@ export async function POST(req: NextRequest) {
   });
   if (classifiedMessageKind === "suggestions") {
     systemContent += TRIP_ASSISTANT_CLASSIFIED_SUGGESTIONS_APPENDIX;
+  }
+  // Always include the actions schema so the LLM knows the format when it
+  // self-classifies as ##actions## even if the client heuristic didn't pre-classify.
+  systemContent += buildTripAssistantActionsSchemaPrompt();
+  if (classifiedMessageKind === "actions") {
+    systemContent += TRIP_ASSISTANT_ACTIONS_APPENDIX;
   }
   if (isScheduleCheck) {
     systemContent += SCHEDULE_CHECK_APPENDIX;
@@ -905,9 +916,14 @@ export async function POST(req: NextRequest) {
       console.warn("[llmMonthlyBudget] record failed after trip assistant", e);
     }
 
+    /** Always attempt to extract trip-actions — the parser is safe (validates schema)
+     *  and produces an empty array when there is no valid actions block. */
+    let actionsFromReply = extractTripActionsFromReply(result.text);
+    const actionsPreText = actionsFromReply ? actionsFromReply.cleanedReply : result.text;
+
     /** Pull any `trip-suggestions` JSON block out of the raw reply BEFORE markdown
      * normalization — the parser tolerates the original fence formatting. */
-    let { cleanedReply, suggestions } = extractTripSuggestionsFromReply(result.text);
+    let { cleanedReply, suggestions } = extractTripSuggestionsFromReply(actionsPreText);
 
     // One-shot retry when the turn was classified as suggestions but every recommendation
     // was dropped by the ≥3-options validator.
@@ -951,11 +967,17 @@ export async function POST(req: NextRequest) {
       console.log("[suggestions] raw from LLM:", JSON.stringify(suggestions.flatMap(s => s.options.map(o => ({ label: o.label, url: o.url, imageUrl: o.imageUrl })))));
       return buildSuggestionsStreamResponse({ reply: text, requestKind, provider: "anthropic", model: anthropicModel(), suggestions, dates: tripDates });
     }
+    if (actionsFromReply && actionsFromReply.actions.length > 0) {
+      console.log("[actions] from LLM:", JSON.stringify(actionsFromReply.actions.map(a => a.type)));
+    }
     return NextResponse.json({
       reply: text,
       ...(requestKind ? { requestKind } : {}),
       provider: "anthropic" as const,
       model: anthropicModel(),
+      ...(actionsFromReply && actionsFromReply.actions.length > 0
+        ? { actions: actionsFromReply.actions }
+        : {}),
       ...(scheduleFixResult?.patches.length
         ? { scheduleFix: { patches: scheduleFixResult.patches, summary: scheduleFixResult.summary } }
         : {}),
@@ -1021,7 +1043,9 @@ export async function POST(req: NextRequest) {
   }
 
   const rawText = parsed.choices?.[0]?.message?.content?.trim() ?? "";
-  let { cleanedReply, suggestions } = extractTripSuggestionsFromReply(rawText);
+  let oaiActionsFromReply = extractTripActionsFromReply(rawText);
+  const oaiActionsPreText = oaiActionsFromReply ? oaiActionsFromReply.cleanedReply : rawText;
+  let { cleanedReply, suggestions } = extractTripSuggestionsFromReply(oaiActionsPreText);
 
   // One-shot retry when the turn was classified as suggestions but every recommendation
   // was dropped by the ≥3-options validator.
@@ -1080,11 +1104,17 @@ export async function POST(req: NextRequest) {
     console.log("[suggestions] raw from LLM:", JSON.stringify(suggestions.flatMap(s => s.options.map(o => ({ label: o.label, url: o.url, imageUrl: o.imageUrl })))));
     return buildSuggestionsStreamResponse({ reply: text, requestKind, provider: "openai", model: openaiModel(), suggestions, dates: tripDates });
   }
+  if (oaiActionsFromReply && oaiActionsFromReply.actions.length > 0) {
+    console.log("[actions] from LLM:", JSON.stringify(oaiActionsFromReply.actions.map(a => a.type)));
+  }
   return NextResponse.json({
     reply: text,
     ...(requestKind ? { requestKind } : {}),
     provider: "openai" as const,
     model: openaiModel(),
+    ...(oaiActionsFromReply && oaiActionsFromReply.actions.length > 0
+      ? { actions: oaiActionsFromReply.actions }
+      : {}),
     ...(scheduleFixResultOai?.patches.length
       ? { scheduleFix: { patches: scheduleFixResultOai.patches, summary: scheduleFixResultOai.summary } }
       : {}),

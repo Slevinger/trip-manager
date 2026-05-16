@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Lock,
   Loader2,
+  Pencil,
   Send,
   Sparkles,
   Square,
@@ -34,6 +35,8 @@ import {
 } from "@/lib/tripRecommendations";
 import type { WizardMissingField } from "@/lib/tripRecommendations";
 import { applySchedulePatches } from "@/lib/tripScheduleCheck";
+import { applyTripActions } from "@/lib/tripActionExecutor";
+import type { TripAction } from "@/lib/tripAssistantActionSchema";
 import { activeTripScreen } from "@/components/shell/navItems";
 import { TripAssistantMessageBody } from "@/components/trip/TripAssistantMessageBody";
 import { MentionInput } from "@/components/agent/MentionInput";
@@ -249,6 +252,16 @@ function DockPanel({
     [canManage, persistTrip]
   );
 
+  const onApplyActions = useCallback(
+    async (_baseTrip: Trip, actions: TripAction[]) => {
+      if (!canManage) return;
+      const next = applyTripActions(latestTripRef.current, actions);
+      latestTripRef.current = next;
+      await persistTrip(next);
+    },
+    [canManage, persistTrip]
+  );
+
   const viewerPingRef = useTripAgentViewerPingRefOptional();
 
   const assistant = useTripAssistant({
@@ -263,6 +276,7 @@ function DockPanel({
     onAddRecommendations,
     onUpdateOptionImage,
     onScheduleFix,
+    onApplyActions,
     ...(viewerPingRef ? { viewerPingRef } : {}),
   });
 
@@ -330,6 +344,8 @@ function DockPanel({
             assistant={assistant}
             screen={screen}
             isOwner={isOwner}
+            canManage={canManage}
+            currentUserDisplayName={data.user?.displayName?.trim() ?? null}
             tripId={tripId}
             onViewSuggestions={() => onTabChange("suggestions")}
             tightenPromptsRef={tightenPromptsRef}
@@ -396,6 +412,8 @@ function ChatTab({
   assistant,
   screen,
   isOwner,
+  canManage,
+  currentUserDisplayName,
   tripId,
   onViewSuggestions,
   tightenPromptsRef,
@@ -403,6 +421,8 @@ function ChatTab({
   assistant: ReturnType<typeof useTripAssistant>;
   screen: ReturnType<typeof activeTripScreen>;
   isOwner: boolean;
+  canManage: boolean;
+  currentUserDisplayName: string | null;
   tripId: string;
   onViewSuggestions: () => void;
   tightenPromptsRef: React.RefObject<Map<string, string>>;
@@ -509,32 +529,56 @@ function ChatTab({
           const displayContent = isUser
             ? line.content.replace(/@private\b\s*/gi, "").replace(/@all\b\s*/gi, "").trim()
             : line.content;
+          const isEditing = assistant.editingLineIdx === i;
+          const senderName = isUser
+            ? (line.fromDisplayName || currentUserDisplayName || null)
+            : null;
           return (
             <div key={i} className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
-              {isUser && (isPrivate || mentionMatch) ? (
-                <div className="mb-0.5 flex gap-1 px-1">
-                  {isPrivate ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-muted-foreground)]">
-                      <Lock className="h-2.5 w-2.5" />
-                      {t("agent.audiencePrivate")}
-                    </span>
-                  ) : null}
-                  {mentionMatch ? (
-                    <span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-muted-foreground)]">
-                      {t("agent.audienceTo")} {mentionMatch}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
               <div
                 className={cn(
-                  "max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                  "relative max-w-[88%] rounded-2xl text-sm leading-relaxed",
                   isUser
-                    ? "bg-gradient-brand text-white"
+                    ? cn("bg-gradient-brand text-white", isEditing && "opacity-60")
                     : "bg-[var(--color-surface-muted)] text-[var(--color-foreground)]"
                 )}
               >
-                <TripAssistantMessageBody content={displayContent} variant={line.role} />
+                {isUser ? (
+                  <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-0.5">
+                    <span className="text-[11px] font-semibold text-white/80 truncate">
+                      {senderName ?? ""}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isPrivate ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-medium text-white/70">
+                          <Lock className="h-2 w-2" />
+                          {t("agent.audiencePrivate")}
+                        </span>
+                      ) : null}
+                      {mentionMatch ? (
+                        <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-medium text-white/70">
+                          {t("agent.audienceTo")} {mentionMatch}
+                        </span>
+                      ) : null}
+                      {canManage && !assistant.loading ? (
+                        <button
+                          type="button"
+                          onClick={() => isEditing ? assistant.cancelEdit() : assistant.startEdit(i)}
+                          className={cn(
+                            "rounded-full p-0.5 transition-colors",
+                            isEditing ? "text-white/90" : "text-white/50 hover:text-white/90"
+                          )}
+                          title={isEditing ? t("agent.editCancel") : t("agent.editMessage")}
+                        >
+                          {isEditing ? <X className="h-2.5 w-2.5" /> : <Pencil className="h-2.5 w-2.5" />}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                <div className={cn("px-3 pb-2", isUser ? "pt-0.5" : "pt-2")}>
+                  <TripAssistantMessageBody content={displayContent} variant={line.role} />
+                </div>
               </div>
             </div>
           );
@@ -595,6 +639,30 @@ function ChatTab({
                 onClick={assistant.discardScheduleFix}
               >
                 {t("agent.scheduleFixDiscard")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {assistant.pendingActionsBatch ? (
+          <div className="sticky bottom-0 rounded-2xl border border-[var(--color-brand)]/30 bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
+            <p className="mb-2 text-xs font-semibold text-[var(--color-foreground)]">
+              {t("agent.actionsReady", { count: assistant.pendingActionsBatch.count })}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1"
+                onClick={() => void assistant.applyPendingActions()}
+              >
+                {t("agent.actionsApply")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="flex-1"
+                onClick={assistant.discardPendingActions}
+              >
+                {t("agent.actionsDiscard")}
               </Button>
             </div>
           </div>

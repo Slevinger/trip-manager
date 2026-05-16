@@ -13,8 +13,10 @@ import {
   stripTripAssistantRequestKindMarker,
   tripAssistantNeedsGlobalContext,
   tripAssistantUserWantsStructuredTripProposals,
+  tripAssistantUserWantsActions,
 } from "@/lib/tripAssistantRequestKind";
-import { appendSharedTripThreadTurn } from "@/lib/sharedTripThread";
+import type { TripAction } from "@/lib/tripAssistantActionSchema";
+import { appendSharedTripThreadTurn, truncateSharedTripThreadAfterMs } from "@/lib/sharedTripThread";
 import type { Trip, TripRecommendation, UserPreferences } from "@/lib/types/trip";
 import { isScheduleCheckCommand } from "@/lib/tripScheduleCheck";
 import type { SchedulePatch } from "@/lib/tripScheduleCheck";
@@ -26,6 +28,10 @@ export type ChatRole = "user" | "assistant";
 export interface ChatLine {
   role: ChatRole;
   content: string;
+  /** Display name of the human speaker (absent for assistant lines). */
+  fromDisplayName?: string;
+  /** Timestamp (ms) matching the Firestore `createdAtMs` field — used for thread truncation when editing. */
+  sentAtMs?: number;
 }
 
 export const EVOLVE_COMMAND = "#evolve";
@@ -54,6 +60,8 @@ export function tripMessagesToLines(msgs: TripChatMessage[]): ChatLine[] {
       return {
         role: isAgent ? ("assistant" as const) : ("user" as const),
         content,
+        ...(m.timeStamp ? { sentAtMs: new Date(m.timeStamp).getTime() } : {}),
+        ...(!isAgent && m.fromDisplayName ? { fromDisplayName: m.fromDisplayName } : {}),
       };
     });
 }
@@ -121,6 +129,8 @@ export interface UseTripAssistantOptions {
   isTripOwner?: boolean;
   canPersistMemory: boolean;
   onAddRecommendations?: (trip: Trip, recommendations: TripRecommendation[]) => Promise<void>;
+  /** Called when the assistant returns ##actions## with a trip-actions JSON block. */
+  onApplyActions?: (trip: Trip, actions: TripAction[]) => Promise<void>;
   /** Called for each patch streamed after the initial suggestion response. */
   onUpdateOptionImage?: (recId: string, optionId: string, imageUrl: string, priceNote?: string) => void;
   /** Called when a schedule-check response includes step-time patches to apply. */
@@ -138,7 +148,7 @@ export interface UseTripAssistantResult {
   llmBackend: "openai" | "anthropic" | null;
   activeModel: string | null;
   canEvolve: boolean;
-  send: (text: string, opts?: { forceKind?: "general" | "specific" | "suggestions" }) => Promise<void>;
+  send: (text: string, opts?: { forceKind?: "general" | "specific" | "suggestions" | "actions" }) => Promise<void>;
   /** Abort the in-flight request. The user's last message is removed from the
    * thread and restored to the input via `pendingDraft`. */
   stop: () => void;
@@ -161,10 +171,23 @@ export interface UseTripAssistantResult {
   applyScheduleFix: () => Promise<void>;
   /** Discard the pending schedule fix without applying. */
   discardScheduleFix: () => void;
+  /** Pending trip mutations from the LLM, waiting for user confirmation. */
+  pendingActionsBatch: { actions: TripAction[]; count: number } | null;
+  /** Apply and clear the pending actions batch. */
+  applyPendingActions: () => Promise<void>;
+  /** Discard the pending actions batch without applying. */
+  discardPendingActions: () => void;
   /** Non-null right after suggestions arrive — cleared when the user sends their next message. */
   latestSuggestionBatch: { count: number } | null;
   /** Dismiss the suggestion bridge notification manually. */
   dismissSuggestionBatch: () => void;
+  /** Start editing a previous user message: pre-fills input and marks an edit point so the
+   *  next `send` truncates history from that line onward before resending. */
+  startEdit: (lineIdx: number) => void;
+  /** Line index currently being edited, or null if no edit is pending. */
+  editingLineIdx: number | null;
+  /** Cancel a pending edit without resending. */
+  cancelEdit: () => void;
 }
 
 export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistantResult {
@@ -178,12 +201,16 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [pendingDraft, setPendingDraft] = useState<string | null>(null);
   const [pendingScheduleFix, setPendingScheduleFix] = useState<{ patches: SchedulePatch[]; summary: string } | null>(null);
+  const [pendingActionsBatch, setPendingActionsBatch] = useState<{ actions: TripAction[]; count: number } | null>(null);
   const [sendLocked, setSendLocked] = useState(false);
   const [latestSuggestionBatch, setLatestSuggestionBatch] = useState<{ count: number } | null>(null);
   const sendLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingImageOptIds, setPendingImageOptIds] = useState<Set<string>>(new Set());
 
   const abortRef = useRef<AbortController | null>(null);
+  /** When non-null, the next `send` truncates lines/thread from this index onward. */
+  const pendingEditIdxRef = useRef<number | null>(null);
+  const [editingLineIdx, setEditingLineIdx] = useState<number | null>(null);
   /** While >0, skip syncing `lines` from Firestore so a transient listener error or stale snapshot does not drop the optimistic user/assistant pair. */
   const pendingPersistRef = useRef(0);
 
@@ -283,7 +310,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
   }, [opts.canPersistMemory, opts.isTripOwner, opts.trip.id, opts.userEmail, persistedTripMessageCount, t]);
 
   const send = useCallback(
-    async (raw: string, sendOpts?: { forceKind?: "general" | "specific" | "suggestions" }) => {
+    async (raw: string, sendOpts?: { forceKind?: "general" | "specific" | "suggestions" | "actions" }) => {
       const text = raw.trim();
       if (!text || loading || evolving || forgetting) return;
 
@@ -307,6 +334,13 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
 
       setError(null);
       setLatestSuggestionBatch(null);
+      setPendingActionsBatch(null);
+
+      // Resolve and clear any pending edit — truncate history from that point.
+      const editIdx = pendingEditIdxRef.current;
+      pendingEditIdxRef.current = null;
+      setEditingLineIdx(null);
+      const baseLines = editIdx !== null ? lines.slice(0, editIdx) : lines;
 
       // Parse @private / @all / @mention tags before touching any state.
       const fromEmailLowerForAudience = opts.userEmail?.trim().toLowerCase() ?? "";
@@ -315,21 +349,36 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         fromEmailLowerForAudience
       );
 
-      const userLine: ChatLine = { role: "user", content: text };
-      const nextLines: ChatLine[] = [...lines, userLine];
+      const contextAtMs = Date.now();
+      const userDisplayName = opts.userDisplayName?.trim() || undefined;
+      const userLine: ChatLine = {
+        role: "user",
+        content: text,
+        sentAtMs: contextAtMs,
+        ...(userDisplayName ? { fromDisplayName: userDisplayName } : {}),
+      };
+      const nextLines: ChatLine[] = [...baseLines, userLine];
       const willPersist = Boolean(opts.canPersistMemory && opts.userEmail?.trim());
       if (willPersist) pendingPersistRef.current += 1;
       setLines(nextLines);
       setLoading(true);
-      const contextAtMs = Date.now();
+
+      // Truncate remote thread when editing (fire-and-forget).
+      if (editIdx !== null && willPersist && opts.trip.id) {
+        const editedLine = lines[editIdx];
+        if (editedLine?.sentAtMs) {
+          void truncateSharedTripThreadAfterMs(opts.trip.id, editedLine.sentAtMs);
+        }
+      }
+
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
         const lastAssistantReply =
-          [...lines].reverse().find((l) => l.role === "assistant")?.content ?? null;
-        let classifiedMessageKind: "general" | "specific" | "suggestions" | undefined;
+          [...baseLines].reverse().find((l) => l.role === "assistant")?.content ?? null;
+        let classifiedMessageKind: "general" | "specific" | "suggestions" | "actions" | undefined;
         let attachGlobal: boolean;
 
         if (sendOpts?.forceKind) {
@@ -337,39 +386,45 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           classifiedMessageKind = sendOpts.forceKind;
           attachGlobal = sendOpts.forceKind === "general";
         } else {
-          try {
-            const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
-              body: JSON.stringify({
-                latestUserText: cleanText,
-                tripTitle: opts.trip.title ?? "",
-                recentTurns: nextLines.slice(-6).map((l) => ({ role: l.role, content: l.content })),
-              }),
-            });
-            if (classifyRes.ok) {
-              const j = (await classifyRes.json().catch(() => ({}))) as {
-                kind?: "general" | "specific" | "suggestions";
-              };
-              if (j.kind === "general" || j.kind === "specific" || j.kind === "suggestions") {
-                classifiedMessageKind = j.kind;
+          // Check for direct action intent before hitting the classify API.
+          if (tripAssistantUserWantsActions(cleanText)) {
+            classifiedMessageKind = "actions";
+            attachGlobal = false;
+          } else {
+            try {
+              const classifyRes = await fetch("/api/chat/trip-assistant-classify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
+                body: JSON.stringify({
+                  latestUserText: cleanText,
+                  tripTitle: opts.trip.title ?? "",
+                  recentTurns: nextLines.slice(-6).map((l) => ({ role: l.role, content: l.content })),
+                }),
+              });
+              if (classifyRes.ok) {
+                const j = (await classifyRes.json().catch(() => ({}))) as {
+                  kind?: "general" | "specific" | "suggestions";
+                };
+                if (j.kind === "general" || j.kind === "specific" || j.kind === "suggestions") {
+                  classifiedMessageKind = j.kind;
+                }
+                attachGlobal = j.kind === "general";
+              } else {
+                attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
               }
-              attachGlobal = j.kind === "general";
-            } else {
+            } catch (e) {
+              logCaughtException(e, "useTripAssistant/classifyMessageKind");
               attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
             }
-          } catch (e) {
-            logCaughtException(e, "useTripAssistant/classifyMessageKind");
-            attachGlobal = tripAssistantNeedsGlobalContext(text, lastAssistantReply);
-          }
 
-          if (classifiedMessageKind !== "general") {
-            if (
-              (classifiedMessageKind === "specific" || classifiedMessageKind === undefined) &&
-              tripAssistantUserWantsStructuredTripProposals(text)
-            ) {
-              classifiedMessageKind = "suggestions";
+            if (classifiedMessageKind !== "general") {
+              if (
+                (classifiedMessageKind === "specific" || classifiedMessageKind === undefined) &&
+                tripAssistantUserWantsStructuredTripProposals(text)
+              ) {
+                classifiedMessageKind = "suggestions";
+              }
             }
           }
         }
@@ -413,8 +468,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
             preferences: opts.profilePreferences ?? undefined,
             contextAtMs,
             messages: apiMessages,
-            ...(classifiedMessageKind === "suggestions"
-              ? { classifiedMessageKind: "suggestions" as const }
+            ...(classifiedMessageKind === "suggestions" || classifiedMessageKind === "actions"
+              ? { classifiedMessageKind }
               : {}),
             ...(scheduleCheck ? { scheduleCheck: true } : {}),
             ...(ping
@@ -443,7 +498,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           provider?: "openai" | "anthropic";
           model?: string;
           suggestions?: TripRecommendation[];
-          requestKind?: "general" | "specific" | "suggestions";
+          requestKind?: "general" | "specific" | "suggestions" | "actions";
+          actions?: TripAction[];
         };
         type ImageChunk = { type: "image"; recId: string; optionId: string; imageUrl: string; priceNote?: string };
 
@@ -452,7 +508,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           const requestKind =
             data.requestKind === "general" ||
             data.requestKind === "specific" ||
-            data.requestKind === "suggestions"
+            data.requestKind === "suggestions" ||
+            data.requestKind === "actions"
               ? data.requestKind
               : parseTripAssistantRequestKind(reply) ?? undefined;
           if (data.provider === "openai" || data.provider === "anthropic") {
@@ -480,7 +537,15 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
             }
           }
 
-          setLines((prev) => [...prev, { role: "assistant", content: reply }]);
+          // Queue pending actions for user confirmation (do NOT apply immediately).
+          const actions = Array.isArray(data.actions) && data.actions.length > 0
+            ? data.actions as TripAction[]
+            : [];
+          if (actions.length > 0) {
+            setPendingActionsBatch({ actions, count: actions.length });
+          }
+
+          setLines((prev) => [...prev, { role: "assistant", content: reply, sentAtMs: contextAtMs + 1 }]);
           if (suggestions.length > 0) {
             setPendingImageOptIds(new Set(suggestions.flatMap((s) => s.options.map((o) => o.id))));
             setLatestSuggestionBatch({ count: suggestions.length });
@@ -491,7 +556,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         // NDJSON stream: first line is the result, subsequent lines are image patches.
         const isNdjson = (res.headers.get("content-type") ?? "").includes("ndjson");
         let reply: string;
-        let requestKind: "general" | "specific" | "suggestions" | undefined;
+        let requestKind: "general" | "specific" | "suggestions" | "actions" | undefined;
         let persistedSuggestions: TripRecommendation[] = [];
 
         if (isNdjson && res.body) {
@@ -605,7 +670,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
                 agentContent: reply,
                 sentAtMs: contextAtMs,
                 tripContextNote: where.summary,
-                ...(requestKind ? { requestKind } : {}),
+                ...(requestKind && requestKind !== "actions" ? { requestKind } : {}),
                 ...(recommendationsJson ? { recommendationsJson } : {}),
                 ...(turnVisibleTo ? { visibleTo: turnVisibleTo } : {}),
                 ...(turnDirectedTo ? { directedTo: turnDirectedTo } : {}),
@@ -692,6 +757,31 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
     setPendingScheduleFix(null);
   }, [opts, pendingScheduleFix, t]);
 
+  const discardPendingActions = useCallback(() => setPendingActionsBatch(null), []);
+  const applyPendingActions = useCallback(async () => {
+    if (!pendingActionsBatch || !opts.onApplyActions) return;
+    try {
+      await opts.onApplyActions(opts.trip, pendingActionsBatch.actions);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : t("assistant.genericError");
+      setError(msg);
+    }
+    setPendingActionsBatch(null);
+  }, [opts, pendingActionsBatch, t]);
+
+  const startEdit = useCallback((lineIdx: number) => {
+    const line = lines[lineIdx];
+    if (!line || line.role !== "user") return;
+    pendingEditIdxRef.current = lineIdx;
+    setEditingLineIdx(lineIdx);
+    setPendingDraft(line.content);
+  }, [lines]);
+
+  const cancelEdit = useCallback(() => {
+    pendingEditIdxRef.current = null;
+    setEditingLineIdx(null);
+  }, []);
+
   return {
     lines,
     loading,
@@ -714,7 +804,13 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
     pendingScheduleFix,
     applyScheduleFix,
     discardScheduleFix,
+    pendingActionsBatch,
+    applyPendingActions,
+    discardPendingActions,
     latestSuggestionBatch,
     dismissSuggestionBatch,
+    startEdit,
+    editingLineIdx,
+    cancelEdit,
   };
 }

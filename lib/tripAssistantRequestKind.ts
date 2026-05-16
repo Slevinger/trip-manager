@@ -6,18 +6,21 @@
  *                  `__global__` context is unhelpful and just costs tokens.
  * - `suggestions` → user explicitly asks for actionable proposals to add to the trip.
  *                  The assistant must emit a fenced `trip-suggestions` JSON block in
- *                  addition to the conversational reply. The **array** inside the
- *                  \`trip-suggestions\` fence is what the app iterates for approve/skip;
- *                  keep free-form prose minimal when using this marker.
+ *                  addition to the conversational reply.
+ * - `actions`     → user gives imperative instructions to mutate the trip directly
+ *                  ("add a task", "update the flight time", "rename the step").
+ *                  The assistant must emit a fenced `trip-actions` JSON block and
+ *                  apply it immediately with undo support.
  */
-export type TripAssistantRequestKind = "general" | "specific" | "suggestions";
+export type TripAssistantRequestKind = "general" | "specific" | "suggestions" | "actions";
 
 export const REQUEST_KIND_GENERAL_MARKER = "##general##";
 export const REQUEST_KIND_SPECIFIC_MARKER = "##specific##";
 export const REQUEST_KIND_SUGGESTIONS_MARKER = "##suggestions##";
+export const REQUEST_KIND_ACTIONS_MARKER = "##actions##";
 
 /** Any marker, optionally surrounded by whitespace, on the LAST non-empty line. */
-const TRAILING_MARKER_RE = /\s*##(general|specific|suggestions)##\s*$/i;
+const TRAILING_MARKER_RE = /\s*##(general|specific|suggestions|actions)##\s*$/i;
 
 /**
  * Parses the trailing classification marker the assistant is instructed to emit.
@@ -28,7 +31,7 @@ export function parseTripAssistantRequestKind(replyText: string): TripAssistantR
   const m = TRAILING_MARKER_RE.exec(replyText);
   if (!m) return null;
   const v = m[1].toLowerCase();
-  if (v === "general" || v === "specific" || v === "suggestions") {
+  if (v === "general" || v === "specific" || v === "suggestions" || v === "actions") {
     return v as TripAssistantRequestKind;
   }
   return null;
@@ -139,6 +142,44 @@ export function tripAssistantUserWantsStructuredTripProposals(latestUserText: st
 }
 
 /**
+ * Client-side heuristic: user is giving a direct imperative instruction to mutate the trip
+ * ("add", "update", "change", "set", "rename", "delete", "remove", "mark as done", etc.).
+ *
+ * Runs before each send; when `true`, the client passes `classifiedMessageKind: "actions"`
+ * and the server appends {@link TRIP_ASSISTANT_ACTIONS_APPENDIX}.
+ */
+export function tripAssistantUserWantsActions(latestUserText: string): boolean {
+  const t = (latestUserText ?? "").trim();
+  if (!t || t.length < 3) return false;
+
+  // Must contain at least one clear imperative verb (English + Hebrew).
+  const imperativeVerbs =
+    /\b(add|create|insert|append|put|include)\b.*\b(step|interval|destination|task|stay|transit|activity|flight|hotel|leg|note|title|budget|date)\b/i.test(t) ||
+    /\b(update|change|edit|modify|set|rename|move|push|shift|adjust|extend|shorten|fix|correct|replace)\b/i.test(t) ||
+    /\b(remove|delete|drop|cancel|clear)\b/i.test(t) ||
+    /\bmark\b.*(done|complete|finished|cancelled|in.?progress)\b/i.test(t) ||
+    /\bmake (it|the|this)\b/i.test(t) ||
+    // Hebrew imperative/action verbs
+    /\b(הוסף|צור|הכנס|שנה|עדכן|ערוך|קבע|הזז|מחק|הסר|בטל|שנה שם|סמן|הארך|קצר|תקן)\b/.test(t);
+
+  if (!imperativeVerbs) return false;
+
+  // Exclude pure question forms (those are suggestions or specific).
+  const isQuestion =
+    /^\s*(what|which|where|when|how|why|should|can|could|would|is|are|do|does|did|have|has)\b/i.test(t) ||
+    /\?$/.test(t.trim());
+
+  // Allow questions only when they clearly pair with an action ("can you add..." / "could you update...")
+  if (isQuestion) {
+    const actionQuestion = /\b(can you|could you|please|would you|can we|let's)\b.*(add|update|change|set|remove|delete|rename|move|mark|fix)\b/i.test(t) ||
+      /\b(אפשר|בבקשה|תוכל|נוכל)\b.*(הוסף|שנה|עדכן|מחק|הסר)\b/.test(t);
+    if (!actionQuestion) return false;
+  }
+
+  return true;
+}
+
+/**
  * Appended to the system prompt when the client marks this turn as proposal-shaped so the
  * model emits `##suggestions##` plus a fenced `trip-suggestions` JSON block.
  *
@@ -221,6 +262,32 @@ export const EXPAND_OPTIONS_RETRY_APPENDIX = [
 ].join("\n");
 
 /**
+ * Appended to the system prompt when the client marks this turn as action-shaped so the
+ * model emits `##actions##` plus a fenced `trip-actions` JSON block that the executor
+ * applies immediately (with undo support) to the trip.
+ */
+export const TRIP_ASSISTANT_ACTIONS_APPENDIX = [
+  "",
+  "### Server classification (this turn)",
+  "The user's latest message was classified as a **direct imperative instruction** — the user wants to mutate the trip right now (e.g. add/update/remove a step, destination, interval, task, or trip-level field).",
+  "",
+  "**Your job:**",
+  "1. Reply with ONE short sentence confirming what you are doing (e.g. \"I've added the snorkeling activity to your Koh Tao stay.\").",
+  "2. Emit exactly ONE fenced `trip-actions` block as specified in the `##actions##` contract above.",
+  `3. End your final line with exactly ${REQUEST_KIND_ACTIONS_MARKER}.`,
+  "",
+  "**Clarify-first gate:**",
+  "If the user's instruction is genuinely ambiguous (you cannot determine the correct step/interval/destination/task ID from the trip JSON), ask EXACTLY ONE focused question, end with `##specific##`, and emit NO `trip-actions` fence.",
+  "You MAY infer IDs from context — only ask when you truly cannot.",
+  "",
+  "**ID discipline:**",
+  "All `stepId`, `intervalId`, `destinationId`, and `taskId` values in the action objects MUST be real IDs copied verbatim from `trip.steps`, `trip.destinations`, or `trip.tasks` in the system prompt. Never invent IDs for existing entities.",
+  "",
+  "**Sequence:**",
+  "If the action requires multiple steps (e.g. add_destination then add_step), emit them in the correct dependency order inside the same array.",
+].join("\n");
+
+/**
  * The system-prompt fragment instructing the assistant to append a classification
  * marker on the very last line. Kept here so prompt + parser stay in sync.
  */
@@ -231,5 +298,6 @@ export const TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION = [
   `- ${REQUEST_KIND_GENERAL_MARKER}     → use when the user's latest message is about THEM as a traveler (likes, dislikes, hobbies, music, food preferences, lifestyle, pace, budget style, future trips, or cross-trip questions).`,
   `- ${REQUEST_KIND_SPECIFIC_MARKER}    → use when the user's latest message is about THIS trip's concrete details (a step, place, date, booking, route, price, schedule, document).`,
   `- ${REQUEST_KIND_SUGGESTIONS_MARKER} → use when the user explicitly asks you to PROPOSE additions to the trip queue (stays, transit, or activities they should consider). When you pick this marker you MUST include the fenced \`trip-suggestions\` JSON block described above — a **top-level JSON array** \`[...]\` of \`TripRecommendation\` objects that the app will iterate; keep normal chat prose **short** and do **not** mirror the same alternatives again as markdown lists/tables/articles. Bind places to existing \`trip.destinations[].id\` values whenever they match (do not invent parallel ids). For activity options tied to a stay in \`trip.steps\`, set \`hostStayStepId\` AND \`targetStepId\` to that stay step's \`id\`. Set \`targetStepId\` on any option whose interval falls inside an existing step of the same kind — only omit it when no existing step covers those dates. If you cannot, choose \`${REQUEST_KIND_SPECIFIC_MARKER}\` or \`${REQUEST_KIND_GENERAL_MARKER}\` instead.`,
+  `- ${REQUEST_KIND_ACTIONS_MARKER}     → use when the user gives a direct imperative instruction to mutate the trip immediately (add, update, remove, rename, change a step/interval/destination/task/budget/date). You MUST emit a fenced \`trip-actions\` JSON block as described in the \`##actions##\` contract. All IDs must be real IDs from the trip JSON. If the instruction is ambiguous, choose \`${REQUEST_KIND_SPECIFIC_MARKER}\` and ask one focused question instead.`,
   "If both apply, pick the dominant intent. Never omit the marker. Never invent other markers.",
 ].join("\n");

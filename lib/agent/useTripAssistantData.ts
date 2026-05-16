@@ -79,6 +79,7 @@ export function useTripAssistantData(trip: Trip | null): UseTripAssistantDataRes
       .map((e) => ({
         tripId: e.tripId,
         from: e.from,
+        ...(e.fromDisplayName ? { fromDisplayName: e.fromDisplayName } : {}),
         content: e.content,
         timeStamp: new Date(e.createdAtMs).toISOString(),
         ...(e.memoryCompressed === true ? { memoryCompressed: true as const } : {}),

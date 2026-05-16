@@ -107,6 +107,31 @@ export async function appendSharedTripThreadTurn(opts: {
 }
 
 /**
+ * Marks all thread entries at or after `afterMs` as inactive.
+ * Used when the user edits a sent message — removes all history from that point onward.
+ */
+export async function truncateSharedTripThreadAfterMs(
+  tripId: string,
+  afterMs: number
+): Promise<void> {
+  const tid = tripId.trim();
+  if (!tid) return;
+
+  const auth = getClientAuth();
+  const token = await auth?.currentUser?.getIdToken();
+  if (!token) return;
+
+  await fetch("/api/chat/shared-trip-thread-truncate", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ tripId: tid, afterMs }),
+  }).catch(() => {});
+}
+
+/**
  * Live shared-thread updates: polls GET `/api/chat/shared-trip-thread` (Admin-backed, same
  * membership as append) so client Firestore rules cannot block reads. If the server returns
  * 503 (no service account in dev), falls back to a direct Firestore `onSnapshot` without

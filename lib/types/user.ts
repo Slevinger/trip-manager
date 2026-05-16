@@ -12,6 +12,8 @@ export type Email = string;
 export interface TripChatMessage {
   tripId: string;
   from: "agent" | Email;
+  /** Display name of the human speaker (absent for agent lines). */
+  fromDisplayName?: string;
   content: string;
   /** ISO 8601 (Firestore-serializable). */
   timeStamp: string;
