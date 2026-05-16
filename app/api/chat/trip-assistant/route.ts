@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import path from "path";
-const execFileAsync = promisify(execFile);
 import {
   buildTripAssistantSystemPrompt,
   TRIP_ASSISTANT_WEB_REFINE_APPENDIX,
@@ -169,37 +165,6 @@ function isBookingPlatformUrl(url: string): boolean {
 }
 
 
-interface OgFetcherResult { imageUrl: string; priceNote?: string }
-
-/**
- * Scrapes Booking.com via og-fetcher (Playwright/headless Chromium).
- * Uses --json output to get image URL + live price when dates are provided.
- */
-async function fetchImageViaOgFetcher(
-  label: string,
-  dates?: { checkin: string; checkout: string; adults: number }
-): Promise<OgFetcherResult | null> {
-  try {
-    const cliPath = path.join(process.cwd(), "node_modules", "og-fetcher", "cli.js");
-    const extraArgs: string[] = ["--json"];
-    if (dates) {
-      extraArgs.push("--checkin", dates.checkin, "--checkout", dates.checkout, "--adults", String(dates.adults));
-    }
-    const { stdout } = await execFileAsync("node", [cliPath, ...extraArgs, label], { timeout: 30_000 });
-    const raw = stdout.trim();
-    if (!raw) return null;
-    let parsed: { url?: string; priceNote?: string };
-    try { parsed = JSON.parse(raw) as typeof parsed; } catch { return null; }
-    const imageUrl = parsed.url?.trim();
-    if (!imageUrl) return null;
-    try { new URL(imageUrl); } catch { return null; }
-    console.log(`[og-fetcher] found image for "${label}": ${imageUrl}${parsed.priceNote ? ` | price: ${parsed.priceNote}` : ""}`);
-    return { imageUrl, priceNote: parsed.priceNote || undefined };
-  } catch (err) {
-    console.log(`[og-fetcher] no result for "${label}": ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
-}
 
 /** Searches Wikipedia for `name` and returns the article's og:image if found. */
 async function fetchWikipediaOgImage(name: string): Promise<string | null> {
@@ -256,76 +221,50 @@ function makeSemaphore(limit: number) {
 /** One semaphore shared across a single enrichment pass — max 2 concurrent LLM image lookups. */
 const IMAGE_LLM_CONCURRENCY = 2;
 
-/** Deduplicates in-flight og-fetcher calls so the same label is never scraped twice at once. */
-const imageLlmInFlight = new Map<string, Promise<OgFetcherResult | null>>();
-
-async function fetchImageViaOgFetcherDeduped(
-  label: string,
-  sem: ReturnType<typeof makeSemaphore>,
-  dates?: { checkin: string; checkout: string; adults: number }
-): Promise<OgFetcherResult | null> {
-  const key = label.trim().toLowerCase();
-  const existing = imageLlmInFlight.get(key);
-  if (existing) return existing;
-  const p = (async () => {
-    await sem.acquire();
-    try {
-      return await fetchImageViaOgFetcher(label, dates);
-    } finally {
-      sem.release();
-      imageLlmInFlight.delete(key);
-    }
-  })();
-  imageLlmInFlight.set(key, p);
-  return p;
-}
-
 interface ResolvedOptionData { imageUrl: string; priceNote?: string }
 
 /**
- * Resolves the best image (and live price when dates provided) for a single suggestion option.
- * Fallback chain:
- * 0. Global Firestore cache → instant hit when already known.
+ * Resolves fast image sources for a single suggestion option.
+ * Fallback chain (synchronous / cheap only — og-fetcher is handled separately):
+ * 0. Global Firestore cache → instant hit.
  * 1. Verify the LLM-provided imageUrl via HEAD request.
- * 2. Fetch og:image from opt.url (non-OTA only).
- * 3. Scrape Booking.com via og-fetcher (Playwright, semaphore-limited) — also returns live price.
- * 4. Wikipedia fallback by label name.
- * Any resolved imageUrl is written to the cache for future requests.
+ * 2. Fetch og:image from opt.url (non-booking-platform only).
+ * 3. Wikipedia fallback by label name.
+ *
+ * Returns null when none of the fast sources yield an image; the caller should
+ * then enqueue an og-queue item so the client fetches the image in the background.
  */
-async function resolveOptionImage(
+async function resolveOptionImageFast(
   opt: { id: string; label?: string; url?: string; imageUrl?: string },
   sem: ReturnType<typeof makeSemaphore>,
-  dates?: { checkin: string; checkout: string; adults: number }
 ): Promise<ResolvedOptionData | null> {
-  const cacheAndReturn = async (url: string, source: string, priceNote?: string): Promise<ResolvedOptionData> => {
+  const cacheAndReturn = async (url: string, source: string): Promise<ResolvedOptionData> => {
     if (opt.label) void setCachedVenueImage(opt.label, url, source);
-    return { imageUrl: url, priceNote };
+    return { imageUrl: url };
   };
 
-  // Step 0: global cache check — skip all network work on a hit.
-  // Note: cached entries don't carry price (no dates at cache time), so we still run
-  // og-fetcher for price if dates are available and no cached price exists.
+  // Step 0: global cache.
   if (opt.label) {
     const cached = await getCachedVenueImage(opt.label);
     if (cached) {
       console.log(`[og-cache] hit for "${opt.label}": ${cached}`);
-      // If we have dates, still fetch live price via og-fetcher (image won't re-scrape since cache hit)
-      if (dates) {
-        const scraped = await fetchImageViaOgFetcherDeduped(opt.label, sem, dates);
-        if (scraped?.priceNote) return { imageUrl: cached, priceNote: scraped.priceNote };
-      }
       return { imageUrl: cached };
     }
   }
 
   // Step 1: verify LLM-provided imageUrl.
   if (opt.imageUrl) {
-    const valid = await verifyImageUrl(opt.imageUrl);
-    if (valid) {
-      console.log(`[og-enrich] verified direct image: ${opt.imageUrl}`);
-      return cacheAndReturn(opt.imageUrl, "llm_direct");
+    await sem.acquire();
+    try {
+      const valid = await verifyImageUrl(opt.imageUrl);
+      if (valid) {
+        console.log(`[og-enrich] verified direct image: ${opt.imageUrl}`);
+        return cacheAndReturn(opt.imageUrl, "llm_direct");
+      }
+      console.log(`[og-enrich] dead/hallucinated imageUrl: ${opt.imageUrl} — skipping`);
+    } finally {
+      sem.release();
     }
-    console.log(`[og-enrich] dead/hallucinated imageUrl: ${opt.imageUrl} — skipping`);
   }
 
   // Step 2: fetch og:image from opt.url (non-OTA only).
@@ -337,13 +276,7 @@ async function resolveOptionImage(
     }
   }
 
-  // Step 3: og-fetcher — scrapes Booking.com via Playwright; returns image + live price.
-  if (opt.label) {
-    const scraped = await fetchImageViaOgFetcherDeduped(opt.label, sem, dates);
-    if (scraped) return cacheAndReturn(scraped.imageUrl, "og-fetcher", scraped.priceNote);
-  }
-
-  // Step 4: final fallback — Wikipedia by label.
+  // Step 3: Wikipedia fallback.
   if (opt.label) {
     const wikiImage = await fetchWikipediaOgImage(opt.label);
     if (wikiImage) return cacheAndReturn(wikiImage, "wikipedia");
@@ -397,18 +330,34 @@ function buildSuggestionsStreamResponse(opts: {
         model,
       });
 
-      // 2. Resolve images (+ live prices) concurrently and stream patches as they arrive.
+      // 2. Resolve fast images concurrently and stream patches as they arrive.
+      //    Hotel (stay) options with a bookingUrl are handled client-side via og-queue
+      //    so the stream can close without waiting for Playwright.
       const sem = makeSemaphore(IMAGE_LLM_CONCURRENCY);
+      const ogQueue: { recId: string; optionId: string; label: string }[] = [];
+
       await Promise.allSettled(
         suggestions.flatMap((rec) =>
           rec.options.map(async (opt) => {
-            const resolved = await resolveOptionImage(opt, sem, dates);
+            const optAny = opt as { bookingUrl?: string; imageUrl?: string };
+            const isHotel = rec.kind === "stay";
+            const hasBookingUrl = isHotel && Boolean(optAny.bookingUrl && isBookingPlatformUrl(optAny.bookingUrl));
+
+            const resolved = await resolveOptionImageFast(opt, sem);
             if (resolved) {
-              write({ type: "image", recId: rec.id, optionId: opt.id, imageUrl: resolved.imageUrl, ...(resolved.priceNote ? { priceNote: resolved.priceNote } : {}) });
+              write({ type: "image", recId: rec.id, optionId: opt.id, imageUrl: resolved.imageUrl });
+            } else if (hasBookingUrl && opt.label) {
+              // No fast image found — queue for client-side og-fetcher.
+              ogQueue.push({ recId: rec.id, optionId: opt.id, label: opt.label });
             }
           })
         )
       );
+
+      // 3. Emit og-queue so client can fetch hotel images in the background.
+      if (ogQueue.length > 0) {
+        write({ type: "og-queue", items: ogQueue, dates: dates ?? null });
+      }
 
       controller.close();
     },

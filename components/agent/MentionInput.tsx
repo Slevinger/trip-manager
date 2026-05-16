@@ -7,6 +7,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
   type ReactNode,
+  type UIEvent,
 } from "react";
 import { Lock, Users } from "lucide-react";
 import { cn } from "@/lib/ui/cn";
@@ -92,6 +93,7 @@ export function MentionInput({
   className,
 }: MentionInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
   const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -168,7 +170,7 @@ export function MentionInput({
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       onSubmit();
     }
@@ -178,6 +180,12 @@ export function MentionInput({
     const ta = textareaRef.current;
     if (!ta) return;
     refreshSuggestions(value, ta.selectionStart ?? value.length);
+  }
+
+  function handleScroll(e: UIEvent<HTMLTextAreaElement>) {
+    if (mirrorRef.current) {
+      mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+    }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -190,8 +198,9 @@ export function MentionInput({
        * overflow is hidden so it never shows its own scrollbar.
        */}
       <div
+        ref={mirrorRef}
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl px-3 py-2 text-sm leading-relaxed text-[var(--color-foreground)]"
+        className="pointer-events-none absolute inset-0 overflow-y-auto rounded-2xl px-3 py-2 text-sm leading-relaxed text-[var(--color-foreground)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ fontFamily: "inherit", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
       >
         {value ? renderHighlighted(value) : null}
@@ -213,6 +222,7 @@ export function MentionInput({
         onKeyDown={handleKeyDown}
         onSelect={handleCursorMove}
         onClick={handleCursorMove}
+        onScroll={handleScroll}
         spellCheck
         className="relative z-10 min-h-10 w-full resize-none rounded-2xl border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-[var(--color-muted-foreground)] focus:ring-1 focus:ring-[var(--color-brand)]"
         style={{ color: "transparent", caretColor: "var(--color-foreground)", overflowY: "hidden" }}

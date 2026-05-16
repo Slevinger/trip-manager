@@ -131,7 +131,7 @@ function FloatingTrigger({
         whileTap={reducedMotion ? undefined : { scale: 0.96 }}
         aria-label={open ? t("agent.closeLabel") : t("agent.openLabel")}
         className={cn(
-          "fixed bottom-20 end-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-brand text-white shadow-[var(--shadow-float)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-brand)]/40 lg:bottom-6 lg:end-6",
+          "fixed bottom-20 end-4 z-[47] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-brand text-white shadow-[var(--shadow-float)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-brand)]/40 lg:bottom-6 lg:end-6",
           disabled ? "opacity-50" : ""
         )}
       >
@@ -151,7 +151,7 @@ function FloatingTrigger({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] lg:hidden"
+              className="fixed inset-0 z-[48] bg-black/30 backdrop-blur-[2px] lg:hidden"
               onClick={() => onOpenChange(false)}
               onWheel={(e) => e.stopPropagation()}
             />
@@ -163,7 +163,7 @@ function FloatingTrigger({
               role="dialog"
               aria-modal="true"
               aria-label={t("agent.title")}
-              className="fixed bottom-24 left-3 right-3 z-50 mx-auto flex max-h-[78dvh] min-h-0 w-auto max-w-md flex-col overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-float)] lg:start-auto lg:end-6 lg:mx-0 lg:w-[28rem] lg:max-w-none"
+              className="fixed bottom-24 left-3 right-3 z-[49] mx-auto flex max-h-[78dvh] min-h-0 w-auto max-w-md flex-col overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-float)] lg:start-auto lg:end-6 lg:mx-0 lg:w-[28rem] lg:max-w-none"
             >
               {children}
             </motion.div>
@@ -212,6 +212,9 @@ function DockPanel({
   // any async persist so image patches never land on a stale (pre-recommendation) snapshot.
   const latestTripRef = useRef(trip);
   latestTripRef.current = trip;
+
+  /** Maps `[refine] "…"` short tags → full tighten prompts so ChatTab can expand on send. */
+  const tightenPromptsRef = useRef<Map<string, string>>(new Map());
 
   const onAddRecommendations = useCallback(
     async (baseTrip: Trip, recs: TripRecommendation[]) => {
@@ -329,6 +332,7 @@ function DockPanel({
             isOwner={isOwner}
             tripId={tripId}
             onViewSuggestions={() => onTabChange("suggestions")}
+            tightenPromptsRef={tightenPromptsRef}
           />
         </TabsContent>
 
@@ -349,14 +353,16 @@ function DockPanel({
             onTighten={(rec, option) => {
               const label = option.label?.trim() || option.interval.title.trim();
               const prefix = rec.visibleTo && rec.visibleTo.length > 0 ? "@private " : "";
-              assistant.prepare(
+              const shortTag = `[refine] "${label}"`;
+              const fullPrompt =
                 `${prefix}Dig deeper on "${label}" (${rec.kind}${rec.title ? ` — "${rec.title}"` : ""}). ` +
-                  `Search Tripadvisor first and suggest 3 specific alternatives for this exact slot. For each option: ` +
-                  `(1) \`url\` = Tripadvisor search URL: tripadvisor.com/Search?q={Name+City} (for reviews); ` +
-                  `(2) \`bookingUrl\` = Booking.com search URL with trip dates: booking.com/searchresults.html?ss={Name+City}&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD&group_adults=N&no_rooms=1 (for availability); ` +
-                  `(3) \`imageUrl\` = direct CDN image URL from the Tripadvisor listing's og:image meta tag (e.g. https://media-cdn.tripadvisor.com/media/photo-s/.../.jpg) — NOT a homepage; ` +
-                  `(4) specific price in local currency for \`priceNote\`, Tripadvisor rating, what's included, and why it fits this trip.`
-              );
+                `Search Tripadvisor first and suggest 3 specific alternatives for this exact slot. For each option: ` +
+                `(1) \`url\` = Tripadvisor search URL: tripadvisor.com/Search?q={Name+City} (for reviews); ` +
+                `(2) \`bookingUrl\` = Booking.com search URL with trip dates: booking.com/searchresults.html?ss={Name+City}&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD&group_adults=N&no_rooms=1 (for availability); ` +
+                `(3) \`imageUrl\` = direct CDN image URL from the Tripadvisor listing's og:image meta tag (e.g. https://media-cdn.tripadvisor.com/media/photo-s/.../.jpg) — NOT a homepage; ` +
+                `(4) specific price in local currency for \`priceNote\`, Tripadvisor rating, what's included, and why it fits this trip.`;
+              tightenPromptsRef.current.set(shortTag, fullPrompt);
+              assistant.prepare(shortTag);
               onTabChange("chat");
             }}
           />
@@ -392,12 +398,14 @@ function ChatTab({
   isOwner,
   tripId,
   onViewSuggestions,
+  tightenPromptsRef,
 }: {
   assistant: ReturnType<typeof useTripAssistant>;
   screen: ReturnType<typeof activeTripScreen>;
   isOwner: boolean;
   tripId: string;
   onViewSuggestions: () => void;
+  tightenPromptsRef: React.RefObject<Map<string, string>>;
 }) {
   const { t } = useI18n();
   const draftKey = `chat-draft:${tripId}`;
@@ -429,16 +437,27 @@ function ChatTab({
     // Expand [action-tag] prefix to the full action prompt + any user context.
     let sendText = text;
     let sendOpts: Parameters<typeof assistant.send>[1];
-    const tagMatch = text.match(/^\[([\w-]+)\]\s*([\s\S]*)/);
-    if (tagMatch) {
-      const action = actions.find((a) => a.id === tagMatch[1]);
-      if (action) {
-        const userContext = tagMatch[2].trim();
-        sendText = userContext ? `${action.prompt}\n\n${userContext}` : action.prompt;
-        // Mirror the same forceKind the Actions tab uses so the route handles
-        // effects (e.g. schedule-fix patches) the same way.
-        if (action.effect === "schedule-check") {
-          sendOpts = { forceKind: "specific" };
+
+    // [refine] "label" → expand to stored tighten prompt (may include user-appended context).
+    const refineMatch = text.match(/^(\[refine\]\s*"[^"]*")([\s\S]*)/);
+    if (refineMatch) {
+      const stored = tightenPromptsRef.current?.get(refineMatch[1].trim());
+      if (stored) {
+        const extra = refineMatch[2].trim();
+        sendText = extra ? `${stored}\n\n${extra}` : stored;
+      }
+    } else {
+      const tagMatch = text.match(/^\[([\w-]+)\]\s*([\s\S]*)/);
+      if (tagMatch) {
+        const action = actions.find((a) => a.id === tagMatch[1]);
+        if (action) {
+          const userContext = tagMatch[2].trim();
+          sendText = userContext ? `${action.prompt}\n\n${userContext}` : action.prompt;
+          // Mirror the same forceKind the Actions tab uses so the route handles
+          // effects (e.g. schedule-fix patches) the same way.
+          if (action.effect === "schedule-check") {
+            sendOpts = { forceKind: "specific" };
+          }
         }
       }
     }

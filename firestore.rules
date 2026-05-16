@@ -465,5 +465,14 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if false;
     }
+
+    /**
+     * Silent exception log — written client-side by logCaughtException.
+     * Any signed-in user may create; nobody may read or update via client.
+     */
+    match /caught_exceptions/{docId} {
+      allow create: if signedIn();
+      allow read, update, delete: if false;
+    }
   }
 }

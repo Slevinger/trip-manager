@@ -500,6 +500,8 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
           let buffer = "";
           let resultHandled = false;
           let earlyReturn = false;
+          let ogQueue: { recId: string; optionId: string; label: string }[] = [];
+          let ogDates: { checkin: string; checkout: string; adults: number } | null = null;
 
           outer: while (true) {
             const { done, value } = await reader.read();
@@ -529,12 +531,45 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
                     return next;
                   });
                 }
+              } else if (chunk.type === "og-queue") {
+                const items = Array.isArray(chunk.items) ? chunk.items as { recId: string; optionId: string; label: string }[] : [];
+                ogQueue = items;
+                ogDates = chunk.dates as typeof ogDates ?? null;
               }
             }
           }
 
-          setPendingImageOptIds(new Set());
+          // Clear pending IDs except for og-queue items (they'll be cleared when background fetch completes).
+          const ogPendingIds = new Set(ogQueue.map((i) => i.optionId));
+          setPendingImageOptIds(ogPendingIds);
+
           if (earlyReturn) return;
+
+          // Fire og-fetcher background requests for hotel options.
+          if (ogQueue.length > 0) {
+            void Promise.allSettled(
+              ogQueue.map(async ({ recId, optionId, label }) => {
+                try {
+                  const res = await fetch("/api/chat/og-image", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ label, recId, optionId, dates: ogDates }),
+                  });
+                  if (!res.ok) return;
+                  const data = (await res.json().catch(() => ({}))) as { imageUrl?: string; priceNote?: string };
+                  if (data.imageUrl) {
+                    opts.onUpdateOptionImage?.(recId, optionId, data.imageUrl, data.priceNote);
+                  }
+                } catch { /* non-fatal */ } finally {
+                  setPendingImageOptIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(optionId);
+                    return next;
+                  });
+                }
+              })
+            );
+          }
           reply ??= "(No reply)";
           requestKind ??= undefined;
         } else {

@@ -52,10 +52,10 @@ export function TripDestinationsRoster({
   // Group destinations by city/step center when steps are available.
   const cityGroups = useMemo(() => {
     if (!steps?.length) return null;
-    const grouped = collectStayGroupedTripPlacePicks(destinations, steps);
+    const grouped = collectStayGroupedTripPlacePicks(steps, destinations);
     const destById = new Map(destinations.map((d) => [d.id, d]));
 
-    const groups: Array<{ label: string; dests: Destination[] }> = grouped.stayGroups
+    const groups: Array<{ key: string; label: string; dests: Destination[] }> = grouped.stayGroups
       .map((g) => {
         const ids = new Set([
           g.centerPick.destinationId,
@@ -65,7 +65,7 @@ export function TripDestinationsRoster({
           .filter((id): id is string => Boolean(id))
           .map((id) => destById.get(id))
           .filter((d): d is Destination => Boolean(d));
-        return { label: g.stayLabel, dests };
+        return { key: g.stepId, label: g.stayLabel, dests };
       })
       .filter((g) => g.dests.length > 0);
 
@@ -77,7 +77,7 @@ export function TripDestinationsRoster({
       .filter((p) => p.destinationId && !coveredIds.has(p.destinationId))
       .map((p) => destById.get(p.destinationId!))
       .filter((d): d is Destination => Boolean(d));
-    if (other.length > 0) groups.push({ label: "Other", dests: other });
+    if (other.length > 0) groups.push({ key: "other", label: "Other", dests: other });
 
     return groups;
   }, [destinations, steps]);
@@ -124,8 +124,8 @@ export function TripDestinationsRoster({
         {manageHint && !editable ? t("view.editPlaceHint") : null}
       </p>
       <div className="mt-3 space-y-4">
-        {(cityGroups ?? [{ label: "", dests: rows ?? [] }]).map((group) => (
-          <div key={group.label}>
+        {(cityGroups ?? [{ key: "all", label: "", dests: rows ?? [] }]).map((group) => (
+          <div key={group.key}>
             {group.label ? (
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
                 {group.label}
