@@ -32,6 +32,8 @@ export interface ChatLine {
   fromDisplayName?: string;
   /** Timestamp (ms) matching the Firestore `createdAtMs` field — used for thread truncation when editing. */
   sentAtMs?: number;
+  /** True only for messages sent or received during the current browser session (not loaded from history). */
+  fromCurrentSession?: boolean;
 }
 
 export const EVOLVE_COMMAND = "#evolve";
@@ -355,6 +357,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
         role: "user",
         content: text,
         sentAtMs: contextAtMs,
+        fromCurrentSession: true,
         ...(userDisplayName ? { fromDisplayName: userDisplayName } : {}),
       };
       const nextLines: ChatLine[] = [...baseLines, userLine];
@@ -545,7 +548,7 @@ export function useTripAssistant(opts: UseTripAssistantOptions): UseTripAssistan
             setPendingActionsBatch({ actions, count: actions.length });
           }
 
-          setLines((prev) => [...prev, { role: "assistant", content: reply, sentAtMs: contextAtMs + 1 }]);
+          setLines((prev) => [...prev, { role: "assistant", content: reply, sentAtMs: contextAtMs + 1, fromCurrentSession: true }]);
           if (suggestions.length > 0) {
             setPendingImageOptIds(new Set(suggestions.flatMap((s) => s.options.map((o) => o.id))));
             setLatestSuggestionBatch({ count: suggestions.length });

@@ -577,7 +577,11 @@ function ChatTab({
                   </div>
                 ) : null}
                 <div className={cn("px-3 pb-2", isUser ? "pt-0.5" : "pt-2")}>
-                  <TripAssistantMessageBody content={displayContent} variant={line.role} />
+                  <TripAssistantMessageBody
+                    content={displayContent}
+                    variant={line.role}
+                    collapsible={!line.fromCurrentSession}
+                  />
                 </div>
               </div>
             </div>
