@@ -198,7 +198,7 @@ export function TransitStepWizardPanel({
                   type="number"
                   min={0}
                   step="any"
-                  className={WIZARD_INPUT_CLASS}
+                  className={WIZARD_INPUT_CLASS_LARGE}
                   value={draft.totalManualPrice != null ? String(draft.totalManualPrice.amount) : ""}
                   onChange={(e) => {
                     const raw = e.target.value.trim();
