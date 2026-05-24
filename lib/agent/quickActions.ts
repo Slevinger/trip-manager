@@ -156,6 +156,7 @@ const ACTIONS_BY_SCREEN: Record<TripScreen, AgentQuickAction[]> = {
   map: MAP_ACTIONS,
   budget: BUDGET_ACTIONS,
   packing: PACKING_ACTIONS,
+  todos: COMMON_OVERVIEW,
   collab: COLLAB_ACTIONS,
   manage: COMMON_OVERVIEW,
 };

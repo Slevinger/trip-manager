@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckSquare, Circle, Clock, Lock, Plus, Trash2, XCircle } from "lucide-react";
+import {
+  CheckSquare,
+  ChevronDown,
+  Circle,
+  Clock,
+  Lock,
+  Plus,
+  Trash2,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
 import { usePrivateTripTasks } from "@/lib/trip/usePrivateTripTasks";
@@ -13,6 +23,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/ui/empty";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { newId } from "@/lib/canonicalIds";
 import type { TaskStatus, Trip, TripTask } from "@/lib/types/trip";
 
@@ -20,19 +36,20 @@ type StatusFilter = "all" | TaskStatus;
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"];
 
-const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
+const STATUS_ICON: Record<TaskStatus, LucideIcon> = {
   todo: Circle,
   in_progress: Clock,
   done: CheckSquare,
   cancelled: XCircle,
 };
 
-const STATUS_TONE: Record<TaskStatus, string> = {
+const STATUS_COLOR: Record<TaskStatus, string> = {
   todo: "text-[var(--color-muted-foreground)]",
   in_progress: "text-[var(--color-brand)]",
   done: "text-emerald-500",
   cancelled: "text-red-400",
 };
+
 
 export function TodoScreen({ tripId }: { tripId: string }) {
   const { trip, loadState, persistTrip } = useTripData(tripId);
@@ -247,15 +264,12 @@ function TaskList({
 }) {
   return (
     <ul className="divide-y divide-[var(--color-border)]">
-      {tasks.map((task) => {
-        const Icon = STATUS_ICON[task.status];
-        return (
+      {tasks.map((task) => (
           <li key={task.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
             <Checkbox
               checked={task.status === "done"}
               onCheckedChange={() => onToggle(task)}
             />
-            <Icon className={`h-4 w-4 shrink-0 ${STATUS_TONE[task.status]}`} />
             <input
               className={
                 "min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-muted-foreground)] " +
@@ -266,17 +280,11 @@ function TaskList({
               value={task.title}
               onChange={(e) => onUpdateTitle(task.id, e.target.value)}
             />
-            <select
+            <StatusPicker
               value={task.status}
-              onChange={(e) => onChangeStatus(task.id, e.target.value as TaskStatus)}
-              className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11px] font-medium text-[var(--color-foreground)] outline-none"
-            >
-              {STATUS_ORDER.map((s) => (
-                <option key={s} value={s}>
-                  {statusLabels[s]}
-                </option>
-              ))}
-            </select>
+              statusLabels={statusLabels}
+              onChange={(s) => onChangeStatus(task.id, s)}
+            />
             <Button
               size="iconSm"
               variant="ghost"
@@ -286,9 +294,51 @@ function TaskList({
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </li>
-        );
-      })}
+      ))}
     </ul>
+  );
+}
+
+function StatusPicker({
+  value,
+  statusLabels,
+  onChange,
+}: {
+  value: TaskStatus;
+  statusLabels: Record<TaskStatus, string>;
+  onChange: (s: TaskStatus) => void;
+}) {
+  const Icon = STATUS_ICON[value];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={
+            "flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 transition-colors hover:bg-[var(--color-surface-muted)] " +
+            STATUS_COLOR[value]
+          }
+        >
+          <Icon className="h-4 w-4" />
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {STATUS_ORDER.map((s) => {
+          const SIcon = STATUS_ICON[s];
+          return (
+            <DropdownMenuItem
+              key={s}
+              onClick={() => onChange(s)}
+              className={s === value ? "bg-[var(--color-surface-muted)]" : ""}
+            >
+              <SIcon className={`h-4 w-4 ${STATUS_COLOR[s]}`} />
+              <span className="text-sm">{statusLabels[s]}</span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
