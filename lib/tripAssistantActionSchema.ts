@@ -18,6 +18,7 @@ import type {
   ActivityType,
   Destination,
   Money,
+  PackingCategory,
   StayStepInterval,
   StayType,
   TaskStatus,
@@ -57,7 +58,9 @@ export type TripAction =
   // ── Tasks ────────────────────────────────────────────────────────────────
   | { type: "add_task";    task: Omit<TripTask, "id"> }
   | { type: "update_task"; taskId: string; patch: Partial<TripTask> }
-  | { type: "remove_task"; taskId: string };
+  | { type: "remove_task"; taskId: string }
+  // ── Packing list ─────────────────────────────────────────────────────────
+  | { type: "add_packing_items"; items: Array<{ name: string; category: PackingCategory; quantity?: number }> };
 
 /** Fenced block tag used in prompt + parser. */
 export const TRIP_ACTIONS_FENCE = "trip-actions";
@@ -177,6 +180,16 @@ export function buildTripAssistantActionsSchemaPrompt(): string {
     '  "patch": { "title": "...", "status": "done", "notes": "..." } }',
     "",
     '{ "type": "remove_task", "taskId": "<existing task id>" }',
+    "",
+    "// ── Packing list ─────────────────────────────────────────────────────",
+    '{ "type": "add_packing_items",',
+    '  "items": [',
+    '    { "name": "Sunscreen SPF 50", "category": "toiletries", "quantity": 1 },',
+    '    { "name": "Hiking boots", "category": "gear" }',
+    "  ]",
+    "}",
+    "// category must be one of: \"documents\" | \"clothes\" | \"toiletries\" | \"tech\" | \"health\" | \"gear\" | \"misc\"",
+    "// Duplicates (same category + name, case-insensitive) are silently skipped.",
     "```",
     "",
     "Authoring rules:",
@@ -499,6 +512,20 @@ function readAction(raw: unknown): TripAction | null {
       if (!taskId) return null;
       return { type: "remove_task", taskId };
     }
+    case "add_packing_items": {
+      if (!Array.isArray(raw.items)) return null;
+      const PACKING_CATEGORIES = new Set<string>(["documents","clothes","toiletries","tech","health","gear","misc"]);
+      const items = (raw.items as unknown[]).flatMap((it): Array<{ name: string; category: PackingCategory; quantity?: number }> => {
+        if (!isRecord(it)) return [];
+        const name = safeStr(it.name, 300);
+        const category = safeStr(it.category, 40);
+        if (!name || !category || !PACKING_CATEGORIES.has(category)) return [];
+        const quantity = safeNum(it.quantity);
+        return [{ name, category: category as PackingCategory, ...(quantity !== undefined ? { quantity } : {}) }];
+      });
+      if (items.length === 0) return null;
+      return { type: "add_packing_items", items };
+    }
     default:
       return null;
   }
@@ -537,6 +564,7 @@ export function extractTripActionsFromReply(replyText: string): {
     "add_destination", "set_destination", "remove_destination",
     "add_step", "update_trip",
     "add_task", "update_task", "remove_task",
+    "add_packing_items",
   ]);
   if (primaryMatches.length === 0) {
     for (const m of replyText.matchAll(ANY_JSON_ARRAY_FENCE_RE)) {

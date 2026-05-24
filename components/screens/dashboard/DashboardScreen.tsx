@@ -35,7 +35,7 @@ export function DashboardScreen() {
   const { t } = useI18n();
   const router = useRouter();
   const { user } = useFirebaseUser();
-  const { trips, loading, error, needsSignIn, saveTrip } = useMyTrips();
+  const { trips, loading, error, needsSignIn, saveTrip, deleteTrip } = useMyTrips();
   const [wizardOpen, setWizardOpen] = useState(false);
 
   const buckets = useMemo(() => {
@@ -97,9 +97,9 @@ export function DashboardScreen() {
         />
       ) : (
         <div className="space-y-10">
-          <Section title={t("dashboard.inProgress")} trips={buckets.in_progress} />
-          <Section title={t("dashboard.upcoming")} trips={buckets.upcoming} />
-          <Section title={t("dashboard.past")} trips={buckets.past} muted />
+          <Section title={t("dashboard.inProgress")} trips={buckets.in_progress} onDelete={deleteTrip} />
+          <Section title={t("dashboard.upcoming")} trips={buckets.upcoming} onDelete={deleteTrip} />
+          <Section title={t("dashboard.past")} trips={buckets.past} muted onDelete={deleteTrip} />
         </div>
       )}
 
@@ -124,10 +124,12 @@ function Section({
   title,
   trips,
   muted,
+  onDelete,
 }: {
   title: string;
   trips: Trip[];
   muted?: boolean;
+  onDelete?: (trip: Trip) => Promise<void>;
 }) {
   if (trips.length === 0) return null;
   return (
@@ -145,7 +147,7 @@ function Section({
         className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
       >
         {trips.map((trip) => (
-          <TripCard key={trip.id} trip={trip} />
+          <TripCard key={trip.id} trip={trip} onDelete={onDelete} />
         ))}
       </motion.div>
     </section>

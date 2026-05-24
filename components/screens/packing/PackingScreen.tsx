@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, avatarInitials } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/ui/empty";
-import { applyTemplate, newPackingItemId, PACKING_TEMPLATES, templateById } from "@/lib/packing/templates";
+import { applyTemplate, newPackingItemId, templateById } from "@/lib/packing/templates";
 import type { PackingCategory, PackingItem, PackingList, Trip } from "@/lib/types/trip";
 import type { MessageKey } from "@/lib/i18n/messages";
 
@@ -155,16 +155,6 @@ function PackingContent({
           </h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">{t("packing.subheading")}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {PACKING_TEMPLATES.map((tpl) => (
-            <Button key={tpl.id} variant="secondary" size="sm" onClick={() => void applyTpl(tpl.id)}>
-              <span aria-hidden className="mr-1">
-                {tpl.emoji}
-              </span>
-              {t(tpl.labelKey)}
-            </Button>
-          ))}
-        </div>
       </header>
 
       <Card>
@@ -199,87 +189,87 @@ function PackingContent({
         </CardContent>
       </Card>
 
-      {filteredItems.length === 0 ? (
+      {filteredItems.length === 0 && (
         <EmptyState
           icon={<ListChecks className="h-7 w-7" />}
           title={t("packing.empty")}
           description={t("packing.subheading")}
         />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {CATEGORY_ORDER.map((cat) => {
-            const list = grouped.get(cat) ?? [];
-            const Icon = CATEGORY_ICON[cat];
-            const packed = list.filter((i) => i.packed).length;
-            const pct = list.length === 0 ? 0 : Math.round((packed / list.length) * 100);
-            return (
-              <Card key={cat}>
-                <CardHeader className="flex-row items-center gap-2 pb-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[var(--color-brand-soft)] text-[var(--color-brand)]">
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <CardTitle className="flex-1 text-sm">{t(CATEGORY_LABELS[cat])}</CardTitle>
-                  <Badge tone="neutral">{`${packed}/${list.length}`}</Badge>
-                </CardHeader>
-                <CardContent>
-                  <Progress value={pct} className="mb-3" tone="brand" />
-                  {list.length === 0 ? (
-                    <p className="text-xs text-[var(--color-muted-foreground)]">
-                      {t("packing.empty")}
-                    </p>
-                  ) : (
-                    <ul className="space-y-1.5">
-                      {list.map((item) => (
-                        <li
-                          key={item.id}
-                          className="flex items-center gap-2 rounded-xl px-1 py-1 hover:bg-[var(--color-surface-muted)]"
-                        >
-                          <Checkbox
-                            checked={item.packed}
-                            onCheckedChange={() => void toggleItem(item)}
-                            aria-label={item.packed ? t("packing.unmarkPacked") : t("packing.markPacked")}
-                          />
-                          <span
-                            className={
-                              "flex-1 text-sm " +
-                              (item.packed
-                                ? "text-[var(--color-muted-foreground)] line-through"
-                                : "text-[var(--color-foreground)]")
-                            }
-                          >
-                            {item.name}
-                            {item.quantity && item.quantity > 1 ? ` × ${item.quantity}` : ""}
-                          </span>
-                          {item.travelerId ? (
-                            <Avatar className="h-5 w-5">
-                              <AvatarFallback className="text-[8px]">
-                                {avatarInitials(travelers.find((t) => t.id === item.travelerId)?.name)}
-                              </AvatarFallback>
-                            </Avatar>
-                          ) : null}
-                          <Button
-                            size="iconSm"
-                            variant="ghost"
-                            onClick={() => void removeItem(item.id)}
-                            aria-label={t("packing.deleteItem")}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <AddItemRow
-                    onAdd={(name) =>
-                      void addItem(name, cat, travelerFilter !== "all" && travelerFilter !== "shared" ? travelerFilter : undefined)
-                    }
-                  />
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
       )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {CATEGORY_ORDER.map((cat) => {
+          const list = grouped.get(cat) ?? [];
+          const Icon = CATEGORY_ICON[cat];
+          const packed = list.filter((i) => i.packed).length;
+          const pct = list.length === 0 ? 0 : Math.round((packed / list.length) * 100);
+          return (
+            <Card key={cat}>
+              <CardHeader className="flex-row items-center gap-2 pb-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[var(--color-brand-soft)] text-[var(--color-brand)]">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <CardTitle className="flex-1 text-sm">{t(CATEGORY_LABELS[cat])}</CardTitle>
+                <Badge tone="neutral">{`${packed}/${list.length}`}</Badge>
+              </CardHeader>
+              <CardContent>
+                <Progress value={pct} className="mb-3" tone="brand" />
+                {list.length === 0 ? (
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    {t("packing.empty")}
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {list.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-center gap-2 rounded-xl px-1 py-1 hover:bg-[var(--color-surface-muted)]"
+                      >
+                        <Checkbox
+                          checked={item.packed}
+                          onCheckedChange={() => void toggleItem(item)}
+                          aria-label={item.packed ? t("packing.unmarkPacked") : t("packing.markPacked")}
+                        />
+                        <span
+                          className={
+                            "flex-1 text-sm " +
+                            (item.packed
+                              ? "text-[var(--color-muted-foreground)] line-through"
+                              : "text-[var(--color-foreground)]")
+                          }
+                        >
+                          {item.name}
+                          {item.quantity && item.quantity > 1 ? ` × ${item.quantity}` : ""}
+                        </span>
+                        {item.travelerId ? (
+                          <Avatar className="h-5 w-5">
+                            <AvatarFallback className="text-[8px]">
+                              {avatarInitials(travelers.find((t) => t.id === item.travelerId)?.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                        ) : null}
+                        <Button
+                          size="iconSm"
+                          variant="ghost"
+                          onClick={() => void removeItem(item.id)}
+                          aria-label={t("packing.deleteItem")}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <AddItemRow
+                  onAdd={(name) =>
+                    void addItem(name, cat, travelerFilter !== "all" && travelerFilter !== "shared" ? travelerFilter : undefined)
+                  }
+                />
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }

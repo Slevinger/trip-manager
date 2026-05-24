@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   CalendarRange,
+  CheckSquare,
   LayoutDashboard,
   ListChecks,
   Map as MapIcon,
@@ -58,6 +59,12 @@ const TRIP_BOTTOM_TABS: BottomTab[] = [
     Icon: ListChecks,
   },
   {
+    href: (id) => (id ? `/trip/${id}/todos` : "/"),
+    match: (p, id) => Boolean(id) && p.startsWith(`/trip/${id}/todos`),
+    labelKey: "shell.todos",
+    Icon: CheckSquare,
+  },
+  {
     href: (id) => (id ? `/trip/${id}/manage` : "/"),
     match: (p, id) => Boolean(id) && p.startsWith(`/trip/${id}/manage`),
     labelKey: "shell.manage",
@@ -83,7 +90,7 @@ export function BottomTabs({ tripId }: { tripId: string | null }) {
       aria-label={t("shell.menu")}
       className="fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--color-border)] bg-[var(--color-surface)]/85 px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-1.5 shadow-[0_-8px_24px_-12px_rgb(15_23_42/0.15)] backdrop-blur lg:hidden"
     >
-      <ul className={cn("grid gap-0.5 px-1", tripId ? "grid-cols-5" : "grid-cols-2")}>
+      <ul className={cn("grid gap-0.5 px-1", tripId ? "grid-cols-6" : "grid-cols-2")}>
         {tabs.map(({ href, match, labelKey, Icon }) => {
           const active = match(pathname, tripId);
           return (

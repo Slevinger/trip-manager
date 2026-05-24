@@ -1,5 +1,6 @@
 import {
   CalendarRange,
+  CheckSquare,
   ListChecks,
   LucideIcon,
   Map as MapIcon,
@@ -17,7 +18,7 @@ export interface TripNavItem {
   labelKey: MessageKey;
   icon: LucideIcon;
   /** Restrict to only certain agent quick-action sets. */
-  screen: "overview" | "itinerary" | "map" | "budget" | "packing" | "collab" | "manage";
+  screen: "overview" | "itinerary" | "map" | "budget" | "packing" | "todos" | "collab" | "manage";
 }
 
 const subPath = (tripId: string, segment: string) => `/trip/${tripId}/${segment}`;
@@ -57,6 +58,13 @@ export const TRIP_NAV: TripNavItem[] = [
     labelKey: "shell.packing",
     icon: ListChecks,
     screen: "packing",
+  },
+  {
+    href: (id) => subPath(id, "todos"),
+    match: (p, id) => p.startsWith(subPath(id, "todos")),
+    labelKey: "shell.todos",
+    icon: CheckSquare,
+    screen: "todos",
   },
   {
     href: (id) => subPath(id, "collab"),

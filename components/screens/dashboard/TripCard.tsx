@@ -8,6 +8,7 @@ import {
   ListChecks,
   Map as MapIcon,
   Sparkles,
+  Trash2,
   Wallet,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
@@ -24,7 +25,7 @@ import type { Trip, Traveler, TripViewer } from "@/lib/types/trip";
 
 const HOUR_MS = 3600 * 1000;
 
-export function TripCard({ trip }: { trip: Trip }) {
+export function TripCard({ trip, onDelete }: { trip: Trip; onDelete?: (trip: Trip) => void }) {
   const { t, locale } = useI18n();
   const reduce = useReducedMotion();
   const nowMs = Date.now();
@@ -174,9 +175,24 @@ export function TripCard({ trip }: { trip: Trip }) {
               </span>
             ) : null}
           </div>
-          <Button asChild size="sm" variant="ghost">
-            <Link href={`/trip/${trip.id}`}>{t("dashboard.openTrip")}</Link>
-          </Button>
+          <div className="flex items-center gap-1">
+            {onDelete ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-[var(--color-danger)] hover:bg-[color-mix(in_oklab,var(--color-danger)_10%,transparent)] hover:text-[var(--color-danger)]"
+                onClick={() => {
+                  if (!window.confirm(t("dashboard.deleteTripConfirm", { title: trip.title }))) return;
+                  onDelete(trip);
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
+            <Button asChild size="sm" variant="ghost">
+              <Link href={`/trip/${trip.id}`}>{t("dashboard.openTrip")}</Link>
+            </Button>
+          </div>
         </div>
       </div>
     </motion.article>

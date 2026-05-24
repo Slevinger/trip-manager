@@ -106,9 +106,11 @@ export function useMyTrips(): MyTripsState {
   }
 
   async function deleteTrip(trip: Trip): Promise<void> {
+    setTrips((prev) => prev.filter((t) => t.id !== trip.id));
     const db = getDb();
     if (useFirestore && db && user) {
       await deleteCanonicalTrip(db, trip.id, user);
+      refresh();
       return;
     }
     deleteLocalTrip(trip.id);

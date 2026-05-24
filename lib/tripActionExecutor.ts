@@ -17,10 +17,12 @@ import {
   normalizeTripForPersist,
   syncStepTimesFromIntervals,
 } from "@/lib/canonicalStepBuilders";
+import { newPackingItemId } from "@/lib/packing/templates";
 import type {
   ActivityStep,
   ActivityStepInterval,
   Destination,
+  PackingList,
   StayStep,
   StayStepInterval,
   TransitStep,
@@ -184,6 +186,24 @@ function applyAction(trip: Trip, action: TripAction): Trip {
 
     case "remove_task": {
       return { ...trip, tasks: (trip.tasks ?? []).filter((t) => t.id !== action.taskId) };
+    }
+
+    // ── Packing list ──────────────────────────────────────────────────────
+    case "add_packing_items": {
+      const existing: PackingList = trip.packingLists?.[0] ?? { id: "pack-1", title: trip.title, items: [] };
+      const seen = new Set(existing.items.map((i) => `${i.category}:${i.name.trim().toLowerCase()}`));
+      const next = [...existing.items];
+      for (const item of action.items) {
+        const key = `${item.category}:${item.name.trim().toLowerCase()}`;
+        if (seen.has(key)) continue;
+        next.push({ id: newPackingItemId(next), name: item.name, category: item.category, packed: false, ...(item.quantity !== undefined ? { quantity: item.quantity } : {}) });
+        seen.add(key);
+      }
+      const updatedList: PackingList = { ...existing, items: next };
+      const lists = trip.packingLists ? trip.packingLists.slice() : [];
+      if (lists.length === 0) lists.push(updatedList);
+      else lists[0] = updatedList;
+      return { ...trip, packingLists: lists };
     }
 
     default:

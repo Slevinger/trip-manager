@@ -17,11 +17,15 @@ import { getDb } from "@/lib/firebase";
 import type { UserPreferences } from "@/lib/types/trip";
 import { parseMemoryArrayFromUserDoc } from "@/lib/tripChatMessages";
 import type { AppUser, Email, ImmutableMemoryQueueEntry, TripChatMessage } from "@/lib/types/user";
+import type { TripTask } from "@/lib/types/trip";
 
 export const USERS_COLLECTION = "users";
 
 /** Per-trip assistant transcript: `users/{emailLower}/tripAssistantChats/{tripId}`. */
 export const TRIP_ASSISTANT_CHATS_SUBCOLLECTION = "tripAssistantChats";
+
+/** Per-trip private tasks: `users/{emailLower}/privateTripTasks/{tripId}`. */
+export const PRIVATE_TRIP_TASKS_SUBCOLLECTION = "privateTripTasks";
 
 /** Central immutable user history: `users/{emailLower}/immutableMemoryQueueEntries/{entryId}`. */
 export const IMMUTABLE_MEMORY_QUEUE_ENTRIES_COLLECTION = "immutableMemoryQueueEntries";
@@ -34,6 +38,16 @@ export function tripAssistantChatDocRef(db: Firestore, emailLower: string, tripI
     normalizeUserEmailKey(emailLower),
     TRIP_ASSISTANT_CHATS_SUBCOLLECTION,
     tid
+  );
+}
+
+export function privateTripTasksDocRef(db: Firestore, emailLower: string, tripId: string) {
+  return doc(
+    db,
+    USERS_COLLECTION,
+    normalizeUserEmailKey(emailLower),
+    PRIVATE_TRIP_TASKS_SUBCOLLECTION,
+    tripId.trim()
   );
 }
 
@@ -563,4 +577,52 @@ export async function clearTripChatMemoryForTrip(emailLower: string, tripId: str
     }
     tx.set(ref, patch, { merge: true });
   });
+}
+
+function parseTripTasks(data: Record<string, unknown>): TripTask[] {
+  const raw = data.tasks;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (t): t is TripTask =>
+      t !== null &&
+      typeof t === "object" &&
+      typeof (t as Record<string, unknown>).id === "string" &&
+      typeof (t as Record<string, unknown>).title === "string"
+  );
+}
+
+export function subscribePrivateTripTasks(
+  emailLower: string,
+  tripId: string,
+  onNext: (tasks: TripTask[]) => void,
+  onError?: (e: Error) => void
+): Unsubscribe {
+  const db = getDb();
+  if (!db) {
+    onNext([]);
+    return () => {};
+  }
+  const ref = privateTripTasksDocRef(db, normalizeUserEmailKey(emailLower), tripId);
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) { onNext([]); return; }
+      onNext(parseTripTasks(snap.data() as Record<string, unknown>));
+    },
+    (err) => {
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+      onNext([]);
+    }
+  );
+}
+
+export async function savePrivateTripTasks(
+  emailLower: string,
+  tripId: string,
+  tasks: TripTask[]
+): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const ref = privateTripTasksDocRef(db, normalizeUserEmailKey(emailLower), tripId);
+  await setDoc(ref, { tasks, updatedAt: isoNow() }, { merge: true });
 }

@@ -120,6 +120,13 @@ const BUDGET_ACTIONS: AgentQuickAction[] = [
 const PACKING_ACTIONS: AgentQuickAction[] = [
   CHECK_SCHEDULE_ACTION,
   {
+    id: "suggest-missing-equipment",
+    labelKey: "agent.actionSuggestEquipment",
+    prompt:
+      "Based on the trip destinations, planned activities, climate, and traveler profiles, identify what's missing from the packing list and add the most important items directly. Use add_packing_items.",
+    icon: Sparkles,
+  },
+  {
     id: "packing-add",
     labelKey: "agent.actionPacking",
     prompt: "Look at the trip destinations, weather, and activities, and suggest packing additions I might be missing.",
