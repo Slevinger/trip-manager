@@ -222,6 +222,49 @@ export function TransitStepIntervalWizardPanel({
               </select>
             </WizardField>
 
+            <WizardSection title="Cancellation" hint="Whether this leg can be cancelled and by when.">
+              <WizardField htmlFor="transit-interval-cancellable" label="Cancellable" optional>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    id="transit-interval-cancellable"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-zinc-300"
+                    checked={(interval as TransitStepInterval).cancellable ?? false}
+                    onChange={(e) =>
+                      patchIntervalAt(intervalIndex, {
+                        cancellable: e.target.checked,
+                        cancellationDeadline: e.target.checked
+                          ? (interval as TransitStepInterval).cancellationDeadline
+                          : undefined,
+                      })
+                    }
+                  />
+                  <span className="text-sm">This leg is cancellable</span>
+                </label>
+              </WizardField>
+              {(interval as TransitStepInterval).cancellable ? (
+                <WizardField htmlFor="transit-interval-cancellation-deadline" label="Cancel by" optional>
+                  <input
+                    id="transit-interval-cancellation-deadline"
+                    type="datetime-local"
+                    className={WIZARD_INPUT_CLASS}
+                    value={
+                      (interval as TransitStepInterval).cancellationDeadline
+                        ? (interval as TransitStepInterval).cancellationDeadline!.slice(0, 16)
+                        : ""
+                    }
+                    onChange={(e) =>
+                      patchIntervalAt(intervalIndex, {
+                        cancellationDeadline: e.target.value
+                          ? new Date(e.target.value).toISOString()
+                          : undefined,
+                      })
+                    }
+                  />
+                </WizardField>
+              ) : null}
+            </WizardSection>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <WizardField
                 htmlFor="transit-interval-price-amount"

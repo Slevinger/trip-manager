@@ -1,20 +1,23 @@
 import type { ExpenseEntry, Trip } from "@/lib/types/trip";
 import type { FxMultipliersToTarget } from "@/lib/fx/moneyInTargetCurrency";
 import { moneyAmountInTargetCurrency } from "@/lib/fx/moneyInTargetCurrency";
+import { collectItineraryPriceLines } from "@/lib/expenses/itineraryPriceLines";
 
 /**
  * Per-traveler net balance: positive = others owe them, negative = they owe.
- * Numeric stable to 2 decimal places to avoid float drift.
+ * Includes both manual expense entries and obligation receipts from itinerary
+ * step intervals. Receipts are split equally among all travelers.
  *
- * @param fx When set, each expense amount is converted into {@link Trip#currency}
- * before splitting; when omitted, raw numeric amounts are used (legacy single-currency behaviour).
+ * @param fx When set, amounts are converted into {@link Trip#currency}
+ * before splitting; when omitted, raw numeric amounts are used.
  */
 export function computeBalances(trip: Trip, fx?: FxMultipliersToTarget | null): Record<string, number> {
-  const expenses = trip.expenses ?? [];
   const target = (trip.currency ?? "").trim().toUpperCase() || "USD";
   const balances: Record<string, number> = {};
   for (const t of trip.travelers) balances[t.id] = 0;
-  for (const e of expenses) {
+
+  // Manual expense entries
+  for (const e of trip.expenses ?? []) {
     const splitIds = e.splitBetween.length > 0 ? e.splitBetween : [e.paidByTravelerId];
     const amt = moneyAmountInTargetCurrency(e.amount, target, fx);
     const share = amt / splitIds.length;
@@ -23,6 +26,29 @@ export function computeBalances(trip: Trip, fx?: FxMultipliersToTarget | null): 
       balances[id] = (balances[id] ?? 0) - share;
     }
   }
+
+  // Obligation receipts from itinerary step intervals — split equally among all travelers
+  const travelerIds = trip.travelers.map((t) => t.id);
+  if (travelerIds.length > 0) {
+    const priceLines = collectItineraryPriceLines(trip);
+    for (const line of priceLines) {
+      if (!line.obligation) continue;
+      for (const receipt of line.obligation.receipts) {
+        if (!receipt.paidByTravelerId) continue;
+        const amt = moneyAmountInTargetCurrency(
+          { amount: receipt.amount, currency: receipt.currency },
+          target,
+          fx
+        );
+        const share = amt / travelerIds.length;
+        balances[receipt.paidByTravelerId] = (balances[receipt.paidByTravelerId] ?? 0) + amt;
+        for (const id of travelerIds) {
+          balances[id] = (balances[id] ?? 0) - share;
+        }
+      }
+    }
+  }
+
   for (const id of Object.keys(balances)) {
     balances[id] = Math.round(balances[id] * 100) / 100;
   }

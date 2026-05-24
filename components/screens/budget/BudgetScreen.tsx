@@ -1,16 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRef, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   ArrowDownRight,
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
+  Paperclip,
   Plus,
   Trash2,
   Wallet,
 } from "lucide-react";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { getClientStorage } from "@/lib/firebase";
 import { logCaughtException } from "@/lib/logCaughtException";
 import { useI18n } from "@/lib/i18n/context";
 import { useTripData } from "@/lib/trip/useTripData";
@@ -30,12 +33,25 @@ import {
   spendByDayFromItinerary,
   tripItineraryTotalAmount,
 } from "@/lib/expenses/itinerarySpend";
-import { collectItineraryPriceLines } from "@/lib/expenses/itineraryPriceLines";
+import { collectItineraryPriceLines, type ItineraryPriceLine } from "@/lib/expenses/itineraryPriceLines";
+import { getObligationStatus, nextReceiptId } from "@/lib/expenses/obligationStatus";
 import { computeBalances, nextExpenseId, settleBalances } from "@/lib/expenses/settlement";
 import { collectTripMoneyCurrenciesExceptTarget } from "@/lib/fx/collectTripMoneyCurrencies";
 import { moneyAmountInTargetCurrency, type FxMultipliersToTarget } from "@/lib/fx/moneyInTargetCurrency";
 import { useTripFxMultipliers } from "@/lib/fx/useTripFxMultipliers";
-import type { ExpenseCategory, ExpenseEntry, Money, Trip, TripStep } from "@/lib/types/trip";
+import type {
+  ActivityStep,
+  CurrencyCode,
+  ExpenseCategory,
+  ExpenseEntry,
+  Money,
+  Obligation,
+  Receipt,
+  StayStep,
+  TransitStep,
+  Trip,
+  TripStep,
+} from "@/lib/types/trip";
 import type { MessageKey } from "@/lib/i18n/messages";
 
 const Charts = dynamic(() => import("./BudgetCharts").then((m) => ({ default: m.BudgetCharts })), {
@@ -212,8 +228,8 @@ function BudgetContent({
         />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-        <Card>
+      <div className="grid w-full gap-4">
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader>
             <CardTitle>{t("budget.expenses")}</CardTitle>
             <CardDescription>{t("budget.expensesCardDescription")}</CardDescription>
@@ -222,6 +238,7 @@ function BudgetContent({
             <CostsAndExpensesList
               trip={trip}
               onRemove={removeExpense}
+              persistTrip={persistTrip}
               fxMultipliers={fxArg}
               fxReady={fxReady}
               needsFx={needsFx}
@@ -231,7 +248,7 @@ function BudgetContent({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader>
             <CardTitle>{t("budget.settlement")}</CardTitle>
           </CardHeader>
@@ -352,9 +369,329 @@ function MoneyFxDetailPanel({
   );
 }
 
+/** Patch a trip's step/interval to update or create an obligation. */
+function patchTripObligation(
+  trip: Trip,
+  lineId: string,
+  updater: (prev: Obligation | undefined) => Obligation
+): Trip {
+  const steps = (trip.steps ?? []).map((step) => {
+    // interval_price: id format is `${stepId}:${intervalId}:price`
+    const intervalMatch = lineId.match(/^([^:]+):([^:]+):price$/);
+    if (intervalMatch) {
+      const [, stepId, intervalId] = intervalMatch;
+      if (step.id !== stepId) return step;
+
+      if (step.stepType === "stay") {
+        const s = step as StayStep;
+        return {
+          ...s,
+          stepIntervals: s.stepIntervals.map((int) =>
+            int.id === intervalId
+              ? { ...int, obligation: updater(int.obligation) }
+              : int
+          ),
+        };
+      }
+      if (step.stepType === "transit") {
+        const ts = step as TransitStep;
+        return {
+          ...ts,
+          stepIntervals: ts.stepIntervals.map((int) =>
+            int.id === intervalId
+              ? { ...int, obligation: updater(int.obligation) }
+              : int
+          ),
+        };
+      }
+      if (step.stepType === "activity") {
+        const as_ = step as ActivityStep;
+        return {
+          ...as_,
+          stepIntervals: as_.stepIntervals.map((int) =>
+            int.id === intervalId
+              ? { ...int, obligation: updater(int.obligation) }
+              : int
+          ),
+        };
+      }
+    }
+
+    // transit_manual: id format is `${stepId}:transit-manual`
+    const transitManualMatch = lineId.match(/^([^:]+):transit-manual$/);
+    if (transitManualMatch) {
+      const [, stepId] = transitManualMatch;
+      if (step.id !== stepId) return step;
+      const ts = step as TransitStep;
+      return { ...ts, totalManualPriceObligation: updater(ts.totalManualPriceObligation) };
+    }
+
+    return step;
+  });
+  return { ...trip, steps, updatedAt: new Date().toISOString() };
+}
+
+function ObligationStatusBadge({ status }: { status: ReturnType<typeof getObligationStatus> }) {
+  if (status === "paid") {
+    return (
+      <Badge className="shrink-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+        Paid
+      </Badge>
+    );
+  }
+  if (status === "partially_paid") {
+    return (
+      <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+        Partial
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="shrink-0 bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+      Unpaid
+    </Badge>
+  );
+}
+
+function AddReceiptForm({
+  obligation,
+  trip,
+  lineId,
+  persistTrip,
+  onDone,
+}: {
+  obligation: Obligation;
+  trip: Trip;
+  lineId: string;
+  persistTrip: (next: Trip) => Promise<void>;
+  onDone: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState<CurrencyCode>(obligation.currency);
+  const [travelerId, setTravelerId] = useState(trip.travelers[0]?.id ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const numeric = parseFloat(amount);
+    if (!Number.isFinite(numeric) || numeric <= 0 || !travelerId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      let attachmentUrl: string | undefined;
+      const file = fileRef.current?.files?.[0];
+      if (file) {
+        const storage = getClientStorage();
+        if (!storage) throw new Error("Firebase Storage not configured.");
+        const safeName = file.name.replace(/[^\w.\- ]+/g, "_");
+        const path = `canonicalTrips/${trip.id}/receipts/${Date.now()}-${safeName}`;
+        const objectRef = ref(storage, path);
+        await uploadBytes(objectRef, file, { contentType: file.type || "application/octet-stream" });
+        attachmentUrl = await getDownloadURL(objectRef);
+      }
+
+      const next = patchTripObligation(trip, lineId, (prev) => {
+        const base = prev ?? obligation;
+        const receipt: Receipt = {
+          id: nextReceiptId(base.receipts),
+          amount: numeric,
+          currency,
+          paidByTravelerId: travelerId,
+          attachment: attachmentUrl,
+        };
+        return { ...base, receipts: [...base.receipts, receipt] };
+      });
+      await persistTrip(next);
+      setAmount("");
+      if (fileRef.current) fileRef.current.value = "";
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add receipt.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 space-y-2 border-t border-[var(--color-border)] pt-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
+        Add receipt
+      </p>
+      <div className="grid gap-2 sm:grid-cols-[1fr_110px_1fr]">
+        <Input
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Amount"
+          inputMode="decimal"
+          required
+        />
+        <select
+          className="h-10 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm"
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+        >
+          {[obligation.currency, "USD", "EUR", "ILS", "THB"]
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+        </select>
+        <select
+          className="h-10 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm"
+          value={travelerId}
+          onChange={(e) => setTravelerId(e.target.value)}
+        >
+          {trip.travelers.map((tr) => (
+            <option key={tr.id} value={tr.id}>{tr.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-surface-muted)]">
+          <Paperclip className="h-3.5 w-3.5" />
+          Attach file
+          <input ref={fileRef} type="file" className="hidden" accept="image/*,application/pdf" />
+        </label>
+        <div className="flex-1" />
+        <Button type="button" variant="ghost" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={busy} className="gap-1">
+          <Plus className="h-3.5 w-3.5" /> Add
+        </Button>
+      </div>
+      {error ? <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p> : null}
+    </form>
+  );
+}
+
+function ObligationPanel({
+  line,
+  trip,
+  obligation,
+  persistTrip,
+}: {
+  line: ItineraryPriceLine;
+  trip: Trip;
+  obligation: Obligation;
+  persistTrip: (next: Trip) => Promise<void>;
+}) {
+  const [addingReceipt, setAddingReceipt] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const status = getObligationStatus(obligation);
+  const paidTotal = obligation.receipts.reduce(
+    (s, r) => (r.currency === obligation.currency ? s + r.amount : s),
+    0
+  );
+
+  async function removeReceipt(receiptId: string) {
+    setBusy(true);
+    try {
+      const next = patchTripObligation(trip, line.id, (prev) => {
+        const base = prev ?? obligation;
+        return { ...base, receipts: base.receipts.filter((r) => r.id !== receiptId) };
+      });
+      await persistTrip(next);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const { cancellable, cancellationDeadline } = line;
+
+  return (
+    <div className="mt-2 space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2.5 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-[var(--color-foreground)]">
+          {obligation.title || "Obligation"}
+        </span>
+        <ObligationStatusBadge status={status} />
+      </div>
+      <div className="flex justify-between text-[var(--color-muted-foreground)]">
+        <span>Price: {formatMoney(obligation.price, obligation.currency)}</span>
+        <span>Paid: {formatMoney(paidTotal, obligation.currency)}</span>
+      </div>
+      {cancellable != null ? (
+        <div className={`flex items-center gap-1.5 ${cancellable ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}>
+          <span>{cancellable ? "✓ Cancellable" : "✗ Non-cancellable"}</span>
+          {cancellable && cancellationDeadline ? (
+            <span className="text-[var(--color-muted-foreground)]">
+              · by {new Date(cancellationDeadline).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {obligation.receipts.length > 0 ? (
+        <ul className="divide-y divide-[var(--color-border)]">
+          {obligation.receipts.map((receipt) => {
+            const payer = trip.travelers.find((tr) => tr.id === receipt.paidByTravelerId);
+            return (
+              <li key={receipt.id} className="flex items-center justify-between gap-2 py-1.5">
+                <div className="min-w-0">
+                  <span className="font-semibold tabular-nums text-[var(--color-foreground)]">
+                    {formatMoney(receipt.amount, receipt.currency)}
+                  </span>
+                  <span className="ml-2 text-[var(--color-muted-foreground)]">
+                    {payer?.name ?? "—"}
+                  </span>
+                  {receipt.attachment ? (
+                    <a
+                      href={receipt.attachment}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 inline-flex items-center gap-0.5 text-[var(--color-brand)] underline underline-offset-2"
+                    >
+                      <Paperclip className="h-3 w-3" /> Receipt
+                    </a>
+                  ) : null}
+                </div>
+                <Button
+                  size="iconSm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void removeReceipt(receipt.id)}
+                  aria-label="Remove receipt"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-[var(--color-muted-foreground)]">No receipts yet.</p>
+      )}
+
+      {addingReceipt ? (
+        <AddReceiptForm
+          obligation={obligation}
+          trip={trip}
+          lineId={line.id}
+          persistTrip={persistTrip}
+          onDone={() => setAddingReceipt(false)}
+        />
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-1 gap-1"
+          onClick={() => setAddingReceipt(true)}
+        >
+          <Plus className="h-3.5 w-3.5" /> Add receipt
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function CostsAndExpensesList({
   trip,
   onRemove,
+  persistTrip,
   fxMultipliers,
   fxReady,
   needsFx,
@@ -362,6 +699,7 @@ function CostsAndExpensesList({
 }: {
   trip: Trip;
   onRemove: (id: string) => Promise<void>;
+  persistTrip: (next: Trip) => Promise<void>;
   fxMultipliers?: FxMultipliersToTarget | null;
   fxReady: boolean;
   needsFx: boolean;
@@ -393,6 +731,13 @@ function CostsAndExpensesList({
                   : line.intervalTitle.trim() || t("common.untitled");
               const secondary = `${t("budget.intervalPriceBadge")} · ${t(stepKindMessageKey(line.stepType))} · ${line.stepTitle} · ${formatShortMd(line.dateKey)}`;
               const ariaLabel = `${primary} — ${line.stepTitle}`;
+              const obligation: Obligation = line.obligation ?? {
+                title: line.intervalTitle.trim() || line.stepTitle,
+                price: line.money.amount,
+                currency: line.money.currency,
+                receipts: [],
+              };
+              const obligationStatus = getObligationStatus(obligation);
 
               return (
                 <li key={line.id} className="py-2.5">
@@ -414,19 +759,30 @@ function CostsAndExpensesList({
                         <p className="text-[11px] text-[var(--color-muted-foreground)]">{secondary}</p>
                       </div>
                     </button>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-[var(--color-foreground)]">
-                      {formatMoney(line.money.amount, line.money.currency)}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <ObligationStatusBadge status={obligationStatus} />
+                      <span className="text-sm font-semibold tabular-nums text-[var(--color-foreground)]">
+                        {formatMoney(line.money.amount, line.money.currency)}
+                      </span>
+                    </div>
                   </div>
                   {expandedKey === key ? (
-                    <MoneyFxDetailPanel
-                      money={line.money}
-                      budgetCur={budgetCur}
-                      fxMultipliers={fxMultipliers}
-                      fxReady={fxReady}
-                      needsFx={needsFx}
-                      fxError={fxError}
-                    />
+                    <>
+                      <MoneyFxDetailPanel
+                        money={line.money}
+                        budgetCur={budgetCur}
+                        fxMultipliers={fxMultipliers}
+                        fxReady={fxReady}
+                        needsFx={needsFx}
+                        fxError={fxError}
+                      />
+                      <ObligationPanel
+                        line={line}
+                        trip={trip}
+                        obligation={obligation}
+                        persistTrip={persistTrip}
+                      />
+                    </>
                   ) : null}
                 </li>
               );

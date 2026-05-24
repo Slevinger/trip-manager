@@ -115,10 +115,14 @@ export function buildTripAssistantActionsSchemaPrompt(): string {
     `    "intervalType": "stay", "stayType": ${stayTypes},`,
     '    "title": "...", "startTime": "...", "endTime": "...", "comment": "...",',
     '    "destinationId": "...", "location": "...", "checkInTime": "...", "checkOutTime": "...", "nights": 3,',
+    '    "cancellable": true, "cancellationDeadline": "<ISO datetime>",  // stay/transit only',
+    '    "price": { "amount": 120, "currency": "USD" },',
+    '    "obligation": { "title": "...", "price": 120, "currency": "USD", "receipts": [] },',
     '    // TransitInterval patch fields:',
     `    "transitType": ${transitTypes},`,
     '    "fromDestinationId": "...", "toDestinationId": "...", "operatorName": "...",',
     '    "departureTerminal": "...", "arrivalTerminal": "...",',
+    '    "cancellable": true, "cancellationDeadline": "<ISO datetime>",',
     '    // ActivityInterval patch fields:',
     `    "activityType": ${activityTypes},`,
     '    "destinationId": "..."',
@@ -336,6 +340,9 @@ function safeInterval(v: unknown): StepInterval | undefined {
     if (nights !== undefined) interval.nights = nights;
     if (comment) interval.comment = comment;
     if (price) interval.price = price;
+    if (typeof v.cancellable === "boolean") interval.cancellable = v.cancellable;
+    const cancellationDeadline = safeIso(v.cancellationDeadline);
+    if (cancellationDeadline) interval.cancellationDeadline = cancellationDeadline;
     return interval;
   }
 
@@ -359,6 +366,9 @@ function safeInterval(v: unknown): StepInterval | undefined {
     if (arrivalTerminal) interval.arrivalTerminal = arrivalTerminal;
     if (comment) interval.comment = comment;
     if (price) interval.price = price;
+    if (typeof v.cancellable === "boolean") interval.cancellable = v.cancellable;
+    const cancellationDeadline = safeIso(v.cancellationDeadline);
+    if (cancellationDeadline) interval.cancellationDeadline = cancellationDeadline;
     return interval;
   }
 

@@ -92,6 +92,25 @@ export interface TripBudget {
   };
 }
 
+export interface Receipt {
+  id: string;
+  amount: number;
+  currency: CurrencyCode;
+  /** Firebase Storage download URL */
+  attachment?: string;
+  /** References Traveler.id */
+  paidByTravelerId: string;
+}
+
+export type ObligationStatus = "unpaid" | "partially_paid" | "paid";
+
+export interface Obligation {
+  title: string;
+  price: number;
+  currency: CurrencyCode;
+  receipts: Receipt[];
+}
+
 export interface BaseStepInterval {
   id: string;
   title: string;
@@ -99,8 +118,15 @@ export interface BaseStepInterval {
   startTime: ISODateString;
   endTime: ISODateString;
   price?: Money;
+  /** Payment obligation for this interval's price. */
+  obligation?: Obligation;
   booking?: BookingInfo;
   attachments?: Attachment[];
+
+  /** Whether this transit booking can be cancelled. */
+  cancellable?: boolean;
+  /** Last date/time by which cancellation is allowed. */
+  cancellationDeadline?: ISODateString;
 }
 
 export type StayType =
@@ -241,6 +267,8 @@ export interface TransitStep extends BaseStep {
   toStayId: string;
   stepIntervals: TransitStepInterval[];
   totalManualPrice?: Money;
+  /** Payment obligation for the transit step's totalManualPrice. */
+  totalManualPriceObligation?: Obligation;
 }
 
 export interface ActivityStep extends BaseStep {

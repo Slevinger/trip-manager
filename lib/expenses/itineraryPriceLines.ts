@@ -1,4 +1,4 @@
-import type { Money, TransitStep, Trip, TripStep } from "@/lib/types/trip";
+import type { Money, Obligation, TransitStep, TransitStepInterval, StayStepInterval, Trip, TripStep } from "@/lib/types/trip";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 
 /** One priced row from the itinerary (interval `price` or transit `totalManualPrice`). */
@@ -14,6 +14,10 @@ export interface ItineraryPriceLine {
   dateKey: string;
   money: Money;
   source: "interval_price" | "transit_manual";
+  /** Obligation attached to this price, if any. */
+  obligation?: Obligation;
+  cancellable?: boolean;
+  cancellationDeadline?: string;
 }
 
 function pushIfPositive(
@@ -38,6 +42,7 @@ export function collectItineraryPriceLines(trip: Trip): ItineraryPriceLine[] {
 
     if (step.stepType === "stay") {
       for (const int of step.stepIntervals) {
+        const si = int as StayStepInterval;
         pushIfPositive(out, {
           id: `${step.id}:${int.id}:price`,
           stepId: step.id,
@@ -48,11 +53,15 @@ export function collectItineraryPriceLines(trip: Trip): ItineraryPriceLine[] {
           dateKey: int.startTime.slice(0, 10),
           money: int.price,
           source: "interval_price",
+          obligation: int.obligation,
+          cancellable: si.cancellable,
+          cancellationDeadline: si.cancellationDeadline,
         });
       }
     } else if (step.stepType === "transit") {
       const ts = step as TransitStep;
       for (const int of ts.stepIntervals) {
+        const ti = int as TransitStepInterval;
         pushIfPositive(out, {
           id: `${step.id}:${int.id}:price`,
           stepId: step.id,
@@ -63,6 +72,9 @@ export function collectItineraryPriceLines(trip: Trip): ItineraryPriceLine[] {
           dateKey: int.startTime.slice(0, 10),
           money: int.price,
           source: "interval_price",
+          obligation: int.obligation,
+          cancellable: ti.cancellable,
+          cancellationDeadline: ti.cancellationDeadline,
         });
       }
       const anchor = ts.stepIntervals[0]?.startTime ?? step.startTime;
@@ -76,6 +88,7 @@ export function collectItineraryPriceLines(trip: Trip): ItineraryPriceLine[] {
         dateKey: anchor.slice(0, 10),
         money: ts.totalManualPrice,
         source: "transit_manual",
+        obligation: ts.totalManualPriceObligation,
       });
     } else if (step.stepType === "activity") {
       for (const int of step.stepIntervals) {
@@ -89,6 +102,7 @@ export function collectItineraryPriceLines(trip: Trip): ItineraryPriceLine[] {
           dateKey: int.startTime.slice(0, 10),
           money: int.price,
           source: "interval_price",
+          obligation: int.obligation,
         });
       }
     }

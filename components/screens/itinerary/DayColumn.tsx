@@ -30,7 +30,7 @@ import {
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { cn } from "@/lib/ui/cn";
 import { tripInstantMs } from "@/lib/tripViewPhase";
-import type { ActivityStep, TransitStep, Trip, TripStep } from "@/lib/types/trip";
+import type { ActivityStep, BaseStepInterval, TransitStep, Trip, TripStep } from "@/lib/types/trip";
 import {
   activityStepTotalCost,
   formatMoneyDisplay,
@@ -38,6 +38,7 @@ import {
   stayStepLodgingCost,
   stepDisplayTotalCost,
 } from "@/lib/trip/stepCosts";
+import { getObligationStatus } from "@/lib/expenses/obligationStatus";
 
 interface DayColumnProps {
   dayKey: string;
@@ -118,6 +119,38 @@ const TRANSIT_ICON: Record<string, LucideIcon> = {
   train: Train,
 };
 
+type PayStatus = "paid" | "partially_paid";
+
+function stepPaymentStatus(step: TripStep): PayStatus | null {
+  const obligations = step.stepIntervals
+    .map((int) => (int as BaseStepInterval).obligation)
+    .filter(Boolean);
+  if (step.stepType === "transit") {
+    const manual = (step as TransitStep).totalManualPriceObligation;
+    if (manual) obligations.push(manual);
+  }
+  if (obligations.length === 0) return null;
+  const statuses = obligations.map((ob) => getObligationStatus(ob!));
+  if (statuses.every((s) => s === "paid")) return "paid";
+  if (statuses.some((s) => s !== "unpaid")) return "partially_paid";
+  return null;
+}
+
+function PayStatusBadge({ status }: { status: PayStatus }) {
+  if (status === "paid") {
+    return (
+      <Badge className="shrink-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+        Paid
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+      Partial
+    </Badge>
+  );
+}
+
 function StepCard({
   step,
   trip,
@@ -158,6 +191,7 @@ function StepCard({
   const firstInterval = step.stepIntervals?.[0];
   const isTransit = step.stepType === "transit" && firstInterval && "transitType" in firstInterval;
   const stepCost = useMemo(() => stepDisplayTotalCost(step, trip.steps), [step, trip.steps]);
+  const payStatus = useMemo(() => stepPaymentStatus(step), [step]);
   const TransitIcon =
     isTransit && firstInterval && "transitType" in firstInterval
       ? TRANSIT_ICON[(firstInterval as { transitType?: string }).transitType ?? ""]
@@ -203,6 +237,7 @@ function StepCard({
                     {formatMoneyDisplay(stepCost)}
                   </span>
                 ) : null}
+                {payStatus ? <PayStatusBadge status={payStatus} /> : null}
               </div>
               <p className="mt-1 line-clamp-2 text-sm font-semibold text-[var(--color-foreground)]">
                 {step.title || t("itinerary.activity")}
@@ -252,10 +287,15 @@ function StepDetails({ step, trip }: { step: TripStep; trip: Trip }) {
       const p = "price" in int ? int.price : undefined;
       if (!p) return null;
       const title = (int.title ?? "").trim() || t("itinerary.intervalCostShort", { index: i + 1 });
+      const ob = (int as BaseStepInterval).obligation;
+      const obStatus = ob ? getObligationStatus(ob) : null;
+      const intPayStatus: PayStatus | null =
+        obStatus === "paid" ? "paid" : obStatus === "partially_paid" ? "partially_paid" : null;
       return (
         <DetailItem key={int.id} label={t("itinerary.intervalCostShort", { index: i + 1 })}>
           <span className="text-[var(--color-muted-foreground)]">{title}</span>
           <span className="mt-0.5 block tabular-nums text-[var(--color-foreground)]">{formatMoneyDisplay(p)}</span>
+          {intPayStatus ? <PayStatusBadge status={intPayStatus} /> : null}
         </DetailItem>
       );
     })

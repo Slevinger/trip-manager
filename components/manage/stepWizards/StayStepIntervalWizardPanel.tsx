@@ -238,6 +238,41 @@ export function StayStepIntervalWizardPanel({
                 />
               </WizardField>
 
+              <WizardSection title="Cancellation" hint="Whether this stay can be cancelled and by when.">
+                <WizardField htmlFor="stay-interval-cancellable" label="Cancellable" optional>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      id="stay-interval-cancellable"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-zinc-300"
+                      checked={interval.cancellable ?? false}
+                      onChange={(e) =>
+                        patchIntervalAt(intervalIndex, {
+                          cancellable: e.target.checked,
+                          cancellationDeadline: e.target.checked ? interval.cancellationDeadline : undefined,
+                        })
+                      }
+                    />
+                    <span className="text-sm">This booking is cancellable</span>
+                  </label>
+                </WizardField>
+                {interval.cancellable ? (
+                  <WizardField htmlFor="stay-interval-cancellation-deadline" label="Cancel by" optional>
+                    <input
+                      id="stay-interval-cancellation-deadline"
+                      type="datetime-local"
+                      className={WIZARD_INPUT_CLASS}
+                      value={interval.cancellationDeadline ? interval.cancellationDeadline.slice(0, 16) : ""}
+                      onChange={(e) =>
+                        patchIntervalAt(intervalIndex, {
+                          cancellationDeadline: e.target.value ? new Date(e.target.value).toISOString() : undefined,
+                        })
+                      }
+                    />
+                  </WizardField>
+                ) : null}
+              </WizardSection>
+
               <WizardSection title="Price" hint="Used for the trip budget view.">
                 <WizardField htmlFor="stay-interval-price-amount" label="Amount" optional>
                   <input

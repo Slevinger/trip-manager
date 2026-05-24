@@ -8,7 +8,8 @@ import { stepIntervalEmoji } from "@/lib/stepIntervalUi";
 import { destinationFromList } from "@/lib/tripDestinationRegistry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
 import { formatMoneyDisplay, stepDisplayTotalCost } from "@/lib/trip/stepCosts";
-import type { Destination, Trip, TripStep } from "@/lib/types/trip";
+import type { BaseStepInterval, Destination, TransitStep, Trip, TripStep } from "@/lib/types/trip";
+import { getObligationStatus } from "@/lib/expenses/obligationStatus";
 
 const REORDER_LONG_PRESS_MS = 450;
 const REORDER_CANCEL_MOVE_PX = 12;
@@ -89,6 +90,43 @@ function intervalExtraHint(
     return int.transitType.replace(/_/g, " ");
   }
   return null;
+}
+
+type PayStatus = "paid" | "partially_paid";
+
+function stepPaymentStatus(step: TripStep): PayStatus | null {
+  const obligations = step.stepIntervals
+    .map((int) => (int as BaseStepInterval).obligation)
+    .filter(Boolean);
+  if (step.stepType === "transit") {
+    const manual = (step as TransitStep).totalManualPriceObligation;
+    if (manual) obligations.push(manual);
+  }
+  if (obligations.length === 0) return null;
+  const statuses = obligations.map((ob) => getObligationStatus(ob!));
+  if (statuses.every((s) => s === "paid")) return "paid";
+  if (statuses.some((s) => s !== "unpaid")) return "partially_paid";
+  return null;
+}
+
+function intervalPaymentStatus(int: BaseStepInterval): PayStatus | null {
+  if (!int.obligation) return null;
+  const s = getObligationStatus(int.obligation);
+  if (s === "paid") return "paid";
+  if (s === "partially_paid") return "partially_paid";
+  return null;
+}
+
+function PayBadge({ status }: { status: PayStatus }) {
+  return status === "paid" ? (
+    <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+      Paid
+    </span>
+  ) : (
+    <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+      Partial
+    </span>
+  );
 }
 
 export function CanonicalStepList({
@@ -369,8 +407,11 @@ export function CanonicalStepList({
                               </span>
                             ) : null}
                             {"price" in int && int.price ? (
-                              <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
-                                {formatMoneyDisplay(int.price)}
+                              <span className="mt-0.5 flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
+                                  {formatMoneyDisplay(int.price)}
+                                </span>
+                                {(() => { const ps = intervalPaymentStatus(int as BaseStepInterval); return ps ? <PayBadge status={ps} /> : null; })()}
                               </span>
                             ) : null}
                           </li>
@@ -427,6 +468,7 @@ export function CanonicalStepList({
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
                     {stepKindLabel(s, t)}
                   </span>
+                  {(() => { const ps = stepPaymentStatus(s); return ps ? <PayBadge status={ps} /> : null; })()}
                 </div>
               </div>
               </button>

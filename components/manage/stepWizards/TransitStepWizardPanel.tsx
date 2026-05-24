@@ -5,7 +5,8 @@ import { useId, useMemo, useState } from "react";
 
 import { useI18n } from "@/lib/i18n/context";
 import type { TripGroupedPlacePicks } from "@/lib/tripLocationCatalog";
-import type { CurrencyCode, Destination, TransitStep, TransitStepInterval } from "@/lib/types/trip";
+import type { CurrencyCode, Destination, Money, TransitStep, TransitStepInterval } from "@/lib/types/trip";
+import { syncTransitManualObligationWithPrice } from "@/lib/expenses/obligationStatus";
 import { STEP_WIZARD_IDS } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
 
@@ -203,17 +204,23 @@ export function TransitStepWizardPanel({
                   onChange={(e) => {
                     const raw = e.target.value.trim();
                     if (raw === "") {
-                      setDraft({ ...draft, totalManualPrice: undefined });
+                      setDraft({
+                        ...draft,
+                        totalManualPrice: undefined,
+                        totalManualPriceObligation: undefined,
+                      });
                       return;
                     }
                     const n = Number(raw);
                     if (!Number.isFinite(n)) return;
+                    const newPrice: Money = {
+                      amount: n,
+                      currency: draft.totalManualPrice?.currency ?? tripCurrency,
+                    };
                     setDraft({
                       ...draft,
-                      totalManualPrice: {
-                        amount: n,
-                        currency: draft.totalManualPrice?.currency ?? tripCurrency,
-                      },
+                      totalManualPrice: newPrice,
+                      totalManualPriceObligation: syncTransitManualObligationWithPrice(draft, newPrice),
                     });
                   }}
                 />
@@ -229,9 +236,11 @@ export function TransitStepWizardPanel({
                       setDraft({ ...draft, totalManualPrice: { amount: 0, currency: cur } });
                       return;
                     }
+                    const newPrice: Money = { ...draft.totalManualPrice, currency: cur };
                     setDraft({
                       ...draft,
-                      totalManualPrice: { ...draft.totalManualPrice, currency: cur },
+                      totalManualPrice: newPrice,
+                      totalManualPriceObligation: syncTransitManualObligationWithPrice(draft, newPrice),
                     });
                   }}
                   disabled={!draft.totalManualPrice}

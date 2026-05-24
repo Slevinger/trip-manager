@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Award,
+  Bell,
+  BellOff,
   Compass,
   Globe,
   MapPin,
@@ -22,11 +24,13 @@ import { EmptyState } from "@/components/ui/empty";
 import { TripBackToTripsHubLink } from "@/components/screens/_shared/TripSubpageBackLink";
 import { Skeleton } from "@/components/ui/skeleton";
 import { signInWithGoogle } from "@/lib/googleSignIn";
+import { usePushSubscription } from "@/lib/push/usePushSubscription";
 
 export function ProfileScreen() {
   const { t } = useI18n();
   const { user } = useFirebaseUser();
   const { trips, loading, needsSignIn } = useMyTrips();
+  const { status: pushStatus, busy: pushBusy, subscribe, unsubscribe } = usePushSubscription(user?.uid);
   const stats = useMemo(() => computeTravelStats(trips), [trips]);
   const achievements = useMemo(() => deriveAchievements(stats), [stats]);
 
@@ -216,6 +220,40 @@ export function ProfileScreen() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-[var(--color-brand)]" /> Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between gap-4">
+              <p className="text-sm text-[var(--color-muted-foreground)]">
+                {pushStatus === "subscribed"
+                  ? "You'll receive trip updates every 12 hours."
+                  : pushStatus === "denied"
+                    ? "Notifications blocked — allow them in your browser settings."
+                    : pushStatus === "unsupported"
+                      ? "Push notifications are not supported in this browser."
+                      : "Get trip reminders and updates on this device."}
+              </p>
+              {pushStatus !== "unsupported" && pushStatus !== "denied" && pushStatus !== "loading" && (
+                <Button
+                  size="sm"
+                  variant={pushStatus === "subscribed" ? "outline" : "default"}
+                  disabled={pushBusy}
+                  onClick={() => void (pushStatus === "subscribed" ? unsubscribe() : subscribe())}
+                  className="shrink-0"
+                >
+                  {pushStatus === "subscribed" ? (
+                    <><BellOff className="mr-1.5 h-3.5 w-3.5" /> Turn off</>
+                  ) : (
+                    <><Bell className="mr-1.5 h-3.5 w-3.5" /> Enable</>
+                  )}
+                </Button>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

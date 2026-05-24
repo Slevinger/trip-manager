@@ -43,6 +43,7 @@ import type {
   ActivityType,
   CurrencyCode,
   Destination,
+  Money,
   StayStep,
   StayStepInterval,
   StayType,
@@ -52,6 +53,10 @@ import type {
   Trip,
   TripStep,
 } from "@/lib/types/trip";
+import {
+  syncIntervalObligationWithPrice,
+  syncTransitManualObligationWithPrice,
+} from "@/lib/expenses/obligationStatus";
 import { ACTIVITY_TYPES, STAY_TYPES, TRANSIT_TYPES } from "@/components/manage/stepEditorConstants";
 
 const STEP_PRICE_CURRENCIES: CurrencyCode[] = ["THB", "USD", "EUR", "ILS", "GBP"];
@@ -299,7 +304,11 @@ export function CanonicalStepEditorDialog({
       const intervals = [...d.stepIntervals];
       const cur = intervals[index];
       if (!cur) return d;
-      intervals[index] = { ...cur, ...patch } as typeof cur;
+      const next = { ...cur, ...patch } as typeof cur;
+      if ("price" in patch) {
+        next.obligation = syncIntervalObligationWithPrice(cur, patch.price as Money | undefined);
+      }
+      intervals[index] = next;
       return { ...d, stepIntervals: intervals } as TripStep;
     });
   }
@@ -1215,6 +1224,46 @@ export function CanonicalStepEditorDialog({
           </div>
         ) : null}
 
+        {(draft.stepType === "stay" && active.intervalType === "stay") ||
+        (draft.stepType === "transit" && active.intervalType === "transit") ? (
+          <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Cancellation</p>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-zinc-300"
+                checked={active.cancellable ?? false}
+                onChange={(e) =>
+                  patchActiveInterval({
+                    cancellable: e.target.checked,
+                    cancellationDeadline: e.target.checked ? active.cancellationDeadline : undefined,
+                  })
+                }
+              />
+              <span className="text-sm text-zinc-700 dark:text-zinc-200">
+                {draft.stepType === "stay" ? "This booking is cancellable" : "This leg is cancellable"}
+              </span>
+            </label>
+            {active.cancellable ? (
+              <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Cancel by
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
+                  value={active.cancellationDeadline ? active.cancellationDeadline.slice(0, 16) : ""}
+                  onChange={(e) =>
+                    patchActiveInterval({
+                      cancellationDeadline: e.target.value
+                        ? new Date(e.target.value).toISOString()
+                        : undefined,
+                    })
+                  }
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
+
         {draft.stepType === "transit" ? (
           <div className="grid gap-2 sm:grid-cols-2 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
@@ -1233,17 +1282,23 @@ export function CanonicalStepEditorDialog({
                   const d = draft as TransitStep;
                   const raw = e.target.value.trim();
                   if (raw === "") {
-                    setDraft({ ...d, totalManualPrice: undefined });
+                    setDraft({
+                      ...d,
+                      totalManualPrice: undefined,
+                      totalManualPriceObligation: undefined,
+                    });
                     return;
                   }
                   const n = Number(raw);
                   if (!Number.isFinite(n)) return;
+                  const newPrice: Money = {
+                    amount: n,
+                    currency: d.totalManualPrice?.currency ?? tripCurrency,
+                  };
                   setDraft({
                     ...d,
-                    totalManualPrice: {
-                      amount: n,
-                      currency: d.totalManualPrice?.currency ?? tripCurrency,
-                    },
+                    totalManualPrice: newPrice,
+                    totalManualPriceObligation: syncTransitManualObligationWithPrice(d, newPrice),
                   });
                 }}
               />
@@ -1260,9 +1315,11 @@ export function CanonicalStepEditorDialog({
                     setDraft({ ...d, totalManualPrice: { amount: 0, currency: cur } });
                     return;
                   }
+                  const newPrice: Money = { ...d.totalManualPrice, currency: cur };
                   setDraft({
                     ...d,
-                    totalManualPrice: { ...d.totalManualPrice, currency: cur },
+                    totalManualPrice: newPrice,
+                    totalManualPriceObligation: syncTransitManualObligationWithPrice(d, newPrice),
                   });
                 }}
                 disabled={!(draft as TransitStep).totalManualPrice}
