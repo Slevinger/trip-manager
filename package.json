@@ -13,7 +13,7 @@
     "migrate:diagram": "node scripts/migrate-legacy-notice.cjs migrate:diagram",
     "migrate:step-types": "node scripts/migrate-legacy-notice.cjs migrate:step-types",
     "deploy:preview": "npx vercel --yes",
-    "deploy:prod": "npx vercel --prod --yes"
+    "deploy:prod": "bash scripts/deploy-prod.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
