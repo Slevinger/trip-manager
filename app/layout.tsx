@@ -3,8 +3,9 @@ import { AppProviders } from "@/components/AppProviders";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Trip planner (canonical)",
-  description: "Trips with ISO dates, intervals, travelers, tasks",
+  title: "Trip Planner",
+  description: "Plan your trips",
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {
