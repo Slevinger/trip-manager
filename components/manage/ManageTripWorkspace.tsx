@@ -4,6 +4,7 @@ import type { User } from "firebase/auth";
 import { motion } from "framer-motion";
 import { Plus, Redo2, Undo2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
 import { TripDocumentUploads } from "@/components/TripDocumentUploads";
 import { TripDestinationsRoster } from "@/components/trip/TripDestinationsRoster";
@@ -59,6 +60,8 @@ export function ManageTripWorkspace({
 }) {
   const { t, locale } = useI18n();
   const rtlIcons = locale === "he";
+  const searchParams = useSearchParams();
+  const highlightIntervalId = searchParams.get("highlight");
   const [saving, setSaving] = useState(false);
   const pendingInsertAfterId = useRef<string | null>(null);
   const [editor, setEditor] = useState<{
@@ -203,6 +206,7 @@ export function ManageTripWorkspace({
                 onDelete={deleteStep}
                 onReorder={reorderSteps}
                 onInsertAfter={insertStepAfter}
+                highlightIntervalId={highlightIntervalId}
               />
             </section>
             {!saveDisabled ? (

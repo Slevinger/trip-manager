@@ -135,12 +135,14 @@ export function CanonicalStepList({
   onDelete,
   onReorder,
   onInsertAfter,
+  highlightIntervalId,
 }: {
   trip: Trip;
   onEdit: (step: TripStep) => void;
   onDelete: (stepId: string) => void;
   onReorder: (orderedStepIds: string[]) => void;
   onInsertAfter: (afterStepId: string) => void;
+  highlightIntervalId?: string | null;
 }) {
   const { t } = useI18n();
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -161,9 +163,24 @@ export function CanonicalStepList({
   } | null>(null);
   const dropIndexRef = useRef<number | null>(null);
 
+  const [highlightStepId, setHighlightStepId] = useState<string | null>(null);
+
   const steps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
   stepsRef.current = steps;
   const isDragging = draggingId !== null;
+
+  useEffect(() => {
+    if (!highlightIntervalId) return;
+    const step = steps.find((s) =>
+      s.stepIntervals.some((iv) => iv.id === highlightIntervalId)
+    );
+    if (!step) return;
+    setHighlightStepId(step.id);
+    const el = cardRefs.current.get(step.id);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setHighlightStepId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [highlightIntervalId, steps]);
   const draggingStep = draggingId ? steps.find((s) => s.id === draggingId) ?? null : null;
   const visibleSteps = isDragging ? steps.filter((s) => s.id !== draggingId) : steps;
 
@@ -340,7 +357,11 @@ export function CanonicalStepList({
               if (el) cardRefs.current.set(s.id, el);
               else cardRefs.current.delete(s.id);
             }}
-            className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+            className={`overflow-hidden rounded-2xl border shadow-sm transition-colors duration-700 ${
+              highlightStepId === s.id
+                ? "border-violet-400 bg-violet-50 dark:border-violet-500 dark:bg-violet-950/40"
+                : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+            }`}
           >
             <div className="flex items-stretch">
               <button
