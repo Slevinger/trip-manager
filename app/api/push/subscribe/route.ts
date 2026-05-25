@@ -1,7 +1,12 @@
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore } from "@/lib/firebaseAdmin";
 
 const COLLECTION = process.env.FIRESTORE_PUSH_COLLECTION ?? "pushSubscriptions";
+
+function endpointDocId(endpoint: string) {
+  return createHash("sha256").update(endpoint).digest("hex");
+}
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
@@ -19,7 +24,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Firestore unavailable" }, { status: 503 });
   }
 
-  await db.collection(COLLECTION).doc(subscription.endpoint).set({
+  await db.collection(COLLECTION).doc(endpointDocId(subscription.endpoint)).set({
     userId,
     subscription,
     active: true,
