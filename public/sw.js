@@ -1,4 +1,6 @@
 // Service Worker — handles Web Push notifications
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener("push", (event) => {
   let data = { title: "Trip Update", body: "", url: "/" };
   try {
@@ -13,6 +15,7 @@ self.addEventListener("push", (event) => {
       icon: "/icon-192.png",
       badge: "/badge-96.png",
       actions: data.actions ?? [],
+      requireInteraction: (data.actions ?? []).length > 0,
       data: { url: data.url, taskAction: data.taskAction ?? null },
     })
   );
