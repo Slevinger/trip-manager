@@ -223,6 +223,9 @@ const BASE_INTERVAL_FIELDS = {
   price: { type: "Money", description: "Price for this interval; prefer the trip currency." },
   booking: { type: "BookingInfo", description: "Booking metadata if a reservation exists or is planned." },
   attachments: { type: "Attachment[]", description: "Pre-trip docs / tickets / links pinned to this interval." },
+  obligation: { type: "Obligation", description: "Payment obligation tracking receipts for this interval's price." },
+  cancellable: { type: "boolean", description: "Whether this booking can be cancelled." },
+  cancellationDeadline: { type: "string", description: "ISO 8601 datetime by which cancellation must be made." },
 } as const satisfies ShapeRecord<BaseStepInterval>;
 
 type StayIntervalOwnFields = Omit<StayStepInterval, keyof BaseStepInterval>;

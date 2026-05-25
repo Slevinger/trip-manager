@@ -240,7 +240,7 @@ export function ProfileScreen() {
               {pushStatus !== "unsupported" && pushStatus !== "denied" && pushStatus !== "loading" && (
                 <Button
                   size="sm"
-                  variant={pushStatus === "subscribed" ? "outline" : "default"}
+                  variant={pushStatus === "subscribed" ? "outline" : "primary"}
                   disabled={pushBusy}
                   onClick={() => void (pushStatus === "subscribed" ? unsubscribe() : subscribe())}
                   className="shrink-0"
