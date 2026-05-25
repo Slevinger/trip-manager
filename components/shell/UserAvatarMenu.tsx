@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { getClientAuth } from "@/lib/firebase";
 import { signInWithGoogle } from "@/lib/googleSignIn";
 import { Avatar, AvatarFallback, AvatarImage, avatarInitials } from "@/components/ui/avatar";
+import pkg from "@/package.json";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -64,6 +65,9 @@ export function UserAvatarMenu({ user }: { user: User | null }) {
           </span>
           <span className="block truncate text-[11px] font-normal normal-case text-[var(--color-muted-foreground)]">
             {user.email}
+          </span>
+          <span className="block text-[10px] font-normal normal-case text-[var(--color-muted-foreground)] opacity-50">
+            v{pkg.version}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
