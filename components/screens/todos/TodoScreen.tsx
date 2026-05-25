@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  CalendarDays,
   CheckSquare,
   ChevronDown,
   Circle,
@@ -95,10 +96,12 @@ function TodoContent({
     await persistTrip({ ...trip, tasks: next, updatedAt: new Date().toISOString() });
   }
 
-  async function addSharedTask(title: string) {
+  async function addSharedTask(title: string, dueDate?: string) {
     const trimmed = title.trim();
     if (!trimmed) return;
-    await updateShared([...sharedTasks, { id: newId(), title: trimmed, status: "todo" }]);
+    const task: TripTask = { id: newId(), title: trimmed, status: "todo" };
+    if (dueDate) task.dueDate = dueDate;
+    await updateShared([...sharedTasks, task]);
   }
 
   async function toggleSharedDone(task: TripTask) {
@@ -119,6 +122,16 @@ function TodoContent({
 
   async function updateSharedTitle(id: string, title: string) {
     await updateShared(sharedTasks.map((t) => (t.id === id ? { ...t, title } : t)));
+  }
+
+  async function updateSharedDueDate(id: string, dueDate: string | undefined) {
+    await updateShared(
+      sharedTasks.map((t) => {
+        if (t.id !== id) return t;
+        const { dueDate: _removed, ...rest } = t;
+        return dueDate ? { ...rest, dueDate } : rest;
+      })
+    );
   }
 
   const FILTER_ITEMS: { key: StatusFilter; label: string }[] = [
@@ -191,6 +204,7 @@ function TodoContent({
                 onToggle={(task) => void toggleSharedDone(task)}
                 onChangeStatus={(id, s) => void changeSharedStatus(id, s)}
                 onUpdateTitle={(id, v) => void updateSharedTitle(id, v)}
+                onUpdateDueDate={(id, v) => void updateSharedDueDate(id, v)}
                 onRemove={(id) => void removeSharedTask(id)}
                 deleteAriaLabel={t("todos.deleteTask")}
               />
@@ -198,7 +212,7 @@ function TodoContent({
           </Card>
         )}
 
-        <AddTaskRow placeholder={t("todos.taskPlaceholder")} onAdd={addSharedTask} />
+        <AddTaskRow placeholder={t("todos.taskPlaceholder")} onAdd={(title, dueDate) => addSharedTask(title, dueDate)} />
       </section>
 
       {/* Private tasks section */}
@@ -225,6 +239,7 @@ function TodoContent({
                 onToggle={(task) => void privateTasks.toggleDone(task.id)}
                 onChangeStatus={(id, s) => void privateTasks.changeStatus(id, s)}
                 onUpdateTitle={(id, v) => void privateTasks.updateTitle(id, v)}
+                onUpdateDueDate={(id, v) => void privateTasks.updateDueDate(id, v)}
                 onRemove={(id) => void privateTasks.removeTask(id)}
                 deleteAriaLabel={t("todos.deleteTask")}
               />
@@ -238,11 +253,15 @@ function TodoContent({
 
         <AddTaskRow
           placeholder={t("todos.privateTaskPlaceholder")}
-          onAdd={(title) => privateTasks.addTask(title)}
+          onAdd={(title, dueDate) => privateTasks.addTask(title, dueDate)}
         />
       </section>
     </div>
   );
+}
+
+function isOverdue(dueDate: string): boolean {
+  return dueDate < new Date().toISOString().slice(0, 10);
 }
 
 function TaskList({
@@ -251,6 +270,7 @@ function TaskList({
   onToggle,
   onChangeStatus,
   onUpdateTitle,
+  onUpdateDueDate,
   onRemove,
   deleteAriaLabel,
 }: {
@@ -259,20 +279,23 @@ function TaskList({
   onToggle: (task: TripTask) => void;
   onChangeStatus: (id: string, status: TaskStatus) => void;
   onUpdateTitle: (id: string, title: string) => void;
+  onUpdateDueDate: (id: string, dueDate: string | undefined) => void;
   onRemove: (id: string) => void;
   deleteAriaLabel: string;
 }) {
   return (
     <ul className="divide-y divide-[var(--color-border)]">
       {tasks.map((task) => (
-          <li key={task.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-            <Checkbox
-              checked={task.status === "done"}
-              onCheckedChange={() => onToggle(task)}
-            />
+        <li key={task.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+          <Checkbox
+            className="mt-0.5"
+            checked={task.status === "done"}
+            onCheckedChange={() => onToggle(task)}
+          />
+          <div className="min-w-0 flex-1">
             <input
               className={
-                "min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-muted-foreground)] " +
+                "w-full bg-transparent text-sm outline-none placeholder:text-[var(--color-muted-foreground)] " +
                 (task.status === "done"
                   ? "text-[var(--color-muted-foreground)] line-through"
                   : "text-[var(--color-foreground)]")
@@ -280,20 +303,40 @@ function TaskList({
               value={task.title}
               onChange={(e) => onUpdateTitle(task.id, e.target.value)}
             />
-            <StatusPicker
-              value={task.status}
-              statusLabels={statusLabels}
-              onChange={(s) => onChangeStatus(task.id, s)}
-            />
-            <Button
-              size="iconSm"
-              variant="ghost"
-              onClick={() => onRemove(task.id)}
-              aria-label={deleteAriaLabel}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </li>
+            <label className="mt-1 flex items-center gap-1">
+              <CalendarDays className={
+                "h-3 w-3 shrink-0 " +
+                (task.dueDate && task.status !== "done" && isOverdue(task.dueDate)
+                  ? "text-red-400"
+                  : "text-[var(--color-muted-foreground)]")
+              } />
+              <input
+                type="date"
+                className={
+                  "bg-transparent text-xs outline-none " +
+                  (task.dueDate && task.status !== "done" && isOverdue(task.dueDate)
+                    ? "text-red-400"
+                    : "text-[var(--color-muted-foreground)]")
+                }
+                value={task.dueDate ?? ""}
+                onChange={(e) => onUpdateDueDate(task.id, e.target.value || undefined)}
+              />
+            </label>
+          </div>
+          <StatusPicker
+            value={task.status}
+            statusLabels={statusLabels}
+            onChange={(s) => onChangeStatus(task.id, s)}
+          />
+          <Button
+            size="iconSm"
+            variant="ghost"
+            onClick={() => onRemove(task.id)}
+            aria-label={deleteAriaLabel}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </li>
       ))}
     </ul>
   );
@@ -371,18 +414,20 @@ function AddTaskRow({
   onAdd,
   placeholder,
 }: {
-  onAdd: (title: string) => Promise<void> | void;
+  onAdd: (title: string, dueDate?: string) => Promise<void> | void;
   placeholder: string;
 }) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
+  const [dueDate, setDueDate] = useState("");
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         if (!value.trim()) return;
-        void onAdd(value);
+        void onAdd(value, dueDate || undefined);
         setValue("");
+        setDueDate("");
       }}
       className="flex items-center gap-2"
     >
@@ -392,6 +437,16 @@ function AddTaskRow({
         placeholder={placeholder}
         className="h-9 text-sm"
       />
+      <label className="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5">
+        <CalendarDays className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
+        <input
+          type="date"
+          className="w-[7.5rem] bg-transparent text-xs text-[var(--color-muted-foreground)] outline-none"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          aria-label={t("todos.dueDateLabel")}
+        />
+      </label>
       <Button type="submit" size="iconSm" variant="primary" aria-label={t("todos.addTask")}>
         <Plus className="h-3.5 w-3.5" />
       </Button>

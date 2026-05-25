@@ -12,13 +12,31 @@ self.addEventListener("push", (event) => {
       body: data.body,
       icon: "/icon-192.png",
       badge: "/badge-96.png",
-      data: { url: data.url },
+      actions: data.actions ?? [],
+      data: { url: data.url, taskAction: data.taskAction ?? null },
     })
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+
+  // Handle action buttons
+  if (event.action === "done") {
+    const taskAction = event.notification.data?.taskAction;
+    if (taskAction) {
+      event.waitUntil(
+        fetch(taskAction.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(taskAction.payload),
+        }).catch(() => {})
+      );
+    }
+    return;
+  }
+
+  // Default click — open or focus the trip todos page
   const url = event.notification.data?.url ?? "/";
   event.waitUntil(
     clients

@@ -371,6 +371,19 @@ export function ManageTripForm({
                   onChange({ ...trip, tasks: next });
                 }}
               />
+              <input
+                type="date"
+                className="rounded-xl border border-zinc-200 bg-white px-2 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
+                value={task.dueDate ?? ""}
+                onChange={(e) => {
+                  const next = tasks.map((x) => {
+                    if (x.id !== task.id) return x;
+                    const { dueDate: _removed, ...rest } = x;
+                    return e.target.value ? { ...rest, dueDate: e.target.value } : rest;
+                  });
+                  onChange({ ...trip, tasks: next });
+                }}
+              />
               <select
                 className="rounded-xl border border-zinc-200 bg-white px-2 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
                 value={task.status}

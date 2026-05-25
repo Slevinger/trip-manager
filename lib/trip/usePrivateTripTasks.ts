@@ -38,10 +38,11 @@ function saveLocalTasks(tripId: string, tasks: TripTask[]): void {
 
 export interface UsePrivateTripTasksResult {
   tasks: TripTask[];
-  addTask: (title: string) => Promise<void>;
+  addTask: (title: string, dueDate?: string) => Promise<void>;
   removeTask: (id: string) => Promise<void>;
   toggleDone: (id: string) => Promise<void>;
   updateTitle: (id: string, title: string) => Promise<void>;
+  updateDueDate: (id: string, dueDate: string | undefined) => Promise<void>;
   changeStatus: (id: string, status: TripTask["status"]) => Promise<void>;
   ready: boolean;
 }
@@ -103,10 +104,12 @@ export function usePrivateTripTasks(tripId: string): UsePrivateTripTasksResult {
   );
 
   const addTask = useCallback(
-    async (title: string) => {
+    async (title: string, dueDate?: string) => {
       const trimmed = title.trim();
       if (!trimmed) return;
-      await persist([...tasks, { id: newId(), title: trimmed, status: "todo" }]);
+      const task: TripTask = { id: newId(), title: trimmed, status: "todo" };
+      if (dueDate) task.dueDate = dueDate;
+      await persist([...tasks, task]);
     },
     [tasks, persist]
   );
@@ -132,6 +135,19 @@ export function usePrivateTripTasks(tripId: string): UsePrivateTripTasksResult {
     [tasks, persist]
   );
 
+  const updateDueDate = useCallback(
+    async (id: string, dueDate: string | undefined) => {
+      await persist(
+        tasks.map((t) => {
+          if (t.id !== id) return t;
+          const { dueDate: _removed, ...rest } = t;
+          return dueDate ? { ...rest, dueDate } : rest;
+        })
+      );
+    },
+    [tasks, persist]
+  );
+
   const changeStatus = useCallback(
     async (id: string, status: TripTask["status"]) => {
       await persist(tasks.map((t) => (t.id === id ? { ...t, status } : t)));
@@ -139,5 +155,5 @@ export function usePrivateTripTasks(tripId: string): UsePrivateTripTasksResult {
     [tasks, persist]
   );
 
-  return { tasks, addTask, removeTask, toggleDone, updateTitle, changeStatus, ready };
+  return { tasks, addTask, removeTask, toggleDone, updateTitle, updateDueDate, changeStatus, ready };
 }
