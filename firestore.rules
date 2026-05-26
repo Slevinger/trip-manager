@@ -474,5 +474,20 @@ service cloud.firestore {
       allow create: if signedIn();
       allow read, update, delete: if false;
     }
+
+    /**
+     * Global custom document-type labels shared across all trips.
+     * Doc ID is the normalized label (lowercase, spaces→hyphens), enforcing uniqueness.
+     * Any signed-in user may read, create, or re-set an existing doc (idempotent upsert).
+     * Nobody may delete via client.
+     */
+    match /documentTypes/{docId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() &&
+        request.resource.data.label is string &&
+        request.resource.data.label.size() > 0 &&
+        request.resource.data.label.size() <= 50;
+      allow delete: if false;
+    }
   }
 }

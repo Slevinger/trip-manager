@@ -296,10 +296,14 @@ export interface TripTask {
   notes?: string;
 }
 
+export const BUILTIN_DOCUMENT_TYPES = ["passport", "visa", "insurance", "license", "medical", "other"] as const;
+export type BuiltinDocumentType = (typeof BUILTIN_DOCUMENT_TYPES)[number];
+
 export interface TripDocument {
   id: string;
   title: string;
-  type: "passport" | "visa" | "insurance" | "license" | "medical" | "other";
+  /** Built-in type or any custom string saved in the `documentTypes` Firestore collection. */
+  type: string;
   travelerId?: string;
   url?: string;
   /** Firebase Storage object path; set when `url` is from Storage so the file can be deleted. */
