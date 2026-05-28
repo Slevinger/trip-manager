@@ -22,6 +22,29 @@ function localDateKey(iso: string): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** Returns every YYYY-MM-DD key from startKey through endKey inclusive. */
+function getDaysBetween(startKey: string, endKey: string): string[] {
+  const [sy, sm, sd] = startKey.split("-").map(Number);
+  const [ey, em, ed] = endKey.split("-").map(Number);
+  const days: string[] = [];
+  let cursor = new Date(sy, (sm ?? 1) - 1, sd ?? 1, 0, 0, 0, 0);
+  const endDate = new Date(ey, (em ?? 1) - 1, ed ?? 1, 0, 0, 0, 0);
+  while (cursor.getTime() <= endDate.getTime()) {
+    days.push(
+      `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`
+    );
+    cursor = new Date(cursor.getTime() + DAY_MS);
+  }
+  return days;
+}
+
+/** Returns every local calendar day that a step occupies (start → end inclusive). */
+function stepDayKeys(step: TripStep): string[] {
+  const startKey = localDateKey(step.startTime);
+  const endKey = step.endTime ? localDateKey(step.endTime) : startKey;
+  return getDaysBetween(startKey, endKey);
+}
+
 export function tripDayKeys(trip: Trip): string[] {
   const set = new Set<string>();
   const start = new Date(trip.startDate);
@@ -36,8 +59,9 @@ export function tripDayKeys(trip: Trip): string[] {
       cursor = new Date(cursor.getTime() + DAY_MS);
     }
   }
+  // Include every day each step spans, not just its start day
   for (const step of trip.steps) {
-    set.add(localDateKey(step.startTime));
+    for (const day of stepDayKeys(step)) set.add(day);
   }
   return Array.from(set).sort();
 }
@@ -46,10 +70,12 @@ export function groupStepsByDay(trip: Trip): Map<string, TripStep[]> {
   const map = new Map<string, TripStep[]>();
   const sorted = sortTripStepsByStartTime(trip.steps);
   for (const day of tripDayKeys(trip)) map.set(day, []);
+  // Place each step in every day it spans (start → end inclusive)
   for (const step of sorted) {
-    const k = localDateKey(step.startTime);
-    if (!map.has(k)) map.set(k, []);
-    map.get(k)!.push(step);
+    for (const day of stepDayKeys(step)) {
+      if (!map.has(day)) map.set(day, []);
+      map.get(day)!.push(step);
+    }
   }
   return map;
 }

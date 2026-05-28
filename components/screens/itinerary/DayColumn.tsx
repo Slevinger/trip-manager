@@ -87,6 +87,7 @@ export function DayColumn({ dayKey, index, trip, items, draggable, weatherChip }
                 step={step}
                 trip={trip}
                 draggable={draggable}
+                dayKey={dayKey}
               />
             ))}
           </div>
@@ -155,10 +156,12 @@ function StepCard({
   step,
   trip,
   draggable,
+  dayKey,
 }: {
   step: TripStep;
   trip: Trip;
   draggable: boolean;
+  dayKey: string;
 }) {
   const { t } = useI18n();
   const sortable = useSortable({ id: `step:${step.id}` });
@@ -171,15 +174,28 @@ function StepCard({
     : undefined;
   const Icon = STEP_ICON[step.stepType] ?? Compass;
   const tone = STEP_BADGE[step.stepType] ?? "neutral";
-  const fmt = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-  const startMs = tripInstantMs(step.startTime);
-  const endMs = step.endTime ? tripInstantMs(step.endTime) : null;
-  const allDay = startMs == null;
+  const fmt = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+
+  // Clip displayed times to this day's boundaries for multi-day steps
+  const [dy, dm, dd] = dayKey.split("-").map(Number);
+  const dayStartMs = new Date(dy, (dm ?? 1) - 1, dd ?? 1, 0, 0, 0, 0).getTime();
+  const dayEndMs = dayStartMs + 24 * 3600 * 1000; // midnight start of next day
+
+  const rawStartMs = tripInstantMs(step.startTime);
+  const rawEndMs = step.endTime ? tripInstantMs(step.endTime) : null;
+
+  const allDay = rawStartMs == null;
+  // If step started before this day, clip start to 00:00 of this day
+  const startMs = rawStartMs != null && rawStartMs < dayStartMs ? dayStartMs : rawStartMs;
+  // If step ends after this day (past midnight), clip end to 00:00 of next day
+  const endMs = rawEndMs != null && rawEndMs > dayEndMs ? dayEndMs : rawEndMs;
+
+  const fmtTime = (ms: number) => ms % (24 * 3600 * 1000) === 0 ? "00:00" : fmt.format(new Date(ms));
   const timeRange = allDay
     ? t("itinerary.allDay")
     : endMs && endMs - (startMs ?? 0) > 0
-      ? `${fmt.format(new Date(startMs!))} – ${fmt.format(new Date(endMs))}`
-      : fmt.format(new Date(startMs!));
+      ? `${fmtTime(startMs!)} – ${fmtTime(endMs)}`
+      : fmtTime(startMs!);
 
   const destination =
     trip.destinations.find((d) => d.id === step.targetDestinationId) ??
@@ -276,6 +292,7 @@ function StepDetails({ step, trip }: { step: TripStep; trip: Trip }) {
     hour: "2-digit",
     minute: "2-digit",
     weekday: "short",
+    hour12: false,
   });
   const fromDest =
     "fromStayId" in step ? trip.destinations.find((d) => d.id === step.fromStayId) : null;

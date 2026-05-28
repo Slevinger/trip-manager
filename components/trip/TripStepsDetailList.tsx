@@ -36,8 +36,9 @@ export function formatStepRange(startIso: string, endIso: string | undefined, em
   const opts: Intl.DateTimeFormatOptions = {
     month: "short",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   };
   if (!b || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return empty;
   return `${a.toLocaleString(undefined, opts)} → ${b.toLocaleString(undefined, opts)}`;

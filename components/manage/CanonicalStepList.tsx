@@ -40,8 +40,9 @@ function formatIntervalCompact(startIso: string, endIso: string): string {
   const opts: Intl.DateTimeFormatOptions = {
     month: "short",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   };
   return `${a.toLocaleString(undefined, opts)} → ${b.toLocaleString(undefined, opts)}`;
 }

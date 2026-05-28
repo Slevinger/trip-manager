@@ -120,8 +120,9 @@ export function formatPrettyDateTime(iso: string, intlLocale: string): string {
       weekday: "short",
       month: "short",
       day: "numeric",
-      hour: "numeric",
+      hour: "2-digit",
       minute: "2-digit",
+      hour12: false,
     }).format(date);
   } catch (e) {
     logCaughtException(e, "DateRangeCalendar/formatPrettyDateTime/intlFallback", { intlLocale });

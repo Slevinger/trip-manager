@@ -70,6 +70,7 @@ function formatIntervalRangeShort(startIso: string, endIso: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   };
   return `${a.toLocaleString(undefined, opts)} – ${b.toLocaleString(undefined, opts)}`;
 }

@@ -618,7 +618,7 @@ function ObligationPanel({
           <span>{cancellable ? "✓ Cancellable" : "✗ Non-cancellable"}</span>
           {cancellable && cancellationDeadline ? (
             <span className="text-[var(--color-muted-foreground)]">
-              · by {new Date(cancellationDeadline).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+              · by {new Date(cancellationDeadline).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
             </span>
           ) : null}
         </div>
