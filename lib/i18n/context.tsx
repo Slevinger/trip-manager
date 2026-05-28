@@ -1,5 +1,6 @@
 "use client";
 
+import { logCaughtException } from "@/lib/logCaughtException";
 import {
   createContext,
   useCallback,
@@ -39,8 +40,8 @@ function readInitialLocale(): SupportedLocale {
   try {
     const s = localStorage.getItem(LOCALE_STORAGE_KEY);
     if (s === "he" || s === "en" || s === "ru") return s;
-  } catch {
-    /* private mode */
+  } catch (e) {
+    logCaughtException(e, "i18n/readInitialLocale");
   }
   if (typeof navigator !== "undefined") {
     const nav = navigator.language?.toLowerCase() ?? "";
@@ -63,8 +64,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLocaleState(next);
     try {
       localStorage.setItem(LOCALE_STORAGE_KEY, next);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      logCaughtException(e, "i18n/setLocale");
     }
   }, []);
 

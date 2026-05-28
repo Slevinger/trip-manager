@@ -126,10 +126,13 @@ export default function MemoryTestPage() {
   }, []);
 
   useEffect(() => {
-    if (!useFirestore || !user || !db) return () => {};
+    if (!useFirestore || !user?.uid) return () => {};
+    const dbNow = getDb();
+    if (!dbNow) return () => {};
+    const authUser = user;
     let unsub: (() => void) | undefined;
     unsub = subscribeMyCanonicalTrips(
-      user,
+      authUser,
       (list) => {
         setTrips(list);
         const { a, b } = pickTwoTripIds(list);
@@ -139,7 +142,7 @@ export default function MemoryTestPage() {
       (e) => setStatus(e.message)
     );
     return () => unsub?.();
-  }, [useFirestore, user, db]);
+  }, [useFirestore, user?.uid]);
 
   useEffect(() => {
     if (!useFirestore || !emailLower) {

@@ -1,0 +1,67 @@
+name: og-fetcher health check
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      force_heal:
+        description: "Force run heal.js even if health-check passes"
+        required: false
+        default: "false"
+
+jobs:
+  health:
+    name: Verify og-fetcher selectors
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: og-fetcher/package-lock.json
+
+      - name: Install og-fetcher dependencies
+        working-directory: og-fetcher
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: og-fetcher
+        run: npx playwright install chromium --with-deps
+
+      - name: Run health check
+        id: health
+        working-directory: og-fetcher
+        run: node health-check.js
+        continue-on-error: true
+
+      - name: Run self-heal (on failure or forced)
+        id: heal
+        if: steps.health.outcome == 'failure' || github.event.inputs.force_heal == 'true'
+        working-directory: og-fetcher
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node heal.js
+
+      - name: Commit updated selectors.json
+        if: steps.heal.outcome == 'success'
+        run: |
+          git config user.name "og-fetcher-healer[bot]"
+          git config user.email "og-fetcher-healer[bot]@users.noreply.github.com"
+          git add og-fetcher/selectors.json og-fetcher/failure-log.json
+          git diff --staged --quiet || git commit -m "chore(og-fetcher): auto-heal selectors [skip ci]"
+          git push
+
+      - name: Fail job if health check failed and heal also failed
+        if: steps.health.outcome == 'failure' && steps.heal.outcome != 'success'
+        run: |
+          echo "Health check failed and self-heal did not succeed."
+          echo "Manual intervention required — check og-fetcher/selectors.json."
+          exit 1

@@ -1,3 +1,4 @@
+import { logCaughtException } from "@/lib/logCaughtException";
 import { migrateTripToDestinationRegistry } from "@/lib/tripDestinationRegistry";
 import type { Trip } from "@/lib/types/trip";
 import { sampleTrip } from "@/lib/sampleTrip";
@@ -24,7 +25,8 @@ export function loadStore(): TripStore {
       return emptyStore();
     }
     return parsed;
-  } catch {
+  } catch (e) {
+    logCaughtException(e, "tripLocalStore/loadStore");
     return emptyStore();
   }
 }
@@ -33,8 +35,8 @@ function saveStore(store: TripStore): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    /* quota */
+  } catch (e) {
+    logCaughtException(e, "tripLocalStore/saveStore");
   }
 }
 

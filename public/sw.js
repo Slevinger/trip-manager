@@ -1,0 +1,55 @@
+// Service Worker — handles Web Push notifications
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener("push", (event) => {
+  let data = { title: "Trip Update", body: "", url: "/" };
+  try {
+    data = event.data ? event.data.json() : data;
+  } catch {
+    data.body = event.data ? event.data.text() : "";
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/icon-192.png",
+      badge: "/badge-96.png",
+      actions: data.actions ?? [],
+      requireInteraction: (data.actions ?? []).length > 0,
+      data: { url: data.url, taskAction: data.taskAction ?? null },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  // Handle action buttons
+  if (event.action === "done") {
+    const taskAction = event.notification.data?.taskAction;
+    if (taskAction) {
+      event.waitUntil(
+        fetch(taskAction.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(taskAction.payload),
+        }).catch(() => {})
+      );
+    }
+    return;
+  }
+
+  // Default click — open or focus the trip todos page
+  const url = event.notification.data?.url ?? "/";
+  event.waitUntil(
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((windowClients) => {
+        const existing = windowClients.find(
+          (c) => c.url.includes(url) && "focus" in c
+        );
+        if (existing) return existing.focus();
+        return clients.openWindow(url);
+      })
+  );
+});

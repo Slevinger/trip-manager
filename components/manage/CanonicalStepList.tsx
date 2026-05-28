@@ -7,7 +7,12 @@ import { isoToDatetimeLocalValue } from "@/lib/isoDatetimeLocal";
 import { stepIntervalEmoji } from "@/lib/stepIntervalUi";
 import { destinationFromList } from "@/lib/tripDestinationRegistry";
 import { sortTripStepsByStartTime } from "@/lib/tripStepSort";
-import type { Destination, Trip, TripStep } from "@/lib/types/trip";
+import { formatMoneyDisplay, stepDisplayTotalCost } from "@/lib/trip/stepCosts";
+import type { BaseStepInterval, Destination, TransitStep, Trip, TripStep } from "@/lib/types/trip";
+import { getObligationStatus } from "@/lib/expenses/obligationStatus";
+
+const REORDER_LONG_PRESS_MS = 450;
+const REORDER_CANCEL_MOVE_PX = 12;
 
 function stepEmoji(step: TripStep): string {
   if (step.stepType === "stay") return "🏨";
@@ -35,8 +40,9 @@ function formatIntervalCompact(startIso: string, endIso: string): string {
   const opts: Intl.DateTimeFormatOptions = {
     month: "short",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   };
   return `${a.toLocaleString(undefined, opts)} → ${b.toLocaleString(undefined, opts)}`;
 }
@@ -87,18 +93,57 @@ function intervalExtraHint(
   return null;
 }
 
+type PayStatus = "paid" | "partially_paid";
+
+function stepPaymentStatus(step: TripStep): PayStatus | null {
+  const obligations = step.stepIntervals
+    .map((int) => (int as BaseStepInterval).obligation)
+    .filter(Boolean);
+  if (step.stepType === "transit") {
+    const manual = (step as TransitStep).totalManualPriceObligation;
+    if (manual) obligations.push(manual);
+  }
+  if (obligations.length === 0) return null;
+  const statuses = obligations.map((ob) => getObligationStatus(ob!));
+  if (statuses.every((s) => s === "paid")) return "paid";
+  if (statuses.some((s) => s !== "unpaid")) return "partially_paid";
+  return null;
+}
+
+function intervalPaymentStatus(int: BaseStepInterval): PayStatus | null {
+  if (!int.obligation) return null;
+  const s = getObligationStatus(int.obligation);
+  if (s === "paid") return "paid";
+  if (s === "partially_paid") return "partially_paid";
+  return null;
+}
+
+function PayBadge({ status }: { status: PayStatus }) {
+  return status === "paid" ? (
+    <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+      Paid
+    </span>
+  ) : (
+    <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+      Partial
+    </span>
+  );
+}
+
 export function CanonicalStepList({
   trip,
   onEdit,
   onDelete,
   onReorder,
   onInsertAfter,
+  highlightIntervalId,
 }: {
   trip: Trip;
   onEdit: (step: TripStep) => void;
   onDelete: (stepId: string) => void;
   onReorder: (orderedStepIds: string[]) => void;
   onInsertAfter: (afterStepId: string) => void;
+  highlightIntervalId?: string | null;
 }) {
   const { t } = useI18n();
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -107,9 +152,36 @@ export function CanonicalStepList({
   const [deleteConfirmStepId, setDeleteConfirmStepId] = useState<string | null>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const dragSnapshot = useRef<TripStep[]>([]);
+  const stepsRef = useRef<TripStep[]>([]);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDragRef = useRef<{
+    stepId: string;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    pointerId: number;
+  } | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
+
+  const [highlightStepId, setHighlightStepId] = useState<string | null>(null);
 
   const steps = useMemo(() => sortTripStepsByStartTime(trip.steps), [trip.steps]);
+  stepsRef.current = steps;
   const isDragging = draggingId !== null;
+
+  useEffect(() => {
+    if (!highlightIntervalId) return;
+    const step = steps.find((s) =>
+      s.stepIntervals.some((iv) => iv.id === highlightIntervalId)
+    );
+    if (!step) return;
+    setHighlightStepId(step.id);
+    const el = cardRefs.current.get(step.id);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => setHighlightStepId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [highlightIntervalId, steps]);
   const draggingStep = draggingId ? steps.find((s) => s.id === draggingId) ?? null : null;
   const visibleSteps = isDragging ? steps.filter((s) => s.id !== draggingId) : steps;
 
@@ -129,12 +201,88 @@ export function CanonicalStepList({
   function clearDragState() {
     setDraggingId(null);
     setDropIndex(null);
+    dropIndexRef.current = null;
     setDragPos(null);
     dragSnapshot.current = [];
   }
 
+  function cancelPendingLongPress() {
+    if (longPressTimerRef.current != null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    pendingDragRef.current = null;
+  }
+
+  useEffect(() => () => cancelPendingLongPress(), []);
+
+  function beginReorderDrag(stepId: string, clientX: number, clientY: number) {
+    dragSnapshot.current = stepsRef.current;
+    setDraggingId(stepId);
+    setDragPos({ x: clientX, y: clientY });
+    const idx = calcDropIndex(clientY, stepId);
+    dropIndexRef.current = idx;
+    setDropIndex(idx);
+  }
+
+  function scheduleLongPressReorder(e: React.PointerEvent<HTMLButtonElement>, stepId: string) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    cancelPendingLongPress();
+
+    const pointerId = e.pointerId;
+    pendingDragRef.current = {
+      stepId,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      pointerId,
+    };
+
+    let cleaned = false;
+    const cleanupWaitListeners = () => {
+      if (cleaned) return;
+      cleaned = true;
+      window.removeEventListener("pointermove", onMoveWhileWaiting);
+      window.removeEventListener("pointerup", onUpWhileWaiting);
+      window.removeEventListener("pointercancel", onUpWhileWaiting);
+    };
+
+    const onMoveWhileWaiting = (ev: PointerEvent) => {
+      if (pendingDragRef.current?.pointerId !== ev.pointerId) return;
+      pendingDragRef.current.lastX = ev.clientX;
+      pendingDragRef.current.lastY = ev.clientY;
+      const dx = ev.clientX - pendingDragRef.current.startX;
+      const dy = ev.clientY - pendingDragRef.current.startY;
+      if (dx * dx + dy * dy > REORDER_CANCEL_MOVE_PX * REORDER_CANCEL_MOVE_PX) {
+        cleanupWaitListeners();
+        cancelPendingLongPress();
+      }
+    };
+
+    const onUpWhileWaiting = (ev: PointerEvent) => {
+      if (pendingDragRef.current?.pointerId !== ev.pointerId) return;
+      cleanupWaitListeners();
+      cancelPendingLongPress();
+    };
+
+    window.addEventListener("pointermove", onMoveWhileWaiting);
+    window.addEventListener("pointerup", onUpWhileWaiting);
+    window.addEventListener("pointercancel", onUpWhileWaiting);
+
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      cleanupWaitListeners();
+      const p = pendingDragRef.current;
+      pendingDragRef.current = null;
+      if (!p || p.pointerId !== pointerId) return;
+      beginReorderDrag(p.stepId, p.lastX, p.lastY);
+    }, REORDER_LONG_PRESS_MS);
+  }
+
   function calcDropIndex(pointerY: number, currentDraggingId: string): number {
-    const ordered = steps.filter((s) => s.id !== currentDraggingId);
+    const ordered = stepsRef.current.filter((s) => s.id !== currentDraggingId);
     for (let i = 0; i < ordered.length; i++) {
       const el = cardRefs.current.get(ordered[i].id);
       if (!el) continue;
@@ -145,32 +293,32 @@ export function CanonicalStepList({
     return ordered.length;
   }
 
-  function startPointerDrag(e: React.PointerEvent<HTMLButtonElement>, stepId: string) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    dragSnapshot.current = steps;
-    setDraggingId(stepId);
-    setDragPos({ x: e.clientX, y: e.clientY });
-    setDropIndex(calcDropIndex(e.clientY, stepId));
-  }
-
   useEffect(() => {
     if (!draggingId) return;
+    const id = draggingId;
     const onMove = (e: PointerEvent) => {
       setDragPos({ x: e.clientX, y: e.clientY });
-      setDropIndex(calcDropIndex(e.clientY, draggingId));
+      const idx = calcDropIndex(e.clientY, id);
+      dropIndexRef.current = idx;
+      setDropIndex(idx);
     };
     const onUp = () => {
-      if (dropIndex !== null) commitReorderAt(dropIndex);
+      const idx = dropIndexRef.current;
+      if (idx !== null) commitReorderAt(idx);
+      clearDragState();
+    };
+    const onCancel = () => {
       clearDragState();
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointercancel", onCancel, { once: true });
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
     };
-  }, [draggingId, dropIndex, steps]);
+  }, [draggingId]);
 
   function formatRange(step: TripStep): string {
     const a = isoToDatetimeLocalValue(step.startTime).replace("T", " ");
@@ -210,22 +358,32 @@ export function CanonicalStepList({
               if (el) cardRefs.current.set(s.id, el);
               else cardRefs.current.delete(s.id);
             }}
-            className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+            className={`overflow-hidden rounded-2xl border shadow-sm transition-colors duration-700 ${
+              highlightStepId === s.id
+                ? "border-violet-400 bg-violet-50 dark:border-violet-500 dark:bg-violet-950/40"
+                : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+            }`}
           >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                  <button
-                    type="button"
-                    className="mr-2 cursor-grab touch-none text-zinc-400 active:cursor-grabbing"
-                    title={t("manage.listDragReorderTitle")}
-                    onPointerDown={(e) => startPointerDrag(e, s.id)}
-                    aria-label={t("manage.listDragStepAria")}
-                  >
-                    ⋮⋮
-                  </button>
-                  {idx + 1}. {stepEmoji(s)} {stepDisplayTitle(s)}
-                </div>
+            <div className="flex items-stretch">
+              <button
+                type="button"
+                className="flex cursor-grab touch-none items-center px-3 text-zinc-400 active:cursor-grabbing"
+                title={t("manage.listDragReorderTitle")}
+                onPointerDown={(e) => { scheduleLongPressReorder(e, s.id); }}
+                aria-label={t("manage.listDragStepAria")}
+              >
+                ⋮⋮
+              </button>
+              <button
+                type="button"
+                onClick={() => onEdit(s)}
+                className="min-w-0 flex-1 cursor-pointer py-4 pe-4 text-start hover:bg-zinc-50 transition-colors dark:hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500"
+              >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    {idx + 1}. {stepEmoji(s)} {stepDisplayTitle(s)}
+                  </div>
                 {s.stepIntervals.length > 1 ? (
                   <div className="mt-1.5">
                     <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -270,6 +428,14 @@ export function CanonicalStepList({
                                 {hint}
                               </span>
                             ) : null}
+                            {"price" in int && int.price ? (
+                              <span className="mt-0.5 flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
+                                  {formatMoneyDisplay(int.price)}
+                                </span>
+                                {(() => { const ps = intervalPaymentStatus(int as BaseStepInterval); return ps ? <PayBadge status={ps} /> : null; })()}
+                              </span>
+                            ) : null}
                           </li>
                         );
                       })}
@@ -310,72 +476,72 @@ export function CanonicalStepList({
                     </div>
                   </>
                 )}
+                {(() => {
+                  const cost = stepDisplayTotalCost(s, trip.steps);
+                  if (!cost) return null;
+                  return (
+                    <p className="mt-1.5 text-xs font-semibold tabular-nums text-zinc-800 dark:text-zinc-100">
+                      {t("itinerary.stepCostTotal")}: {formatMoneyDisplay(cost)}
+                    </p>
+                  );
+                })()}
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 flex-col items-end gap-2">
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
                     {stepKindLabel(s, t)}
                   </span>
-                  {deleteConfirmStepId !== s.id ? (
+                  {(() => { const ps = stepPaymentStatus(s); return ps ? <PayBadge status={ps} /> : null; })()}
+                </div>
+              </div>
+              </button>
+            </div>
+
+            <div className="border-t border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100"
+                  onClick={(e) => { e.stopPropagation(); onInsertAfter(s.id); }}
+                >
+                  {t("manage.addStepAfter")}
+                </button>
+                {deleteConfirmStepId !== s.id ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
+                    onClick={(e) => { e.stopPropagation(); setDeleteConfirmStepId(s.id); }}
+                    aria-label={t("manage.deleteStepAria", { title: stepDisplayTitle(s) })}
+                  >
+                    {t("manage.deleteStep")}
+                  </button>
+                ) : null}
+              </div>
+              {deleteConfirmStepId === s.id ? (
+                <div
+                  className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/30"
+                  role="alert"
+                >
+                  <p className="text-xs leading-snug text-amber-950 dark:text-amber-100">
+                    {t("manage.deleteStepConfirm", { title: stepDisplayTitle(s) })}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
-                      onClick={() => setDeleteConfirmStepId(s.id)}
-                      aria-label={t("manage.deleteStepAria", { title: stepDisplayTitle(s) })}
+                      className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                      onClick={(e) => { e.stopPropagation(); setDeleteConfirmStepId(null); }}
                     >
-                      {t("manage.deleteStep")}
+                      {t("manage.keepStep")}
                     </button>
-                  ) : null}
+                    <button
+                      type="button"
+                      className="rounded-lg border border-red-300 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white dark:border-red-800 dark:bg-red-700"
+                      onClick={(e) => { e.stopPropagation(); onDelete(s.id); setDeleteConfirmStepId(null); }}
+                    >
+                      {t("manage.deleteStepYes")}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </div>
-            {deleteConfirmStepId === s.id ? (
-              <div
-                className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/30"
-                role="alert"
-              >
-                <p className="text-xs leading-snug text-amber-950 dark:text-amber-100">
-                  {t("manage.deleteStepConfirm", { title: stepDisplayTitle(s) })}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-                    onClick={() => setDeleteConfirmStepId(null)}
-                  >
-                    {t("manage.keepStep")}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-red-300 bg-red-600 px-3 py-1.5 text-xs font-semibold text-white dark:border-red-800 dark:bg-red-700"
-                    onClick={() => {
-                      onDelete(s.id);
-                      setDeleteConfirmStepId(null);
-                    }}
-                  >
-                    {t("manage.deleteStepYes")}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium dark:border-zinc-800 dark:bg-zinc-900"
-                onClick={() => {
-                  setDeleteConfirmStepId(null);
-                  onEdit(s);
-                }}
-              >
-                {t("common.edit")}
-              </button>
-              <button
-                type="button"
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100"
-                onClick={() => onInsertAfter(s.id)}
-              >
-                {t("manage.addStepAfter")}
-              </button>
+              ) : null}
             </div>
           </div>
         </div>

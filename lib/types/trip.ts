@@ -92,6 +92,25 @@ export interface TripBudget {
   };
 }
 
+export interface Receipt {
+  id: string;
+  amount: number;
+  currency: CurrencyCode;
+  /** Firebase Storage download URL */
+  attachment?: string;
+  /** References Traveler.id */
+  paidByTravelerId: string;
+}
+
+export type ObligationStatus = "unpaid" | "partially_paid" | "paid";
+
+export interface Obligation {
+  title: string;
+  price: number;
+  currency: CurrencyCode;
+  receipts: Receipt[];
+}
+
 export interface BaseStepInterval {
   id: string;
   title: string;
@@ -99,8 +118,15 @@ export interface BaseStepInterval {
   startTime: ISODateString;
   endTime: ISODateString;
   price?: Money;
+  /** Payment obligation for this interval's price. */
+  obligation?: Obligation;
   booking?: BookingInfo;
   attachments?: Attachment[];
+
+  /** Whether this transit booking can be cancelled. */
+  cancellable?: boolean;
+  /** Last date/time by which cancellation is allowed. */
+  cancellationDeadline?: ISODateString;
 }
 
 export type StayType =
@@ -241,6 +267,8 @@ export interface TransitStep extends BaseStep {
   toStayId: string;
   stepIntervals: TransitStepInterval[];
   totalManualPrice?: Money;
+  /** Payment obligation for the transit step's totalManualPrice. */
+  totalManualPriceObligation?: Obligation;
 }
 
 export interface ActivityStep extends BaseStep {
@@ -268,10 +296,14 @@ export interface TripTask {
   notes?: string;
 }
 
+export const BUILTIN_DOCUMENT_TYPES = ["passport", "visa", "insurance", "license", "medical", "other"] as const;
+export type BuiltinDocumentType = (typeof BUILTIN_DOCUMENT_TYPES)[number];
+
 export interface TripDocument {
   id: string;
   title: string;
-  type: "passport" | "visa" | "insurance" | "license" | "medical" | "other";
+  /** Built-in type or any custom string saved in the `documentTypes` Firestore collection. */
+  type: string;
   travelerId?: string;
   url?: string;
   /** Firebase Storage object path; set when `url` is from Storage so the file can be deleted. */
@@ -291,9 +323,11 @@ export interface TripLiveLocation {
  * Pending suggestion for the trip — surfaced in the floating notifications dock.
  *
  * A recommendation is a *bundle of options* (each carrying a full step-interval
- * payload of the same `kind`). The user picks one option to approve, which
- * becomes a new step on the trip. The whole recommendation stays in the queue
- * until the user approves an option or deletes the recommendation.
+ * payload of the same `kind`). The user picks one option to approve: either it
+ * becomes a **new** step, or — when {@link BaseRecommendationOption#targetStepId}
+ * is set — the interval is **merged** into that existing step’s `stepIntervals`
+ * (same `stepType` as `kind`). The whole recommendation stays in the queue until
+ * the user approves an option or deletes the recommendation.
  *
  * Recommendations live alongside `steps` rather than inside one so the queue
  * is order-independent and can be authored by the assistant or other tooling.
@@ -312,6 +346,20 @@ interface BaseRecommendationOption {
    * not yet exist on the trip (ids should match the interval's references).
    */
   destinations?: Destination[];
+  /**
+   * When set, approving merges `interval` into this step’s `stepIntervals` instead
+   * of creating a new step. Must match some {@link TripStep#id} whose `stepType`
+   * equals this option’s recommendation `kind` (`stay` / `transit` / `activity`).
+   */
+  targetStepId?: string;
+  /** Tripadvisor (or activity info) URL — for reviews and ratings. */
+  url?: string;
+  /** Booking.com / Viator / Google Flights search URL — for checking availability. */
+  bookingUrl?: string;
+  /** Photo or thumbnail URL to show alongside the option. */
+  imageUrl?: string;
+  /** Human-readable price note, e.g. "€120/night", "~$45 pp", "Free entry". */
+  priceNote?: string;
 }
 
 export interface StayRecommendationOption extends BaseRecommendationOption {
@@ -344,6 +392,12 @@ interface BaseTripRecommendation {
    * but no longer trigger the "new" indicator on the bell or the card.
    */
   seen?: boolean;
+  /**
+   * When set, only these email addresses may see this recommendation in the UI.
+   * Stamped by the assistant when the originating chat turn was `@private`.
+   * Stripped when the recommendation is approved into the itinerary (it becomes public).
+   */
+  visibleTo?: string[];
 }
 
 export interface StayRecommendation extends BaseTripRecommendation {
@@ -370,6 +424,113 @@ export type TripRecommendationOption =
   | StayRecommendationOption
   | TransitRecommendationOption
   | ActivityRecommendationOption;
+
+export type PackingCategory =
+  | "documents"
+  | "clothes"
+  | "toiletries"
+  | "tech"
+  | "health"
+  | "gear"
+  | "misc";
+
+export interface PackingItem {
+  id: string;
+  name: string;
+  category: PackingCategory;
+  quantity?: number;
+  packed: boolean;
+  /** Owner; missing means shared / household item. */
+  travelerId?: string;
+  /** Marker so reset / template-merge knows what came from a template. */
+  templateId?: string;
+}
+
+export interface PackingList {
+  id: string;
+  title: string;
+  items: PackingItem[];
+  /** Source template applied to this list (if any). */
+  templateId?: string;
+}
+
+export type ExpenseCategory =
+  | "hotels"
+  | "transport"
+  | "food"
+  | "activities"
+  | "shopping"
+  | "insurance"
+  | "other";
+
+export interface ExpenseEntry {
+  id: string;
+  title: string;
+  amount: Money;
+  /** Traveler id of the person who paid. */
+  paidByTravelerId: string;
+  /** Traveler ids the cost is split across (equally). Empty = paid alone. */
+  splitBetween: string[];
+  category?: ExpenseCategory;
+  date: ISODateString;
+  /** Optional link back to an itinerary step. */
+  relatedStepId?: string;
+  notes?: string;
+}
+
+export type CommentTargetType = "trip" | "step" | "recommendation" | "destination";
+
+export interface TripComment {
+  id: string;
+  /** Lowercased email of the author (matches travelers/viewers email). */
+  authorId: string;
+  authorName?: string;
+  createdAt: ISODateString;
+  body: string;
+  targetType: CommentTargetType;
+  targetId: string;
+  resolved?: boolean;
+  /** Threading: id of the parent comment when this is a reply. */
+  parentId?: string;
+  /** Lowercased emails of travelers who reacted thumbs-up (toggle). */
+  reactions?: string[];
+}
+
+export interface RecommendationVote {
+  recommendationId: string;
+  optionId: string;
+  /** Lowercased email of the voter. */
+  travelerId: string;
+  createdAt: ISODateString;
+}
+
+export interface WeatherDay {
+  dateIso: string;
+  tempMaxC: number;
+  tempMinC: number;
+  precipMm?: number;
+  weatherCode: number;
+}
+
+export interface WeatherSnapshot {
+  destinationId: string;
+  updatedAt: ISODateString;
+  daily: WeatherDay[];
+}
+
+/** Scenic hero background for trip overview; chosen from destinations (API + optional LLM query). */
+export interface TripHeroCover {
+  url: string;
+  destinationLabel?: string;
+  query?: string;
+  photographerName?: string;
+  photoPageUrl?: string;
+  licenseNote?: string;
+  updatedAt: ISODateString;
+}
+
+/** Server/API payload before `updatedAt` is set on save. */
+export type TripHeroCoverPersistPayload = Omit<TripHeroCover, "updatedAt">;
 
 export interface Trip {
   id: string;
@@ -398,9 +559,26 @@ export interface Trip {
    * each entry carries a full step interval that can be promoted into `steps` on approve.
    */
   recommendations?: TripRecommendation[];
+  /**
+   * Recommendation ids removed from the queue (dismiss / approve). Used so thread snapshots
+   * do not resurrect deleted cards when syncing suggestions from the shared assistant thread.
+   */
+  removedRecommendationIds?: string[];
   /** Live device positions by participant key (typically lowercased email). */
   liveLocations?: Record<string, TripLiveLocation>;
   warnings?: TripWarning[];
+  /** Per-trip packing lists (smart categories, optionally per traveler). */
+  packingLists?: PackingList[];
+  /** Per-expense ledger; rolls up into the Budget screen. */
+  expenses?: ExpenseEntry[];
+  /** Comments on the trip / steps / destinations / recommendations. */
+  comments?: TripComment[];
+  /** Per-option votes on recommendations (collaborative voting). */
+  recommendationVotes?: RecommendationVote[];
+  /** Cached weather snapshots per destination. */
+  weatherCache?: WeatherSnapshot[];
+  /** Auto-filled scenic photo for overview hero (destinations-based). */
+  heroCover?: TripHeroCover;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }

@@ -29,6 +29,7 @@ import { intervalIndexFromFrame, STEP_WIZARD_IDS } from "@/lib/wizardStack/types
 import type { WizardFrame } from "@/lib/wizardStack/types";
 import type { WizardStackControls } from "@/lib/wizardStack/useWizardStack";
 import type {
+  CurrencyCode,
   Destination,
   TransitStep,
   TransitStepInterval,
@@ -38,6 +39,7 @@ import type {
 import { TRANSIT_TYPES } from "@/components/manage/stepEditorConstants";
 
 const TRANSIT_INTERVAL_WIZARD_PAGE_COUNT = 2;
+const STEP_PRICE_CURRENCIES: CurrencyCode[] = ["THB", "USD", "EUR", "ILS", "GBP"];
 
 export function TransitStepIntervalWizardPanel({
   frame,
@@ -46,6 +48,7 @@ export function TransitStepIntervalWizardPanel({
   patchIntervalAt,
   wizard,
   tripStartIso,
+  tripCurrency,
   trip,
   tripPlaceGrouped,
   getRow,
@@ -58,13 +61,14 @@ export function TransitStepIntervalWizardPanel({
   patchIntervalAt: (index: number, patch: Record<string, unknown>) => void;
   wizard: WizardStackControls;
   tripStartIso: string;
+  tripCurrency: CurrencyCode;
   trip: Trip;
   tripPlaceGrouped: TripGroupedPlacePicks;
   getRow: (id: string | undefined) => Destination;
   setRow: (id: string, row: Destination) => void;
   onAppendDestinations: (rows: Destination[]) => void;
 }) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const intlLocale = intlLocaleForApp(locale);
   const intervalIndex = Math.min(intervalIndexFromFrame(frame), draft.stepIntervals.length - 1);
   const interval = draft.stepIntervals[intervalIndex];
@@ -217,6 +221,103 @@ export function TransitStepIntervalWizardPanel({
                 ))}
               </select>
             </WizardField>
+
+            <WizardSection title="Cancellation" hint="Whether this leg can be cancelled and by when.">
+              <WizardField htmlFor="transit-interval-cancellable" label="Cancellable" optional>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    id="transit-interval-cancellable"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-zinc-300"
+                    checked={(interval as TransitStepInterval).cancellable ?? false}
+                    onChange={(e) =>
+                      patchIntervalAt(intervalIndex, {
+                        cancellable: e.target.checked,
+                        cancellationDeadline: e.target.checked
+                          ? (interval as TransitStepInterval).cancellationDeadline
+                          : undefined,
+                      })
+                    }
+                  />
+                  <span className="text-sm">This leg is cancellable</span>
+                </label>
+              </WizardField>
+              {(interval as TransitStepInterval).cancellable ? (
+                <WizardField htmlFor="transit-interval-cancellation-deadline" label="Cancel by" optional>
+                  <input
+                    id="transit-interval-cancellation-deadline"
+                    type="datetime-local"
+                    className={WIZARD_INPUT_CLASS}
+                    value={
+                      (interval as TransitStepInterval).cancellationDeadline
+                        ? (interval as TransitStepInterval).cancellationDeadline!.slice(0, 16)
+                        : ""
+                    }
+                    onChange={(e) =>
+                      patchIntervalAt(intervalIndex, {
+                        cancellationDeadline: e.target.value
+                          ? new Date(e.target.value).toISOString()
+                          : undefined,
+                      })
+                    }
+                  />
+                </WizardField>
+              ) : null}
+            </WizardSection>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <WizardField
+                htmlFor="transit-interval-price-amount"
+                label={t("manage.priceOptional")}
+                optional
+                hint={t("manage.intervalPriceItineraryHint")}
+              >
+                <input
+                  id="transit-interval-price-amount"
+                  type="number"
+                  min={0}
+                  step="any"
+                  className={WIZARD_INPUT_CLASS}
+                  value={interval.price != null ? String(interval.price.amount) : ""}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    if (raw === "") {
+                      patchIntervalAt(intervalIndex, { price: undefined });
+                      return;
+                    }
+                    const n = Number(raw);
+                    if (!Number.isFinite(n)) return;
+                    patchIntervalAt(intervalIndex, {
+                      price: {
+                        amount: n,
+                        currency: interval.price?.currency ?? tripCurrency,
+                      },
+                    });
+                  }}
+                />
+              </WizardField>
+              <WizardField htmlFor="transit-interval-price-currency" label={t("manage.priceCurrency")}>
+                <select
+                  id="transit-interval-price-currency"
+                  className={WIZARD_SELECT_CLASS}
+                  value={interval.price?.currency ?? tripCurrency}
+                  onChange={(e) => {
+                    const cur = e.target.value as CurrencyCode;
+                    if (!interval.price) return;
+                    patchIntervalAt(intervalIndex, {
+                      price: { ...interval.price, currency: cur },
+                    });
+                  }}
+                  disabled={!interval.price}
+                >
+                  {[...new Set([tripCurrency, ...STEP_PRICE_CURRENCIES])].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </WizardField>
+            </div>
           </div>
         ) : (
           <div className="space-y-5">
@@ -240,7 +341,7 @@ export function TransitStepIntervalWizardPanel({
                 value={interval.comment ?? ""}
                 onChange={(e) =>
                   patchIntervalAt(intervalIndex, {
-                    comment: e.target.value.trim() ? e.target.value : undefined,
+                    comment: e.target.value === "" ? undefined : e.target.value,
                   })
                 }
               />

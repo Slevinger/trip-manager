@@ -174,7 +174,7 @@ export function StayStepWizardPanel({
                 onRegisterNewDestination={onRegisterNewDestination}
                 value={
                   draft.areaCenterDestinationId
-                    ? (areaCenterPlace?.location ?? "").trim()
+                    ? (areaCenterPlace?.location ?? "")
                     : areaCenterDraftLocation
                 }
                 onChange={(location) => {

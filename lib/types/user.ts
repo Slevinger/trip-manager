@@ -12,6 +12,8 @@ export type Email = string;
 export interface TripChatMessage {
   tripId: string;
   from: "agent" | Email;
+  /** Display name of the human speaker (absent for agent lines). */
+  fromDisplayName?: string;
   content: string;
   /** ISO 8601 (Firestore-serializable). */
   timeStamp: string;
@@ -27,6 +29,7 @@ export type ImmutableMemoryEntryKind = "message" | "summary";
  * One entry in the **shared per-trip assistant thread** (`trips/{tripId}/assistantThread/{id}`).
  * Visible to every member of the trip; immutable from the client (only compaction / owner-clear
  * server routes update `active`). `from` is the email of the speaker or `"agent"`.
+ * When `active` is omitted in Firestore, clients treat the row as active.
  */
 export interface SharedTripThreadEntry {
   tripId: string;
@@ -42,9 +45,24 @@ export interface SharedTripThreadEntry {
   tripContext?: string;
   /** Assistant self-classification of the most recent user message in this turn. */
   requestKind?: "general" | "specific" | "suggestions";
+  /**
+   * When the assistant returned structured trip suggestions, JSON snapshot of that array
+   * (same shape as API `suggestions`) so the transcript stays aligned with trip recommendations.
+   */
+  recommendationsJson?: string;
   memoryCompressed?: boolean;
   /** For `kind === "summary"`: how many compaction passes produced this entry. */
   evolveCount?: number;
+  /**
+   * When set, only the listed email addresses may see this entry.
+   * Used for `@private` turns — both the user message and the agent reply carry this field.
+   */
+  visibleTo?: Email[];
+  /**
+   * Raw mention string recorded for UI display, e.g. `"@john"`.
+   * The entry is still visible to all trip members; this is a display-only tag.
+   */
+  directedTo?: string;
 }
 
 /** One immutable entry in the centralized per-user history queue. */

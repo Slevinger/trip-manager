@@ -5,6 +5,7 @@ import {
   canonicalFirestoreDataToTrip,
   canonicalTripDocReadableByUser,
   OWNER_UID,
+  PARTICIPANT_EMAILS_LOWER,
   PARTICIPANT_UIDS,
 } from "@/lib/canonicalTripsFirestore";
 import { getAdminFirestore } from "@/lib/firebaseAdmin";
@@ -35,10 +36,14 @@ export async function GET(req: NextRequest) {
   const emailLower = auth.emailLower;
   const col = db.collection(CANONICAL_TRIPS_COLLECTION);
 
-  const [owned, shared] = await Promise.all([
+  const queries = [
     col.where(OWNER_UID, "==", uid).get(),
     col.where(PARTICIPANT_UIDS, "array-contains", uid).get(),
-  ]);
+  ];
+  if (emailLower) {
+    queries.push(col.where(PARTICIPANT_EMAILS_LOWER, "array-contains", emailLower).get());
+  }
+  const [owned, shared, ...rest] = await Promise.all(queries);
 
   const merged = new Map<string, Trip>();
 
@@ -55,6 +60,7 @@ export async function GET(req: NextRequest) {
 
   ingest(owned);
   ingest(shared);
+  for (const snap of rest) ingest(snap);
 
   const trips = Array.from(merged.values());
   sortTripsByUpdatedDesc(trips);

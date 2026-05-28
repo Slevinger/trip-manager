@@ -1,5 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import { NextResponse, type NextRequest } from "next/server";
+import { logCaughtExceptionServer } from "@/lib/logCaughtExceptionServer";
 
 import { requireFirebaseUser } from "@/lib/adminAuth";
 import {
@@ -48,7 +49,8 @@ export async function POST(req: NextRequest) {
   let body: { tripId?: unknown; query?: unknown; maxResults?: unknown } = {};
   try {
     body = (await req.json()) as typeof body;
-  } catch {
+  } catch (e) {
+    logCaughtExceptionServer(e, "gmailSearchRoute/parseRequestJson");
     body = {};
   }
 
@@ -75,9 +77,7 @@ export async function POST(req: NextRequest) {
   }
 
   const trip = canonicalFirestoreDataToTrip(raw);
-  const derived = gmailSearchQueryFromTrip(trip);
-  const q =
-    extraQuery.length > 0 ? `${derived} (${extraQuery.replace(/\)/g, "").replace(/\(/g, "")})` : derived;
+  const q = gmailSearchQueryFromTrip(trip, extraQuery);
 
   const credSnap = await userGmailCredentialRef(db, viewerEmail).get();
   if (!credSnap.exists) {

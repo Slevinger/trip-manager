@@ -4,8 +4,9 @@ import { useRef, useState } from "react";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { getClientStorage } from "@/lib/firebase";
 import type { Trip, TripDocument } from "@/lib/types/trip";
+import { useDocumentTypes } from "@/lib/useDocumentTypes";
 
-const DOC_TYPE_OPTIONS: { value: TripDocument["type"]; label: string }[] = [
+const BUILTIN_OPTIONS = [
   { value: "passport", label: "Passport" },
   { value: "visa", label: "Visa" },
   { value: "insurance", label: "Insurance" },
@@ -13,6 +14,8 @@ const DOC_TYPE_OPTIONS: { value: TripDocument["type"]; label: string }[] = [
   { value: "medical", label: "Medical" },
   { value: "other", label: "Other" },
 ];
+
+const ADD_NEW_SENTINEL = "__add_new__";
 
 function newDocId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -41,6 +44,9 @@ export function TripDocumentUploads({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const docs = trip.documents ?? [];
+  const { customTypes, addCustomType } = useDocumentTypes();
+  // docId → new-type input value when user picks "Add type…"
+  const [addingTypeFor, setAddingTypeFor] = useState<Record<string, string>>({});
 
   async function pickAndUpload(files: FileList | null) {
     if (!files?.length) return;
@@ -85,7 +91,11 @@ export function TripDocumentUploads({
     }
   }
 
-  async function setDocType(id: string, type: TripDocument["type"]) {
+  async function setDocType(id: string, type: string) {
+    if (type === ADD_NEW_SENTINEL) {
+      setAddingTypeFor((prev) => ({ ...prev, [id]: "" }));
+      return;
+    }
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -97,6 +107,14 @@ export function TripDocumentUploads({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function confirmNewType(docId: string) {
+    const label = (addingTypeFor[docId] ?? "").trim();
+    if (!label) { setAddingTypeFor((prev) => { const n = { ...prev }; delete n[docId]; return n; }); return; }
+    await addCustomType(label);
+    setAddingTypeFor((prev) => { const n = { ...prev }; delete n[docId]; return n; });
+    await setDocType(docId, label);
   }
 
   async function downloadDocument(doc: TripDocument) {
@@ -181,21 +199,42 @@ export function TripDocumentUploads({
               key={d.id}
               className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
             >
-              <select
-                className="max-w-[7.5rem] rounded-md border border-zinc-200 bg-white px-1 py-1 dark:border-zinc-700 dark:bg-zinc-900"
-                value={d.type}
-                disabled={busy}
-                onChange={(e) =>
-                  void setDocType(d.id, e.target.value as TripDocument["type"])
-                }
-                aria-label="Document type"
-              >
-                {DOC_TYPE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              {addingTypeFor[d.id] !== undefined ? (
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(e) => { e.preventDefault(); void confirmNewType(d.id); }}
+                >
+                  <input
+                    autoFocus
+                    className="w-24 rounded-md border border-zinc-300 bg-white px-1.5 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900"
+                    placeholder="Type name…"
+                    value={addingTypeFor[d.id]}
+                    onChange={(e) => setAddingTypeFor((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Escape") setAddingTypeFor((prev) => { const n = { ...prev }; delete n[d.id]; return n; }); }}
+                  />
+                  <button type="submit" className="rounded-md border border-zinc-200 px-1.5 py-0.5 text-[11px] font-medium dark:border-zinc-600">OK</button>
+                </form>
+              ) : (
+                <select
+                  className="max-w-[7.5rem] rounded-md border border-zinc-200 bg-white px-1 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                  value={d.type}
+                  disabled={busy}
+                  onChange={(e) => void setDocType(d.id, e.target.value)}
+                  aria-label="Document type"
+                >
+                  {BUILTIN_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                  {customTypes.length > 0 && (
+                    <optgroup label="Custom">
+                      {customTypes.map((t) => (
+                        <option key={t.id} value={t.label}>{t.label}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <option value={ADD_NEW_SENTINEL}>＋ Add type…</option>
+                </select>
+              )}
               {d.url ? (
                 <a
                   href={d.url}

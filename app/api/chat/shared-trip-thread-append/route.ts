@@ -5,6 +5,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalTripDocReadableByUser } from "@/lib/canonicalTripsFirestore";
+import { notifySharedTripThreadUpdated } from "@/lib/tripSharedThreadPusherServer";
 import type { Email, SharedTripThreadEntry } from "@/lib/types/user";
 
 /**
@@ -61,6 +62,9 @@ export async function POST(req: NextRequest) {
     sentAtMs?: unknown;
     tripContextNote?: unknown;
     requestKind?: unknown;
+    recommendationsJson?: unknown;
+    visibleTo?: unknown;
+    directedTo?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -73,10 +77,14 @@ export async function POST(req: NextRequest) {
 
   const auth = getAuth();
   let uid = "";
+  let tokenEmail = "";
   try {
     const decoded = await auth.verifyIdToken(token);
     uid = String(decoded.uid ?? "").trim();
     if (!uid) return NextResponse.json({ error: "Token missing uid" }, { status: 401 });
+    if (typeof decoded.email === "string" && decoded.email.trim()) {
+      tokenEmail = decoded.email.trim().toLowerCase();
+    }
   } catch {
     return NextResponse.json({ error: "Invalid auth token" }, { status: 401 });
   }
@@ -89,12 +97,24 @@ export async function POST(req: NextRequest) {
     callerEmail = "";
   }
 
-  const fromLower =
+  const effectiveEmail = callerEmail || tokenEmail;
+  if (!effectiveEmail) {
+    return NextResponse.json(
+      {
+        error:
+          "No email on this Firebase account; shared trip chat cannot be saved. Sign in with a provider that supplies an email (e.g. Google).",
+      },
+      { status: 400 }
+    );
+  }
+
+  const fromBody =
     typeof body.fromEmailLower === "string" ? body.fromEmailLower.trim().toLowerCase() : "";
-  if (!fromLower) return NextResponse.json({ error: "Missing fromEmailLower" }, { status: 400 });
-  if (callerEmail && fromLower !== callerEmail) {
+  if (fromBody && fromBody !== effectiveEmail) {
     return NextResponse.json({ error: "fromEmailLower does not match signed-in user" }, { status: 403 });
   }
+
+  const fromLower = effectiveEmail;
 
   const userContent = typeof body.userContent === "string" ? body.userContent : "";
   const agentContent = typeof body.agentContent === "string" ? body.agentContent : "";
@@ -120,13 +140,36 @@ export async function POST(req: NextRequest) {
       ? requestKindRaw
       : undefined;
 
+  const recommendationsJson =
+    typeof body.recommendationsJson === "string" && body.recommendationsJson.trim()
+      ? body.recommendationsJson.trim().slice(0, 25000)
+      : undefined;
+
+  // visibleTo: only emails belonging to the caller are accepted (sender can only make it
+  // visible to themselves — i.e. @private = [fromLower]).
+  const visibleToRaw = body.visibleTo;
+  const visibleTo =
+    Array.isArray(visibleToRaw) && visibleToRaw.length > 0
+      ? (visibleToRaw
+          .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+          .map((v) => v.trim().toLowerCase())
+          .filter((v) => v === fromLower) // only allow listing the sender's own email
+        )
+      : undefined;
+  const visibleToFinal = visibleTo && visibleTo.length > 0 ? visibleTo : undefined;
+
+  const directedTo =
+    typeof body.directedTo === "string" && body.directedTo.trim()
+      ? body.directedTo.trim().slice(0, 120)
+      : undefined;
+
   const db = getFirestore();
   const canonicalSnap = await db.collection("canonicalTrips").doc(tripId).get();
   if (!canonicalSnap.exists) {
     return NextResponse.json({ error: "Trip not found" }, { status: 404 });
   }
   const tripPayload = (canonicalSnap.data() ?? {}) as Record<string, unknown>;
-  if (!canonicalTripDocReadableByUser(uid, callerEmail, tripPayload)) {
+  if (!canonicalTripDocReadableByUser(uid, effectiveEmail, tripPayload)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -148,6 +191,8 @@ export async function POST(req: NextRequest) {
     createdAtMs: t0,
     ...(ctxNote ? { tripContext: ctxNote } : {}),
     ...(requestKind ? { requestKind } : {}),
+    ...(visibleToFinal ? { visibleTo: visibleToFinal } : {}),
+    ...(directedTo ? { directedTo } : {}),
   };
 
   const agentEntry: SharedTripThreadEntry = {
@@ -160,6 +205,9 @@ export async function POST(req: NextRequest) {
     createdAtMs: t1,
     ...(ctxNote ? { tripContext: ctxNote } : {}),
     ...(requestKind ? { requestKind } : {}),
+    ...(recommendationsJson ? { recommendationsJson } : {}),
+    ...(visibleToFinal ? { visibleTo: visibleToFinal } : {}),
+    ...(directedTo ? { directedTo } : {}),
   };
 
   const col = db.collection("trips").doc(tripId).collection("assistantThread");
@@ -167,6 +215,8 @@ export async function POST(req: NextRequest) {
   batch.set(col.doc(), userEntry);
   batch.set(col.doc(), agentEntry);
   await batch.commit();
+
+  void notifySharedTripThreadUpdated(tripId).catch(() => {});
 
   return NextResponse.json({ ok: true });
 }

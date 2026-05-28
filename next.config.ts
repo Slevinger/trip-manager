@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: appRoot,
   },
+  serverExternalPackages: ["og-fetcher", "playwright", "playwright-core"],
 };
 
 export default nextConfig;

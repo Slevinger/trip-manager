@@ -26,6 +26,8 @@ export function buildTripAssistantSystemPrompt(
     profilePreferences?: UserPreferences | null;
     /** Trip-assistant Anthropic branch only: `web_search` tool is attached this request. */
     anthropicWebSearchEnabled?: boolean;
+    /** Optional traveler GPS context (synced + optional fresh ping). */
+    travelerLocationContextAppendix?: string;
   }
 ): string {
   const phase = getTripViewPhase(trip, opts.nowMs);
@@ -77,6 +79,7 @@ export function buildTripAssistantSystemPrompt(
       destinations: trip.destinations,
       travelers: trip.travelers,
       viewers: trip.viewers ?? [],
+      liveLocations: trip.liveLocations ?? {},
       steps: sorted,
       tasks: trip.tasks ?? [],
       documents: trip.documents ?? [],
@@ -87,9 +90,11 @@ export function buildTripAssistantSystemPrompt(
 
   return [
     "You are a professional travel agent: calm, precise, and trustworthy.",
-    "**Language:** Reply in the **same language as the user’s latest message** by default. Only switch languages when the user explicitly asks you to. Keep proper nouns and place names as they appear in the trip data when helpful.",
+    "**Language (non-negotiable):** Always reply in the **exact same language as the user’s latest message** — no exceptions. If they write in Hebrew, reply in Hebrew; if in Russian, reply in Russian; if in English, reply in English. Never default to English or any other language. Only switch when the user explicitly asks. Keep proper nouns and place names as they appear in the trip data.",
+    "**BREVITY (non-negotiable):** Your visible chat reply MUST be ≤ 3 sentences — zero bullet lists, zero numbered items, zero markdown headers, zero `---` dividers in the chat prose itself. All detail belongs inside the `trip-suggestions` JSON fence when suggestions are requested.",
     "**Formatting:** Use normal Markdown when helpful: put **each list item on its own line** starting with `- ` (blank line before a list if it follows a paragraph). Never cram multiple `-` items into one run-on line.",
     "Finish every reply with proper sentence endings (period / question mark); do not stop mid‑sentence.",
+    "When `liveLocations` in the trip JSON is non-empty, those are voluntary last-known device coordinates for participants (not continuous surveillance). Use them for nearby suggestions or “where is everyone” style questions.",
     "Be accurate to the trip data below; if something is unknown, say so briefly and suggest a next step.",
     "**Thread vs trip JSON:** Older messages may have been merged into one long assistant note. Use that note for prior web facts and chat-only context. For itinerary layout, steps, and dates, treat the trip JSON below as source of truth (the note must not be relied on for current schedule state).",
     "**NEVER copy the format of memory notes.** Any assistant turn that begins with `[TRIP_MEMORY_NOTE`, `[GLOBAL_MEMORY_NOTE`, or contains headers like `LEGEND:`, `FROM_WEB_OR_VERIFIED:`, `CHAT_ONLY_MEMORY:`, `OPEN_LOOSE_ENDS:` is a compressed memory dump for your context only. Read it silently. Your reply must be a normal conversational answer (prose + optional bullet list) and **must not** contain any of those headers or that structured layout.",
@@ -116,11 +121,26 @@ export function buildTripAssistantSystemPrompt(
     "### Destination ids (use these in suggestions)",
     "Every place on this trip is listed under `destinations` above; each row’s `id` is the canonical key.",
     "When you reply with `##suggestions##` and the fenced `trip-suggestions` JSON, set `destinationId`, `fromDestinationId`, and `toDestinationId` on intervals to **those exact id strings** whenever the proposal refers to an existing row.",
-    "For **activity** suggestions, also set each option’s `hostStayStepId` to the **`trip.steps` stay step `id`** when the activity belongs while the traveler is based at that stay.",
+    "For **activity** suggestions that fall inside an existing stay, set both `hostStayStepId` AND `targetStepId` to that stay step’s `id`.",
+    "For **any** suggestion (stay, transit, or activity) whose proposed interval overlaps an existing step of the same kind, set `targetStepId` to that step’s `id` — the interval is appended to the existing step instead of creating a new one.",
+    "**Only omit `targetStepId`** when the proposed dates have no existing step of that kind (the slot is genuinely empty in `trip.steps`).",
     "Do **not** mint a second id or duplicate that place inside `option.destinations` — reserve `option.destinations` only for places that are **not** already in `trip.destinations`.",
+    "### Payment obligations & cancellability",
+    "Each stay or transit interval may carry:",
+    "- `obligation` — tracks the planned `price` alongside `receipts[]` (each receipt: `amount`, `currency`, `paidByTravelerId`). Derived status: receipts total = 0 → unpaid; total ≥ price → paid; otherwise → partially_paid.",
+    "- `cancellable` (boolean) and `cancellationDeadline` (ISO datetime) — whether the booking can be cancelled and by when.",
+    "When the user asks about unpaid bookings, payment status, or cancellation deadlines, read these fields from the trip JSON steps. You can update them via `update_interval` patch with `cancellable`, `cancellationDeadline`, or `obligation` fields.",
+    "",
+    "### Structured suggestions (authoritative for the app)",
+    "When you use `##suggestions##`, the **only** machine-readable proposal channel is **one** fenced code block whose info-string is exactly `trip-suggestions` (same tag as in the schema). Its body must be a **JSON array** `[...]` of `TripRecommendation` objects (see schema below). The client **iterates that array** so the traveler can approve/skip/edit each card — nothing outside that array is queued.",
+    "Put **every** alternative you want the user to compare (morning spa A/B/C, lunch beaches, tours, dinners, etc.) **inside** that array: use **separate** `TripRecommendation` rows and/or multiple `options[]` per row. Use `interval.price`, `interval.comment`, and `option.note` for amounts and caveats.",
+    "Do **not** duplicate the same options as a long markdown/HTML article: no `---` / `<hr>`, no multi-`##` day plans, no markdown **tables** for budgets, and no long numbered option lists in prose when the fence is present — keep visible chat to **1 sentence** plus the fence.",
     prefsBlock,
     "",
     buildTripRecommendationSchemaPrompt(),
     TRIP_ASSISTANT_REQUEST_KIND_INSTRUCTION,
+    ...(opts.travelerLocationContextAppendix?.trim()
+      ? [opts.travelerLocationContextAppendix.trim()]
+      : []),
   ].join("\n");
 }

@@ -3,8 +3,15 @@ import type { Trip } from "@/lib/types/trip";
 import type { JsonChangeAction } from "./types";
 import { applyDiff } from "@/lib/stateDiff";
 
+export type FirestoreTripAccess = {
+  canManageFirestore: boolean;
+  isOwner: boolean;
+};
+
 export type TripState = {
   trip: Trip | null;
+  /** Latest Firestore ACL hints from `subscribeCanonicalTrip` (shared listener). */
+  firestoreTripAccess: FirestoreTripAccess | null;
   draft: Trip | null;
   past: JsonChangeAction[];
   future: JsonChangeAction[];
@@ -13,6 +20,7 @@ export type TripState = {
 
 const initialState: TripState = {
   trip: null,
+  firestoreTripAccess: null,
   draft: null,
   past: [],
   future: [],
@@ -34,7 +42,24 @@ const tripSlice = createSlice({
       state.future = action.payload.future;
     },
     setTrip(state, action: PayloadAction<Trip | null>) {
-      state.trip = action.payload;
+      const next = action.payload;
+      const prevTrip = state.trip;
+      if (!next) {
+        state.trip = null;
+        state.firestoreTripAccess = null;
+        state.draft = null;
+        return;
+      }
+      const draftStillMirroredCanonical =
+        state.draft !== null && prevTrip !== null && state.draft === prevTrip;
+      state.trip = next;
+      // Seed draft on first load / trip switch; keep unsaved draft if it diverged from the prior canonical trip.
+      if (state.draft === null || state.draft.id !== next.id || draftStillMirroredCanonical) {
+        state.draft = next;
+      }
+    },
+    setFirestoreTripAccess(state, action: PayloadAction<FirestoreTripAccess | null>) {
+      state.firestoreTripAccess = action.payload;
     },
     setManageDraft(state, action: PayloadAction<Trip | null>) {
       state.draft = action.payload;
@@ -76,6 +101,7 @@ export const {
   setActiveTripId,
   hydrateHistory,
   setTrip,
+  setFirestoreTripAccess,
   setManageDraft,
   patchDraft,
   pushHistory,

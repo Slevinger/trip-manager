@@ -1,6 +1,5 @@
 import {
   arrayUnion,
-  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -12,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { getIdTokenResult, type User } from "firebase/auth";
 import { migrateTripToDestinationRegistry } from "@/lib/tripDestinationRegistry";
+import { logCaughtException } from "@/lib/logCaughtException";
 import type { Trip, TripLiveLocation } from "@/lib/types/trip";
 
 /** Top-level collection for canonical (v2) trip documents. */
@@ -59,8 +59,8 @@ function isoFromFirestoreInstant(raw: unknown): string {
     if (typeof o.toDate === "function") {
       try {
         return o.toDate().toISOString();
-      } catch {
-        /* ignore */
+      } catch (e) {
+        logCaughtException(e, "canonicalTripsFirestore/isoFromFirestoreInstant/toDate");
       }
     }
     if (typeof o.seconds === "number") {
@@ -372,42 +372,6 @@ export async function ensureCanonicalTripListsMyUid(
   );
 }
 
-export async function updateCanonicalTripLiveLocation(
-  db: Firestore,
-  tripId: string,
-  userLocationKey: string,
-  location: TripLiveLocation
-): Promise<void> {
-  const ref = tripDocRef(db, tripId);
-  /** Dot notation in `updateDoc` field paths splits on `.`; nest under `liveLocations` instead. */
-  await setDoc(
-    ref,
-    {
-      liveLocations: {
-        [userLocationKey]: pruneUndefinedForFirestore(location),
-      },
-    },
-    { merge: true }
-  );
-}
-
-export async function clearCanonicalTripLiveLocation(
-  db: Firestore,
-  tripId: string,
-  userLocationKey: string
-): Promise<void> {
-  const ref = tripDocRef(db, tripId);
-  await setDoc(
-    ref,
-    {
-      liveLocations: {
-        [userLocationKey]: deleteField(),
-      },
-    },
-    { merge: true }
-  );
-}
-
 export async function deleteCanonicalTrip(
   db: Firestore,
   tripId: string,
@@ -434,19 +398,28 @@ function firestoreErrCode(err: unknown): string {
  * Lists trips the user may open via **GET /api/canonical-trips/my** (Admin SDK + ID token).
  * Client Firestore `list` on `canonicalTrips` is not used (rules can deny collection queries).
  *
- * @param pollMs Refetch interval; default 12s. Use `0` for a single load (no interval).
+ * @param pollMs Refetch interval in ms. **`0` (default) = one fetch on subscribe** (e.g. app open or
+ * explicit resubscribe after `refresh()`). Pass a positive value to poll on an interval; when
+ * polling, refetches are skipped while the tab is hidden and resume when it becomes visible.
  */
 export function subscribeMyCanonicalTrips(
   user: User,
   onTrips: (trips: Trip[]) => void,
   onError?: (e: Error) => void,
-  pollMs: number = 12_000
+  pollMs: number = 0
 ): Unsubscribe {
   let cancelled = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
   async function tick() {
     if (cancelled) return;
+    if (
+      pollMs > 0 &&
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      return;
+    }
     try {
       const token = await user.getIdToken();
       const res = await fetch("/api/canonical-trips/my", {
@@ -456,8 +429,8 @@ export function subscribeMyCanonicalTrips(
       let body: { trips?: Trip[]; error?: string } = {};
       try {
         body = (await res.json()) as typeof body;
-      } catch {
-        /* ignore */
+      } catch (e) {
+        logCaughtException(e, "canonicalTripsFirestore/subscribeMyCanonicalTrips/parseResponseJson");
       }
       if (!res.ok) {
         const msg =
@@ -476,11 +449,23 @@ export function subscribeMyCanonicalTrips(
     }
   }
 
+  let onVisibility: (() => void) | undefined;
+  if (pollMs > 0 && typeof document !== "undefined") {
+    onVisibility = () => {
+      if (cancelled) return;
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+  }
+
   void tick();
   if (pollMs > 0) timer = setInterval(() => void tick(), pollMs);
   return () => {
     cancelled = true;
     if (timer) clearInterval(timer);
+    if (typeof document !== "undefined" && onVisibility) {
+      document.removeEventListener("visibilitychange", onVisibility);
+    }
   };
 }
 
